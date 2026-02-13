@@ -112,7 +112,7 @@ prefill URL を毎回生成するのではなく、**選択肢を 1 つだけに
 | 2 | 部署 | プルダウン（1択固定） | `{部署名}` | 実質 prefill |
 | 3 | 作業員 | プルダウン | 部署で絞り込み。表示例: `A001 今泉雄二` | 作業員マスタ(在籍フラグ=true)から生成 |
 | 4 | 作業実施日 | 日付 | ― | Date 型 |
-| 5 | 工番 | 短文テキスト | 自由入力 | V1 は短文。DB 側で工番マスタ照合 |
+| 5 | 工番 | プルダウン | 工番マスタ全件。表示: `工番｜品名／納入先` | 件数が多い場合は絞り込み列追加を検討 |
 | 6 | 業務ID | プルダウン | 部署で絞り込み | 業務NOマスタから生成 |
 | 7 | 理由 | プルダウン | 固定リスト（下記参照） | ― |
 | 8 | 補足理由 | 段落（長文） | ― | 理由=「その他」の時のみ必須 |
@@ -125,13 +125,14 @@ prefill URL を毎回生成するのではなく、**選択肢を 1 つだけに
 | 1〜8 | *(残業フォームと同一)* | ― | ― | ― |
 | 9 | 予定時間 | プルダウン | `半日` / `1日` | ― |
 
-### 4.3 理由リスト（固定）
+### 4.3 理由リスト（固定・GAS コード準拠）
 
-- 納期対応
-- 不具合対応
-- 設計遅延
-- 試験対応
-- その他
+- 急ぎ作業を要するため
+- 納期遅延解消のため
+- マシントラブル対応のため
+- 業者対応のため
+- 顧客対応のため
+- その他（→補足理由必須）
 
 > ※ 「その他」選択時は補足理由（質問 8）が必須。
 
@@ -154,18 +155,30 @@ prefill URL を毎回生成するのではなく、**選択肢を 1 つだけに
 
 ## 5. 工番の扱い
 
-### V1（確定）
+### V1（確定：プルダウン）
 
-- フォーム入力は **短文テキスト**（自由入力）
-- DB 側で工番マスタと照合し、存在しない工番には **警告フラグ** を立てる
-- 理由: フォームの選択肢が巨大になる事故を防ぐ
+- フォーム入力は **プルダウン**（工番マスタ全件から生成）
+- 表示形式: `工番｜品名／納入先`（品名・納入先がある場合）
+- 部署による絞り込みは V1 では行わない（工番マスタに部署列がないため）
+
+### スケーラビリティ注意
+
+工番が数千〜万件になるとフォームのプルダウンが重くなる。対策として工番マスタに以下の列追加を推奨:
+
+| 追加列候補 | 目的 |
+|------------|------|
+| isActive | 稼働中の工番のみ TRUE → 候補を絞り込み |
+| validTo | この日付を過ぎたら候補から除外 |
+| dept | 部署で絞れるようにする（将来） |
+
+まずは現行件数で動作確認し、重ければ絞り込み列を追加する。
 
 ### 将来拡張
 
 | 段階 | 方式 |
 |------|------|
-| V1（確定） | 短文 ＋ DB 照合 |
-| 拡張 | 候補が少なければプルダウン化 |
+| V1（確定） | プルダウン（全件） |
+| 拡張 | isActive / validTo で絞り込み |
 | 上位拡張 | Web アプリ側で工番検索 → prefill してフォームへ渡す |
 
 ---
@@ -351,8 +364,28 @@ const workerCode = answer.split(" ")[0];  // "A001"
 
 | 関数名 | トリガー | 概要 |
 |--------|----------|------|
-| `getOrCreateDeptForm(type, dept)` | Web アプリから呼び出し | FormMap 検索 → 未生成ならテンプレ複製 → formUrl 返却 |
+| `getOrCreateDeptForm(type, dept)` | Web アプリから呼び出し | FormMap 検索 → 未生成ならテンプレ複製＋onFormSubmitトリガー付与 → formUrl 返却 |
 | `updateDeptFormChoices(type, dept)` | バッチ / 手動 | 指定 (type, dept) のフォームの選択肢を最新マスタで更新 |
 | `nightlyUpdateAllForms()` | 時間トリガー（毎朝 6:30） | FormMap 全件の選択肢を一括更新 |
-| `onFormSubmit(e)` | フォーム送信トリガー | フォーム回答 → Requests にマッピング・書き込み |
+| `addFormSubmitTrigger_(formId)` | フォーム生成時に自動呼出 | 新規フォームに handleFormSubmit_ トリガーを付与（重複防止付き） |
+| `handleFormSubmit_(e)` | フォーム送信トリガー（installable） | フォーム回答 → Requests 書き込み＋WorkLogs プレースホルダ作成 |
+| `appendRequestRow_(obj)` | handleFormSubmit_ から呼出 | ヘッダ名ベースで Requests に 1 行追加（列順変更耐性あり） |
+| `ensureWorkLogRow_(requestId)` | handleFormSubmit_ から呼出 | WorkLogs にプレースホルダ行を作成（開始/完了ボタンで更新用） |
+| `lookupOrderInfo_(orderNo)` | handleFormSubmit_ から呼出 | 工番マスタから受注先/納入先/品名を補完 |
 | `doGet(e)` / `doPost(e)` | Web アプリ | 部署選択モーダル表示、フォーム URL リダイレクト |
+
+---
+
+## 12. ソースファイル構成
+
+```
+src/
+├── config.gs          # 定数・設定・ユーティリティ（SHEET, Q, REASONS, OT_HOURS, HD_HOURS）
+├── masters.gs         # マスタ読込（loadDeptList_, loadWorkersByDept_, loadJobsByDept_, loadOrderChoices_）
+├── formMap.gs         # FormMap CRUD + FormTemplates 取得
+├── formUtils.gs       # フォーム質問検索・選択肢設定ヘルパー
+├── formGenerate.gs    # 核心: getOrCreateDeptForm_ + updateDeptFormChoices_
+├── formBatch.gs       # 毎朝バッチ: nightlyUpdateAllForms_
+├── formSubmit.gs      # onFormSubmit ハンドラ: handleFormSubmit_ + Requests/WorkLogs 書き込み
+└── menu.gs            # onOpen メニュー + setupTriggers_
+```
