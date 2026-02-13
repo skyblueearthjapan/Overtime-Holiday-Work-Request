@@ -18,8 +18,10 @@
 10. [Requests](#10-requests)
 11. [WorkLogs](#11-worklogs)
 12. [ExportHistory](#12-exporthistory)
-13. [申請書フォーム](#13-申請書フォーム)
-14. [休憩計算_フォーム](#14-休憩計算_フォーム)
+13. [FormTemplates](#13-formtemplates)
+14. [FormMap](#14-formmap)
+15. [申請書フォーム](#15-申請書フォーム)
+16. [休憩計算_フォーム](#16-休憩計算_フォーム)
 
 ---
 
@@ -235,7 +237,48 @@ PDF 出力・メール送信等のエクスポート履歴を記録。
 
 ---
 
-## 13. 申請書フォーム
+## 13. FormTemplates
+
+Google フォームのテンプレート管理シート。残業・休日それぞれのテンプレートフォーム ID を保持する。部署別フォーム自動生成時にこのテンプレートを複製元として使用する。
+
+| 列 | ヘッダー (Row 1) | 型 | 説明 |
+|----|-------------------|-----|------|
+| A | type | String | `overtime` または `holiday` |
+| B | templateFormId | String | テンプレートとなる Google フォームの ID |
+| C | templateUrl | String | テンプレートフォームの URL |
+| D | note | String | 備考（例：残業テンプレ / 休日テンプレ） |
+
+- **データ開始行**: Row 2
+
+### 初期データ
+
+| type | templateFormId | templateUrl | note |
+|------|----------------|-------------|------|
+| overtime | *(フォームID)* | *(URL)* | 残業テンプレ |
+| holiday | *(フォームID)* | *(URL)* | 休日テンプレ |
+
+---
+
+## 14. FormMap
+
+部署 × 種別ごとに自動生成されたフォームの管理シート。`getOrCreateDeptForm()` で生成・参照される。
+
+| 列 | ヘッダー (Row 1) | 型 | 説明 |
+|----|-------------------|-----|------|
+| A | type | String | `overtime` または `holiday` |
+| B | dept | String | 部署名（部署マスタと一致） |
+| C | formId | String | 生成されたフォームの ID |
+| D | formUrl | String | 生成されたフォームの URL |
+| E | updatedAt | DateTime | 最終更新日時（選択肢更新含む） |
+| F | isActive | Boolean | 有効フラグ |
+
+- **データ開始行**: Row 2
+- **ユニークキー**: (type, dept) の組み合わせ
+- **自動生成**: フォーム未生成の (type, dept) でアクセスがあった場合、FormTemplates のテンプレを複製して自動生成し、本シートに記録する
+
+---
+
+## 15. 申請書フォーム
 
 PDF 出力用の申請書テンプレート。セル結合を多用したレイアウト定義。GAS から値を埋め込み、PDF として書き出す。
 
@@ -252,7 +295,7 @@ PDF 出力用の申請書テンプレート。セル結合を多用したレイ�
 
 ---
 
-## 14. 休憩計算_フォーム
+## 16. 休憩計算_フォーム
 
 休憩時間の自動計算ロジックを確認・テストするための補助シート。
 
@@ -279,6 +322,10 @@ Requests.workNo1〜3  ──→  工番マスタ.工番
 WorkLogs.requestId  ──→  Requests.requestId
 ExportHistory.requestId  ──→  Requests.requestId
 休憩マスタ  ──→  WorkLogs（休憩分の自動算出に使用）
+FormMap.type  ──→  FormTemplates.type（テンプレ複製元）
+FormMap.dept  ──→  部署マスタ.部署
+FormMap（生成時）  ──→  作業員マスタ（部署絞り込みで選択肢セット）
+FormMap（生成時）  ──→  業務NOマスタ（部署絞り込みで選択肢セット）
 ```
 
 ---
@@ -286,7 +333,7 @@ ExportHistory.requestId  ──→  Requests.requestId
 ## 補足
 
 - **Row 1 が注記、Row 2 がヘッダーのシート**: 部署マスタ、作業員マスタ、業務NOマスタ、工番マスタ、休憩マスタ、ApproverMap、WorkLogs
-- **Row 1 がヘッダーのシート**: Requests、ExportHistory
+- **Row 1 がヘッダーのシート**: Requests、ExportHistory、FormTemplates、FormMap
 - マスタ系シート（部署・作業員・業務NO・工番）は別マスタからの自動転記を想定しており、手動編集は原則不要
 - `requestType` は `overtime`（残業）と `holiday`（休日出勤）の 2 種類
 - 残業の開始時刻は **17:20 固定**（定時終了時刻）
