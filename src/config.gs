@@ -71,3 +71,9 @@ function requireSheet_(name) {
 function normalize_(s) {
   return String(s ?? '').trim();
 }
+
+function getSheetHeaderIndex_(sheetName, headerRowNo=1) {
+  const sh = requireSheet_(sheetName);
+  const header = sh.getRange(headerRowNo, 1, 1, sh.getLastColumn()).getValues()[0].map(h => normalize_(h));
+  return { sh, header, idx: buildHeaderIndex_(header) };
+}

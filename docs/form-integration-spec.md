@@ -360,19 +360,54 @@ const workerCode = answer.split(" ")[0];  // "A001"
 
 ## 11. GAS 関数一覧
 
-フォーム連携に必要な関数の一覧。
+### 11.1 フォーム生成・送信
 
 | 関数名 | トリガー | 概要 |
 |--------|----------|------|
-| `getOrCreateDeptForm(type, dept)` | Web アプリから呼び出し | FormMap 検索 → 未生成ならテンプレ複製＋onFormSubmitトリガー付与 → formUrl 返却 |
-| `updateDeptFormChoices(type, dept)` | バッチ / 手動 | 指定 (type, dept) のフォームの選択肢を最新マスタで更新 |
-| `nightlyUpdateAllForms()` | 時間トリガー（毎朝 6:30） | FormMap 全件の選択肢を一括更新 |
+| `getOrCreateDeptForm_(type, dept)` | Web アプリから呼び出し | FormMap 検索 → 未生成ならテンプレ複製＋onFormSubmitトリガー付与 → formUrl 返却 |
+| `updateDeptFormChoices_(type, dept)` | バッチ / 手動 | 指定 (type, dept) のフォームの選択肢を最新マスタで更新 |
+| `nightlyUpdateAllForms_()` | 時間トリガー（毎朝 6:30） | FormMap 全件の選択肢を一括更新 |
 | `addFormSubmitTrigger_(formId)` | フォーム生成時に自動呼出 | 新規フォームに handleFormSubmit_ トリガーを付与（重複防止付き） |
 | `handleFormSubmit_(e)` | フォーム送信トリガー（installable） | フォーム回答 → Requests 書き込み＋WorkLogs プレースホルダ作成 |
 | `appendRequestRow_(obj)` | handleFormSubmit_ から呼出 | ヘッダ名ベースで Requests に 1 行追加（列順変更耐性あり） |
-| `ensureWorkLogRow_(requestId)` | handleFormSubmit_ から呼出 | WorkLogs にプレースホルダ行を作成（開始/完了ボタンで更新用） |
+| `ensureWorkLogRow_(requestId)` | handleFormSubmit_ から呼出 | WorkLogs にプレースホルダ行を作成 |
 | `lookupOrderInfo_(orderNo)` | handleFormSubmit_ から呼出 | 工番マスタから受注先/納入先/品名を補完 |
+
+### 11.2 承認
+
+| 関数名 | トリガー | 概要 |
+|--------|----------|------|
+| `api_getTodayRequestsForDept(dept)` | Web アプリ（承認者画面） | 部署別の本日申請一覧を取得（権限チェック付き） |
+| `api_approveRequest(requestId)` | Web アプリ（承認ボタン） | status→approved、approvedAt/approvedBy を記録 |
+| `isAdmin_(email)` | 内部 | ApproverMap で admin ロールかチェック |
+| `canApproveDept_(email, dept)` | 内部 | 指定部署の承認権限があるかチェック |
+
+### 11.3 実績（開始/完了）
+
+| 関数名 | トリガー | 概要 |
+|--------|----------|------|
+| `api_markOvertimeDone(requestId)` | Web アプリ（残業完了ボタン） | 17:20 固定起点で実績算出→休憩控除→net→WorkLogs更新→PDF生成 |
+| `api_markHolidayStart(requestId)` | Web アプリ（休日開始ボタン） | actualStartAt を記録 |
+| `api_markHolidayDone(requestId)` | Web アプリ（休日完了ボタン） | start〜end で実績算出→休憩控除→net→WorkLogs更新→PDF生成 |
+| `calcBreakMinutesByMaster_(type, actualMinutes)` | 内部 | 休憩マスタから該当区間の休憩分を返す |
+| `getRequestById_(requestId)` | 内部 | Requests から 1 件取得 |
+| `updateWorkLog_(requestId, patch)` | 内部 | WorkLogs の指定行をパッチ更新 |
+
+### 11.4 PDF 生成
+
+| 関数名 | トリガー | 概要 |
+|--------|----------|------|
+| `generatePdfForRequest_(requestId)` | 完了ボタンから呼出 | テンプレSS複製→操作!B3にrequestIdセット→申請書フォームをPDF化→Drive保存 |
+| `getOrCreateDateFolder_(rootFolderId, dateObj)` | 内部 | yyyy.MM.dd フォルダを取得 or 作成 |
+| `exportSheetToPdfBlob_(ssId, sheetId, filename)` | 内部 | 指定シートを A4 PDF Blob にエクスポート |
+
+### 11.5 Web アプリ / メニュー
+
+| 関数名 | トリガー | 概要 |
+|--------|----------|------|
 | `doGet(e)` / `doPost(e)` | Web アプリ | 部署選択モーダル表示、フォーム URL リダイレクト |
+| `onOpen()` | スプレッドシート起動 | 管理者メニュー（フォーム全更新 / テスト生成） |
+| `setupTriggers_()` | 手動 1 回実行 | nightlyUpdateAllForms_ の毎朝トリガーを作成 |
 
 ---
 
@@ -380,12 +415,22 @@ const workerCode = answer.split(" ")[0];  // "A001"
 
 ```
 src/
-├── config.gs          # 定数・設定・ユーティリティ（SHEET, Q, REASONS, OT_HOURS, HD_HOURS）
+├── config.gs          # 定数・設定・ユーティリティ（SHEET, Q, REASONS, getSheetHeaderIndex_）
 ├── masters.gs         # マスタ読込（loadDeptList_, loadWorkersByDept_, loadJobsByDept_, loadOrderChoices_）
 ├── formMap.gs         # FormMap CRUD + FormTemplates 取得
 ├── formUtils.gs       # フォーム質問検索・選択肢設定ヘルパー
 ├── formGenerate.gs    # 核心: getOrCreateDeptForm_ + updateDeptFormChoices_
 ├── formBatch.gs       # 毎朝バッチ: nightlyUpdateAllForms_
 ├── formSubmit.gs      # onFormSubmit ハンドラ: handleFormSubmit_ + Requests/WorkLogs 書き込み
+├── approval.gs        # 承認権限チェック + 承認実行 API
+├── worklog.gs         # 開始/完了ボタン + 休憩控除 + net 算出
+├── pdfExport.gs       # PDF 生成（テンプレSS複製→操作!B3→PDF→Drive保存）
 └── menu.gs            # onOpen メニュー + setupTriggers_
 ```
+
+### Settings 必須キー（PDF 生成用）
+
+| Key | 説明 |
+|-----|------|
+| `PDF_ROOT_FOLDER_ID` | PDF 保存先ルートフォルダの Google Drive ID |
+| `TEMPLATE_SSID` | 申請書テンプレートのスプレッドシート ID（操作/申請書フォーム シートを含む） |
