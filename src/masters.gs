@@ -108,3 +108,38 @@ function loadOrderChoices_() {
   uniq.sort();
   return uniq;
 }
+
+// ====== 作業者本人情報取得（Googleアカウントで照合） ======
+
+function api_getWorkerInfo() {
+  const email = Session.getActiveUser().getEmail();
+  if (!email) return null;
+
+  const sh = requireSheet_(SHEET.WORKERS);
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const idx = {
+    code: H.indexOf('作業員コード'),
+    name: H.indexOf('氏名'),
+    dept: H.indexOf('部署'),
+    email: H.indexOf('Googleアカウント'),
+    active: H.indexOf('在籍フラグ'),
+  };
+  if (idx.email < 0) return null;
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const active = idx.active >= 0 ? normalize_(row[idx.active]) : '1';
+    if (active && active !== '1' && active.toLowerCase() !== 'true') continue;
+
+    if (normalize_(row[idx.email]) === email) {
+      return {
+        workerCode: normalize_(row[idx.code]),
+        workerName: normalize_(row[idx.name]),
+        dept: normalize_(row[idx.dept]),
+        email: email,
+      };
+    }
+  }
+  return null;
+}

@@ -124,3 +124,41 @@ function api_approveRequest(requestId) {
     lock.releaseLock();
   }
 }
+
+// ====== 承認者の担当部署一覧取得 ======
+
+function api_getApproverDepts() {
+  const email = Session.getActiveUser().getEmail();
+  const sh = requireSheet_('ApproverMap');
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const idx = {
+    dept: H.indexOf('部署'),
+    mail: H.indexOf('承認者メール'),
+    role: H.indexOf('role(approver/admin)'),
+    enabled: H.indexOf('有効フラグ'),
+  };
+
+  const depts = [];
+  let isAdminRole = false;
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const mail = normalize_(row[idx.mail]);
+    const enabled = idx.enabled >= 0 ? row[idx.enabled] : true;
+    if (enabled === false || String(enabled).toLowerCase() === 'false') continue;
+    if (mail !== email) continue;
+
+    const role = normalize_(row[idx.role]);
+    if (role === 'admin') isAdminRole = true;
+
+    const dept = normalize_(row[idx.dept]);
+    if (dept && !depts.includes(dept)) depts.push(dept);
+  }
+
+  if (isAdminRole) {
+    return { isAdmin: true, depts: loadDeptList_() };
+  }
+
+  return { isAdmin: isAdminRole, depts };
+}

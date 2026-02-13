@@ -226,3 +226,62 @@ function api_markHolidayDone(requestId) {
     lock.releaseLock();
   }
 }
+
+// ====== 作業者本人の「本日の申請一覧」取得 ======
+
+function api_getTodayRequestsForWorker() {
+  const email = Session.getActiveUser().getEmail();
+  const workerInfo = api_getWorkerInfo();
+
+  const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  const values = sh.getDataRange().getValues();
+  const today = fmtDate_(new Date(), 'yyyy-MM-dd');
+
+  const wlMap = buildWorkLogsMapByRequestId_();
+  const out = [];
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+    if (!status || status === 'canceled') continue;
+
+    // 本人照合（workerEmail または workerCode）
+    let isMe = false;
+    const rowEmail = normalize_(row[idx['workerEmail']]);
+    if (rowEmail && rowEmail === email) isMe = true;
+    if (!isMe && workerInfo) {
+      const rowCode = normalize_(row[idx['workerCode']]);
+      if (rowCode && rowCode === workerInfo.workerCode) isMe = true;
+    }
+    if (!isMe) continue;
+
+    const targetDateVal = row[idx['targetDate']];
+    const targetDate = targetDateVal instanceof Date
+      ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
+      : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+    if (targetDate !== today) continue;
+
+    const requestId = normalize_(row[idx['requestId']]);
+    const wl = wlMap.get(requestId) || {};
+
+    out.push({
+      requestId,
+      requestType: normalize_(row[idx['requestType(overtime/holiday)']]),
+      status,
+      dept: normalize_(row[idx['dept']]),
+      workerName: normalize_(row[idx['workerName']]),
+      targetDate,
+      approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
+      submittedAt: row[idx['submittedAt']],
+      approvedAt: row[idx['approvedAt']],
+      actualStartAt: wl.actualStartAt || '',
+      actualEndAt: wl.actualEndAt || '',
+      actualMinutes: Number(wl.actualMinutes || 0),
+      breakMinutes: Number(wl.breakMinutes || 0),
+      netMinutes: Number(wl.netMinutes || 0),
+      pdfFileId: normalize_(row[idx['pdfFileId']]),
+    });
+  }
+
+  return { today, workerInfo, items: out };
+}

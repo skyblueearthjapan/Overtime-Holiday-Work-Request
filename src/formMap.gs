@@ -62,3 +62,14 @@ function getTemplateFormId_(type) {
   }
   throw new Error(`FormTemplatesにtypeがありません: ${type}`);
 }
+
+// ====== フォームURL取得（TOP画面用） ======
+
+function api_getFormUrl(type, dept) {
+  const found = findFormMapRow_(type, dept);
+  if (!found) return null;
+  const isActive = found.isActive;
+  if (isActive === false || String(isActive).toLowerCase() === 'false') return null;
+  const url = found.idx.formUrl >= 0 ? normalize_(found.row[found.idx.formUrl]) : '';
+  return url || null;
+}

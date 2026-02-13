@@ -379,6 +379,7 @@ const workerCode = answer.split(" ")[0];  // "A001"
 |--------|----------|------|
 | `api_getTodayRequestsForDept(dept)` | Web アプリ（承認者画面） | 部署別の本日申請一覧を取得（権限チェック付き） |
 | `api_approveRequest(requestId)` | Web アプリ（承認ボタン） | status→approved、approvedAt/approvedBy を記録 |
+| `api_getApproverDepts()` | Web アプリ（承認者画面初期化） | 承認者のメールから担当部署一覧を返す（admin は全部署） |
 | `isAdmin_(email)` | 内部 | ApproverMap で admin ロールかチェック |
 | `canApproveDept_(email, dept)` | 内部 | 指定部署の承認権限があるかチェック |
 
@@ -389,6 +390,9 @@ const workerCode = answer.split(" ")[0];  // "A001"
 | `api_markOvertimeDone(requestId)` | Web アプリ（残業完了ボタン） | 17:20 固定起点で実績算出→休憩控除→net→WorkLogs更新→PDF生成 |
 | `api_markHolidayStart(requestId)` | Web アプリ（休日開始ボタン） | actualStartAt を記録 |
 | `api_markHolidayDone(requestId)` | Web アプリ（休日完了ボタン） | start〜end で実績算出→休憩控除→net→WorkLogs更新→PDF生成 |
+| `api_getTodayRequestsForWorker()` | Web アプリ（TOP 画面） | セッションユーザーの本日申請一覧（WorkLogs 結合済み） |
+| `api_getWorkerInfo()` | Web アプリ（TOP 画面初期化） | Googleアカウントで作業員マスタ照合→部署/氏名/コード返却 |
+| `api_getFormUrl(type, dept)` | Web アプリ（TOP 画面） | FormMap から該当フォームの URL を返す |
 | `calcBreakMinutesByMaster_(type, actualMinutes)` | 内部 | 休憩マスタから該当区間の休憩分を返す |
 | `getRequestById_(requestId)` | 内部 | Requests から 1 件取得 |
 | `updateWorkLog_(requestId, patch)` | 内部 | WorkLogs の指定行をパッチ更新 |
@@ -460,11 +464,36 @@ const workerCode = answer.split(" ")[0];  // "A001"
 | 注意対象 | 実績 30h(1800 分)超 or 予測 40h 超 |
 | PDF 未作成 | `status=approved` かつ `netMinutes>0` かつ `pdfFileId` 空 |
 
+#### 作業者 TOP 画面 UI 機能（top.html）
+
+| 機能 | 概要 |
+|------|------|
+| 作業者情報表示 | Googleアカウントで作業員マスタ照合 → 部署/氏名/コードを表示 |
+| 残業申請ボタン | 部署対応フォーム（FormMap）への直リンク。ワンクリックでフォーム遷移 |
+| 休日出勤申請ボタン | 同上（holiday 用フォーム） |
+| 本日の申請一覧 | 種別/承認状況/予定時間/実績/休憩/実残業/PDF/操作 を表形式で表示 |
+| 残業完了ボタン | 17:20 起点で実績自動計算 → WorkLogs 更新 → 承認済みなら PDF 自動生成 |
+| 休日開始ボタン | 現在時刻を actualStartAt に記録 |
+| 休日完了ボタン | 開始時刻からの実績算出 → 休憩控除 → net → PDF 自動生成 |
+| PDF リンク | 生成済み PDF を Google Drive で直接開封 |
+| ページ遷移 | 承認者画面・総務部画面へのナビゲーションリンク |
+
+#### 承認者画面 UI 機能（approver.html）
+
+| 機能 | 概要 |
+|------|------|
+| 部署選択 | ApproverMap から担当部署を自動取得（admin は全部署） |
+| KPI カード（3 枚） | 本日の申請件数、未承認件数、承認済件数 |
+| 本日の申請テーブル | 氏名/種別/承認状況/予定時間/提出時刻/操作 を表形式で表示 |
+| 承認ボタン | 個別承認（status → approved、approvedAt/approvedBy 記録） |
+| 全件一括承認 | 表示中の未承認申請を全件承認（confirm 付き） |
+| ページ遷移 | トップ画面・総務部画面へのナビゲーションリンク |
+
 ### 11.7 Web アプリ / メニュー / トリガー
 
 | 関数名 | トリガー | 概要 |
 |--------|----------|------|
-| `doGet(e)` | Web アプリ | page=admin → 総務部画面、それ以外 → トップ |
+| `doGet(e)` | Web アプリ | page=top（デフォルト）→ 作業者 TOP、page=approver → 承認者画面、page=admin → 総務部画面 |
 | `onOpen()` | スプレッドシート起動 | 管理者メニュー（フォーム全更新 / テスト / メール手動送信） |
 | `setupTriggers_()` | 手動 1 回実行 | nightlyUpdateAllForms_ の毎朝トリガーを作成 |
 | `setupMailTriggers_()` | 手動 1 回実行 | 夕方メール 2 回（17:10, 18:10）＋朝メール（7:10）のトリガーを作成 |
@@ -488,7 +517,9 @@ src/
 ├── pdfExport.gs       # PDF 生成（テンプレSS複製→操作!B3→PDF→Drive保存）
 ├── mail.gs            # 夕方メール（17:10, 18:10）+ 朝メール（7:10, CSV/Excel添付）
 ├── admin.gs           # 総務部ダッシュボード API（日次/月次40h/年度推移）+ doGet ルーティング
-├── admin.html         # 総務部画面 UI（KPI + 月次テーブル + 日次テーブル）
+├── admin.html         # 総務部画面 UI（KPI + Canvas チャート + 月次/日次テーブル）
+├── top.html           # 作業者 TOP 画面（フォーム申請ボタン + 本日申請一覧 + 完了/開始ボタン）
+├── approver.html      # 承認者画面（部署選択 + 本日申請テーブル + 承認/一括承認ボタン）
 └── menu.gs            # onOpen メニュー + setupAllTriggers_（フォーム更新＋メール）
 ```
 

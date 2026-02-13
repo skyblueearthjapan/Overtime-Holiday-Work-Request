@@ -426,6 +426,14 @@ function doGet(e) {
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
-  // 既存トップ（部署選択等）
-  return HtmlService.createHtmlOutput('TODO: existing routing');
+  if (page === 'approver') {
+    return HtmlService.createHtmlOutputFromFile('approver')
+      .setTitle('承認者画面')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
+  // デフォルト：作業者TOP
+  return HtmlService.createHtmlOutputFromFile('top')
+    .setTitle('残業・休日出勤 申請TOP')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }

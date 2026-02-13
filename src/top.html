@@ -1,0 +1,416 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <style>
+    :root{
+      --bg1:#eaf6ff;
+      --bg2:#f7fffb;
+      --accent:#1f9d55;
+      --accent2:#0ea5e9;
+      --text:#0b2545;
+      --muted:#5c6b7a;
+      --card:#ffffffcc;
+      --line:#d7e7f5;
+      --danger:#ff5a5f;
+      --warn:#ffb020;
+    }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(1100px 600px at 18% 0%, var(--bg1), transparent),
+        radial-gradient(1100px 600px at 92% 20%, var(--bg2), transparent),
+        linear-gradient(180deg, #ffffff, #f3fbff);
+    }
+    header{
+      padding:18px 22px;
+      display:flex; align-items:flex-end; justify-content:space-between;
+      border-bottom:1px solid var(--line);
+      backdrop-filter: blur(8px);
+      position:sticky; top:0;
+      background: rgba(255,255,255,.55);
+      z-index: 10;
+    }
+    .title{ font-weight:900; letter-spacing:.06em; }
+    .sub{ opacity:.8; font-size:12px; color:var(--muted); }
+    .wrap{ padding:18px 22px; max-width:960px; margin:0 auto; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:14px 14px;
+      box-shadow: 0 10px 30px rgba(10,40,80,.06);
+    }
+    .grid2{ display:grid; gap:12px; grid-template-columns: 1fr 1fr; }
+    .kpi2{ font-size:18px; font-weight:900; }
+    .action-card{
+      cursor:pointer;
+      text-align:center;
+      padding:28px 14px;
+      transition: transform .12s, box-shadow .12s;
+    }
+    .action-card:hover{
+      transform:translateY(-2px);
+      box-shadow:0 14px 36px rgba(10,40,80,.12);
+    }
+    .action-card.overtime{ border-left:4px solid var(--accent2); }
+    .action-card.holiday{ border-left:4px solid var(--accent); }
+
+    .sectionTitle{
+      font-weight:900;
+      letter-spacing:.05em;
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:8px;
+    }
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:13px;
+    }
+    th, td{
+      border-bottom:1px solid var(--line);
+      padding:10px 8px;
+      text-align:left;
+    }
+    th{
+      font-size:12px;
+      color:var(--muted);
+    }
+    button{
+      padding:10px 12px;
+      border-radius:12px;
+      border:0;
+      background:linear-gradient(135deg, var(--accent), #1bd67f);
+      color:#fff; font-weight:800;
+      cursor:pointer;
+      box-shadow: 0 10px 22px rgba(31,157,85,.20);
+    }
+    .ghost{
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--line);
+      box-shadow:none;
+    }
+    .btn-blue{
+      background:linear-gradient(135deg, var(--accent2), #38bdf8);
+      box-shadow:0 10px 22px rgba(14,165,233,.20);
+    }
+    .btn-sm{ padding:6px 10px; font-size:12px; border-radius:8px; }
+    .btn-warn{
+      background:linear-gradient(135deg, var(--warn), #ffc655);
+      color:var(--text);
+      box-shadow:0 6px 16px rgba(255,176,32,.20);
+    }
+    .btn-danger{
+      background:linear-gradient(135deg, var(--danger), #ff8a8e);
+      box-shadow:0 6px 16px rgba(255,90,95,.20);
+    }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      display:inline-block;
+      color:var(--text);
+    }
+    .danger{ border-color:#ffb3b3; background:#fff0f0; color:#7a0b0b; }
+    .warn{ border-color:#ffd29e; background:#fff6eb; color:#7a4a0b; }
+    .ok{ border-color:#bfe9d0; background:#f0fff6; color:#0b5a2b; }
+    .info{ border-color:#b3d4ff; background:#f0f7ff; color:#0b2a5a; }
+    .muted{ color:var(--muted); }
+    a{ color:var(--accent2); text-decoration:none; }
+    a:hover{ text-decoration:underline; }
+    .nav-link{
+      font-size:13px; padding:6px 12px; border-radius:8px;
+      border:1px solid var(--line); background:#fff; color:var(--text);
+    }
+    .nav-link:hover{ background:var(--bg1); text-decoration:none; }
+    .worker-badge{
+      display:inline-flex; align-items:center; gap:6px;
+      padding:8px 14px; border-radius:999px;
+      border:1px solid var(--line); background:#fff;
+      font-size:14px; font-weight:700;
+    }
+    .loading{ text-align:center; padding:30px; color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="title">残業・休日出勤 申請TOP</div>
+      <div class="sub" id="workerSub">読込中...</div>
+    </div>
+    <div class="row">
+      <a href="?page=approver" class="nav-link">承認者画面</a>
+      <a href="?page=admin" class="nav-link">総務部画面</a>
+    </div>
+  </header>
+
+  <div class="wrap">
+
+    <!-- Worker info -->
+    <div style="margin-bottom:12px">
+      <span class="worker-badge" id="workerBadge">読込中...</span>
+    </div>
+
+    <!-- Action cards -->
+    <div class="grid2" id="formCards" style="margin-bottom:12px">
+      <div class="card action-card overtime" onclick="openForm('overtime')">
+        <div class="kpi2">残業申請</div>
+        <div class="sub">残業予定をフォームで申請する</div>
+      </div>
+      <div class="card action-card holiday" onclick="openForm('holiday')">
+        <div class="kpi2">休日出勤申請</div>
+        <div class="sub">休日出勤をフォームで申請する</div>
+      </div>
+    </div>
+
+    <!-- Today's requests -->
+    <div class="card">
+      <div class="sectionTitle">
+        <div>本日の申請一覧（<span id="todayDate">-</span>）</div>
+        <button class="ghost btn-sm" onclick="loadToday()">更新</button>
+      </div>
+      <table id="tblToday">
+        <thead>
+          <tr>
+            <th>種別</th>
+            <th>承認</th>
+            <th>予定</th>
+            <th>実績</th>
+            <th>休憩</th>
+            <th>実残業/実働</th>
+            <th>PDF</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="8" class="loading">読込中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+<script>
+var WORKER = null;
+var FORM_URLS = {};
+
+function fmtMin(min){
+  min = Math.max(0, Math.round(Number(min||0)));
+  var h = Math.floor(min/60), r = min % 60;
+  if(h===0) return r+'分';
+  if(r===0) return h+'時間';
+  return h+'時間'+r+'分';
+}
+
+// ====== 初期ロード ======
+google.script.run
+  .withSuccessHandler(function(res){
+    WORKER = res.workerInfo;
+    if(WORKER){
+      document.getElementById('workerBadge').innerText =
+        WORKER.dept + ' / ' + WORKER.workerName + '（' + WORKER.workerCode + '）';
+      document.getElementById('workerSub').innerText =
+        WORKER.dept + ' - ' + WORKER.email;
+      // フォームURL読込
+      loadFormUrl('overtime', WORKER.dept);
+      loadFormUrl('holiday', WORKER.dept);
+    } else {
+      document.getElementById('workerBadge').innerText = '作業員マスタに未登録';
+      document.getElementById('workerSub').innerText =
+        '作業員マスタにGoogleアカウントが登録されていません';
+    }
+    renderToday(res);
+  })
+  .withFailureHandler(function(err){
+    alert(err.message || err);
+  })
+  .api_getTodayRequestsForWorker();
+
+// ====== フォームURL取得 ======
+function loadFormUrl(type, dept){
+  google.script.run
+    .withSuccessHandler(function(url){
+      FORM_URLS[type] = url;
+    })
+    .withFailureHandler(function(){})
+    .api_getFormUrl(type, dept);
+}
+
+function openForm(type){
+  var url = FORM_URLS[type];
+  if(!url){
+    var label = (type === 'overtime') ? '残業' : '休日出勤';
+    alert(label + '申請フォームが未作成です。管理者に連絡してください。');
+    return;
+  }
+  window.open(url, '_blank');
+}
+
+// ====== 本日の申請 更新 ======
+function loadToday(){
+  document.querySelector('#tblToday tbody').innerHTML =
+    '<tr><td colspan="8" class="loading">読込中...</td></tr>';
+  google.script.run
+    .withSuccessHandler(function(res){ renderToday(res); })
+    .withFailureHandler(function(err){ alert(err.message || err); })
+    .api_getTodayRequestsForWorker();
+}
+
+// ====== テーブル描画 ======
+function renderToday(res){
+  document.getElementById('todayDate').innerText = res.today;
+  var tb = document.querySelector('#tblToday tbody');
+  tb.innerHTML = '';
+
+  if(!res.items || res.items.length === 0){
+    tb.innerHTML =
+      '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">' +
+      '本日の申請はありません</td></tr>';
+    return;
+  }
+
+  res.items.forEach(function(it){
+    var typePill = it.requestType === 'overtime'
+      ? '<span class="pill info">残業</span>'
+      : '<span class="pill ok">休日</span>';
+
+    // 承認状況
+    var statusPill = '';
+    if(it.status === 'submitted'){
+      statusPill = '<span class="pill warn">承認待ち</span>';
+    } else if(it.status === 'approved'){
+      statusPill = '<span class="pill ok">承認済</span>';
+    }
+
+    // PDF
+    var pdfCell = '';
+    if(it.pdfFileId){
+      pdfCell = '<a href="https://drive.google.com/file/d/' +
+        it.pdfFileId + '/view" target="_blank" class="pill ok">PDF</a>';
+    } else if(it.netMinutes > 0 && it.status === 'approved'){
+      pdfCell = '<span class="pill warn">未作成</span>';
+    } else {
+      pdfCell = '<span class="muted">-</span>';
+    }
+
+    // 操作ボタン
+    var actionCell = buildActionCell(it);
+
+    var tr = document.createElement('tr');
+    tr.innerHTML =
+      '<td>' + typePill + '</td>' +
+      '<td>' + statusPill + '</td>' +
+      '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
+      '<td>' + (it.actualMinutes > 0 ? fmtMin(it.actualMinutes)
+        : '<span class="muted">-</span>') + '</td>' +
+      '<td>' + (it.breakMinutes > 0 ? fmtMin(it.breakMinutes)
+        : '<span class="muted">-</span>') + '</td>' +
+      '<td>' + (it.netMinutes > 0 ? '<b>' + fmtMin(it.netMinutes) + '</b>'
+        : '<span class="muted">-</span>') + '</td>' +
+      '<td>' + pdfCell + '</td>' +
+      '<td>' + actionCell + '</td>';
+    tb.appendChild(tr);
+  });
+}
+
+// ====== 操作ボタン構築 ======
+function buildActionCell(it){
+  // 未承認
+  if(it.status === 'submitted'){
+    return '<span class="muted">承認待ち</span>';
+  }
+
+  // 残業
+  if(it.requestType === 'overtime'){
+    if(it.actualEndAt){
+      return '<span class="pill ok">完了済</span>';
+    }
+    return '<button class="btn-blue btn-sm" ' +
+      'onclick="doOvertimeDone(\'' + it.requestId + '\',this)">残業完了</button>';
+  }
+
+  // 休日
+  if(it.requestType === 'holiday'){
+    if(it.actualEndAt){
+      return '<span class="pill ok">完了済</span>';
+    }
+    if(it.actualStartAt){
+      return '<button class="btn-sm" ' +
+        'onclick="doHolidayDone(\'' + it.requestId + '\',this)">休日完了</button>';
+    }
+    return '<button class="btn-warn btn-sm" ' +
+      'onclick="doHolidayStart(\'' + it.requestId + '\',this)">開始</button>';
+  }
+
+  return '-';
+}
+
+// ====== 残業完了 ======
+function doOvertimeDone(requestId, btn){
+  if(!confirm('残業完了を記録しますか？\n（17:20から現在時刻まで自動計算されます）')) return;
+  btn.disabled = true;
+  btn.innerText = '処理中...';
+  google.script.run
+    .withSuccessHandler(function(res){
+      alert('残業完了を記録しました。\n' +
+        '実働: ' + fmtMin(res.actualMinutes) + '\n' +
+        '休憩控除: ' + fmtMin(res.breakMinutes) + '\n' +
+        '実残業: ' + fmtMin(res.netMinutes));
+      loadToday();
+    })
+    .withFailureHandler(function(err){
+      alert('エラー: ' + (err.message || err));
+      btn.disabled = false;
+      btn.innerText = '残業完了';
+    })
+    .api_markOvertimeDone(requestId);
+}
+
+// ====== 休日開始 ======
+function doHolidayStart(requestId, btn){
+  if(!confirm('休日出勤を開始しますか？\n（現在時刻が開始時刻として記録されます）')) return;
+  btn.disabled = true;
+  btn.innerText = '処理中...';
+  google.script.run
+    .withSuccessHandler(function(res){
+      alert('休日出勤を開始しました。');
+      loadToday();
+    })
+    .withFailureHandler(function(err){
+      alert('エラー: ' + (err.message || err));
+      btn.disabled = false;
+      btn.innerText = '開始';
+    })
+    .api_markHolidayStart(requestId);
+}
+
+// ====== 休日完了 ======
+function doHolidayDone(requestId, btn){
+  if(!confirm('休日出勤を完了しますか？\n（開始時刻から現在時刻まで自動計算されます）')) return;
+  btn.disabled = true;
+  btn.innerText = '処理中...';
+  google.script.run
+    .withSuccessHandler(function(res){
+      alert('休日出勤を完了しました。\n' +
+        '実働: ' + fmtMin(res.actualMinutes) + '\n' +
+        '休憩控除: ' + fmtMin(res.breakMinutes) + '\n' +
+        '実残業/実働: ' + fmtMin(res.netMinutes));
+      loadToday();
+    })
+    .withFailureHandler(function(err){
+      alert('エラー: ' + (err.message || err));
+      btn.disabled = false;
+      btn.innerText = '休日完了';
+    })
+    .api_markHolidayDone(requestId);
+}
+</script>
+</body>
+</html>
