@@ -308,6 +308,101 @@ function api_adminFiscalTrend(baseDateYmd, deptFilter) {
 }
 
 // ====================================================================
+// 総務部API：特別条項（60h超）年度内回数カウント
+// ====================================================================
+
+function api_adminSpecialClauseCount(baseDateStr, deptFilter) {
+  assertAdmin_();
+
+  const base = new Date(baseDateStr);
+  if (isNaN(base.getTime())) throw new Error('基準日が不正です');
+
+  const year = base.getMonth() >= 3 ? base.getFullYear() : base.getFullYear() - 1;
+  const fiscalStart = new Date(year, 3, 1);
+  const fiscalEnd = new Date(year + 1, 3, 1);
+
+  const recs = buildJoinedRecords_(fiscalStart, fiscalEnd)
+    .filter(r => r.netMinutes > 0);
+
+  const LIMIT60 = 3600;
+
+  // 個人×月 の netMinutes 合算
+  const monthlyMap = new Map(); // key: dept|name|yyyy-mm
+  for (const r of recs) {
+    const ym = Utilities.formatDate(r.targetDate, Session.getScriptTimeZone(), 'yyyy-MM');
+    const key = `${r.dept}|${r.workerName}|${ym}`;
+    monthlyMap.set(key, (monthlyMap.get(key) || 0) + r.netMinutes);
+  }
+
+  // 60h超の月をカウント
+  const countMap = new Map(); // dept|name -> count60
+  for (const [key, total] of monthlyMap.entries()) {
+    if (total >= LIMIT60) {
+      const [dept, name] = key.split('|');
+      const k = `${dept}|${name}`;
+      countMap.set(k, (countMap.get(k) || 0) + 1);
+    }
+  }
+
+  const result = [];
+  for (const [key, cnt] of countMap.entries()) {
+    const [dept, name] = key.split('|');
+    if (deptFilter && deptFilter !== 'ALL' && dept !== deptFilter) continue;
+
+    result.push({
+      dept,
+      workerName: name,
+      count60: cnt,
+      isDanger: cnt >= 6,
+      isWarn: cnt >= 5
+    });
+  }
+
+  result.sort((a,b)=> b.count60 - a.count60);
+
+  return {
+    fiscalYear: `${year}-04-01 ~ ${year+1}-03-31`,
+    list: result
+  };
+}
+
+// ====================================================================
+// 総務部API：未承認滞留監視
+// ====================================================================
+
+function api_adminPendingWatch() {
+  assertAdmin_();
+
+  const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const values = sh.getRange(2,1,lastRow-1,sh.getLastColumn()).getValues();
+  const now = new Date();
+  const result = [];
+
+  for (const row of values) {
+    const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+    if (status !== 'submitted') continue;
+
+    const submittedAt = new Date(row[idx['submittedAt']]);
+    const hours = (now - submittedAt) / (1000*60*60);
+
+    result.push({
+      dept: normalize_(row[idx['dept']]),
+      workerName: normalize_(row[idx['workerName']]),
+      submittedAt: submittedAt,
+      hoursPending: Math.floor(hours),
+      isOver48h: hours >= 48
+    });
+  }
+
+  result.sort((a,b)=> b.hoursPending - a.hoursPending);
+
+  return result;
+}
+
+// ====================================================================
 // 総務部API：部署プルダウン用
 // ====================================================================
 

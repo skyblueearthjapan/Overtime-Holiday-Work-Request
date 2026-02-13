@@ -308,7 +308,7 @@
     <div class="card">
       <div class="sectionTitle">
         <div>日次：申請一覧（承認・実績・PDF）</div>
-        <div class="sub">PDF未作成は強調</div>
+        <div class="sub">PDF未作成は強調 / 作成済はクリックで開封</div>
       </div>
       <table id="tblDaily">
         <thead>
@@ -320,6 +320,56 @@
         </thead>
         <tbody></tbody>
       </table>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <!-- Special Clause (60h) -->
+    <div class="card">
+      <div class="sectionTitle">
+        <div>特別条項（60h超）年度内回数</div>
+        <div class="row">
+          <div class="sub">年6回上限（36協定）</div>
+          <button class="ghost" onclick="loadSpecial()">更新</button>
+        </div>
+      </div>
+      <table id="tblSpecial">
+        <thead>
+          <tr>
+            <th>部署</th>
+            <th>氏名</th>
+            <th>60h超回数</th>
+            <th>状況</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="sub" style="margin-top:8px">※年度（4/1〜3/31）内で月60h超の回数。6回到達で36協定違反リスク。</div>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <!-- Pending Watch -->
+    <div class="card">
+      <div class="sectionTitle">
+        <div>未承認滞留監視</div>
+        <div class="row">
+          <div class="sub">48時間超は警告</div>
+          <button class="ghost" onclick="loadPending()">更新</button>
+        </div>
+      </div>
+      <table id="tblPending">
+        <thead>
+          <tr>
+            <th>部署</th>
+            <th>氏名</th>
+            <th>経過時間</th>
+            <th>状態</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="sub" style="margin-top:8px">※status=submitted のまま放置されている申請を検出。</div>
     </div>
 
   </div>
@@ -494,7 +544,9 @@ function loadDaily(){
     tb.innerHTML='';
     res.items.forEach(function(it){
       var typeJa = it.requestType==='overtime'?'残業':'休日出勤';
-      var pdf = it.pdfFileId ? '<span class="pill ok">作成済</span>' : '<span class="pill warn">未作成</span>';
+      var pdf = it.pdfFileId
+        ? '<a href="https://drive.google.com/file/d/'+it.pdfFileId+'/view" target="_blank" class="pill ok">開く</a>'
+        : '<span class="pill warn">未作成</span>';
       var tr=document.createElement('tr');
       tr.innerHTML=
         '<td>'+it.dept+'</td>'+
@@ -768,9 +820,66 @@ function hashCode(str){
   return h;
 }
 
+// ====== Special Clause (60h) ======
+function loadSpecial(){
+  var base = document.getElementById('fyBase').value.trim();
+  var dept = document.getElementById('dept').value;
+
+  google.script.run.withSuccessHandler(function(res){
+    var tb=document.querySelector('#tblSpecial tbody');
+    tb.innerHTML='';
+    if(!res.list || res.list.length===0){
+      tb.innerHTML='<tr><td colspan="4" class="muted">60h超の月はありません</td></tr>';
+      return;
+    }
+    res.list.forEach(function(r){
+      var status = r.isDanger ? '<span class="pill danger">6回到達</span>'
+                   : r.isWarn ? '<span class="pill warn">5回</span>'
+                   : '<span class="pill ok">'+r.count60+'回</span>';
+      var tr=document.createElement('tr');
+      tr.innerHTML=
+        '<td>'+r.dept+'</td>'+
+        '<td><b>'+r.workerName+'</b></td>'+
+        '<td>'+r.count60+'</td>'+
+        '<td>'+status+'</td>';
+      tb.appendChild(tr);
+    });
+  }).withFailureHandler(function(err){
+    alert(err.message || err);
+  }).api_adminSpecialClauseCount(base, dept);
+}
+
+// ====== Pending Watch ======
+function loadPending(){
+  google.script.run.withSuccessHandler(function(list){
+    var tb=document.querySelector('#tblPending tbody');
+    tb.innerHTML='';
+    if(!list || list.length===0){
+      tb.innerHTML='<tr><td colspan="4" class="muted">未承認の滞留はありません</td></tr>';
+      return;
+    }
+    list.forEach(function(r){
+      var status = r.isOver48h
+        ? '<span class="pill danger">48h超</span>'
+        : '<span class="pill warn">滞留中</span>';
+      var tr=document.createElement('tr');
+      tr.innerHTML=
+        '<td>'+r.dept+'</td>'+
+        '<td><b>'+r.workerName+'</b></td>'+
+        '<td>'+r.hoursPending+'時間</td>'+
+        '<td>'+status+'</td>';
+      tb.appendChild(tr);
+    });
+  }).withFailureHandler(function(err){
+    alert(err.message || err);
+  }).api_adminPendingWatch();
+}
+
 // Initial load
 loadMonthly();
 loadFiscal();
+loadSpecial();
+loadPending();
 </script>
 </body>
 </html>

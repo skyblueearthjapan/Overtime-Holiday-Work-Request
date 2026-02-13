@@ -428,6 +428,8 @@ const workerCode = answer.split(" ")[0];  // "A001"
 | `api_adminDailyDetail(dateYmd, deptFilter)` | Web API | 指定日の申請一覧（承認/実績/PDF 状況） |
 | `api_adminMonthlySummary(yearMonth, deptFilter)` | Web API | 月次40h監視：個人別集計 + KPI + 予測 + 注意対象 + グラフ（棒/円） |
 | `api_adminFiscalTrend(baseDateYmd, deptFilter)` | Web API | 年度月別推移（4月〜3月、折れ線用） |
+| `api_adminSpecialClauseCount(baseDateStr, deptFilter)` | Web API | 特別条項：年度内の月 60h 超回数カウント（年 6 回上限） |
+| `api_adminPendingWatch()` | Web API | 未承認滞留監視：status=submitted のまま放置されている申請一覧 |
 | `api_adminDeptOptions()` | Web API | 部署プルダウン用選択肢 |
 
 #### 総務部ダッシュボード UI 機能（admin.html — DX 完成版）
@@ -440,6 +442,9 @@ const workerCode = answer.split(" ")[0];  // "A001"
 | 折れ線グラフ | 年度推移（4 月〜3 月、月別合計 netMinutes） |
 | 月次テーブル | 個人別：合算/残業/休日/40h 残/予測（月末）/PDF 未作成。列ヘッダクリックでソート |
 | 注意対象テーブル | 30h 超 or 予測 40h 超を自動抽出（DX 抽出） |
+| 特別条項テーブル | 年度内の月 60h 超回数（5 回=黄、6 回=赤）。36 協定違反リスク管理 |
+| 未承認滞留テーブル | submitted のまま放置された申請。48h 超は赤表示 |
+| PDF 直リンク | 日次テーブルの PDF 列から Drive ファイルをワンクリックで開封 |
 | 日次テーブル | 承認時間/実績/休憩/net/PDF 状態。PDF 未作成は `.warn` で強調 |
 | フィルタ | 部署、氏名検索、40h 超のみ、60h 超のみ、予測 40h 超のみ、PDF 未作成のみ |
 | CSV エクスポート | 表示中のフィルタ結果をブラウザ側で CSV ダウンロード |
