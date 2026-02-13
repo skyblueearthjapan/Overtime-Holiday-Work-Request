@@ -415,11 +415,26 @@ const workerCode = answer.split(" ")[0];  // "A001"
 | `exportRowsToXlsxBlob_(rows, filename)` | 内部 | 2D 配列 → 一時 SS → xlsx Blob にエクスポート |
 | `countGeneratedPdfsForDate_(dateObj)` | 内部 | 対象日の PDF 作成件数（残業/休日/合計） |
 
-### 11.6 Web アプリ / メニュー / トリガー
+### 11.6 総務部ダッシュボード（admin）
 
 | 関数名 | トリガー | 概要 |
 |--------|----------|------|
-| `doGet(e)` / `doPost(e)` | Web アプリ | 部署選択モーダル表示、フォーム URL リダイレクト |
+| `assertAdmin_()` | 内部 | 総務権限（ApproverMap role=admin）チェック |
+| `getFiscalYearStart_(d)` | 内部 | 年度開始日（4/1）を返す |
+| `getFiscalYearEnd_(d)` | 内部 | 年度終了日（翌年4/1 exclusive）を返す |
+| `monthKey_(d)` | 内部 | Date → `yyyy-MM` 文字列 |
+| `toDate_(v)` | 内部 | 値 → Date 変換（無効なら null） |
+| `buildJoinedRecords_(dateFrom, dateTo)` | 内部 | Requests × WorkLogs を join し期間内の行データを返す |
+| `api_adminDailyDetail(dateYmd, deptFilter)` | Web API | 指定日の申請一覧（承認/実績/PDF 状況） |
+| `api_adminMonthlySummary(yearMonth, deptFilter)` | Web API | 月次40h監視：個人別集計 + KPI + グラフ用データ |
+| `api_adminFiscalTrend(baseDateYmd, deptFilter)` | Web API | 年度月別推移（4月〜3月、折れ線用） |
+| `api_adminDeptOptions()` | Web API | 部署プルダウン用選択肢 |
+
+### 11.7 Web アプリ / メニュー / トリガー
+
+| 関数名 | トリガー | 概要 |
+|--------|----------|------|
+| `doGet(e)` | Web アプリ | page=admin → 総務部画面、それ以外 → トップ |
 | `onOpen()` | スプレッドシート起動 | 管理者メニュー（フォーム全更新 / テスト / メール手動送信） |
 | `setupTriggers_()` | 手動 1 回実行 | nightlyUpdateAllForms_ の毎朝トリガーを作成 |
 | `setupMailTriggers_()` | 手動 1 回実行 | 夕方メール 2 回（17:10, 18:10）＋朝メール（7:10）のトリガーを作成 |
@@ -442,6 +457,8 @@ src/
 ├── worklog.gs         # 開始/完了ボタン + 休憩控除 + net 算出
 ├── pdfExport.gs       # PDF 生成（テンプレSS複製→操作!B3→PDF→Drive保存）
 ├── mail.gs            # 夕方メール（17:10, 18:10）+ 朝メール（7:10, CSV/Excel添付）
+├── admin.gs           # 総務部ダッシュボード API（日次/月次40h/年度推移）+ doGet ルーティング
+├── admin.html         # 総務部画面 UI（KPI + 月次テーブル + 日次テーブル）
 └── menu.gs            # onOpen メニュー + setupAllTriggers_（フォーム更新＋メール）
 ```
 

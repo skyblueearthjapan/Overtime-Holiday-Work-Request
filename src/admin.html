@@ -1,0 +1,273 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <style>
+    :root{
+      --bg1:#eaf6ff; /* 薄水色 */
+      --bg2:#f7fffb; /* ほんのり白緑 */
+      --accent:#1f9d55; /* 緑 */
+      --text:#0b2545;
+      --card:#ffffffcc;
+      --line:#d7e7f5;
+    }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+      color:var(--text);
+      background: radial-gradient(1200px 600px at 20% 0%, var(--bg1), transparent),
+                  radial-gradient(1200px 600px at 90% 20%, var(--bg2), transparent),
+                  linear-gradient(180deg, #ffffff, #f3fbff);
+    }
+    header{
+      padding:18px 22px;
+      display:flex; align-items:center; justify-content:space-between;
+      border-bottom:1px solid var(--line);
+      backdrop-filter: blur(8px);
+    }
+    .title{
+      font-weight:800; letter-spacing:.04em;
+    }
+    .wrap{ padding:18px 22px; max-width:1200px; margin:0 auto; }
+    .grid{ display:grid; gap:12px; grid-template-columns: 1fr 1fr 1fr; }
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:16px;
+      padding:14px 14px;
+      box-shadow: 0 10px 30px rgba(10,40,80,.06);
+    }
+    .kpi{ font-size:22px; font-weight:800; }
+    .sub{ opacity:.75; font-size:12px; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    select, input{
+      padding:10px 10px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      min-width:160px;
+    }
+    button{
+      padding:10px 12px;
+      border-radius:12px;
+      border:0;
+      background:var(--accent);
+      color:#fff; font-weight:700;
+      cursor:pointer;
+    }
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:13px;
+    }
+    th, td{
+      border-bottom:1px solid var(--line);
+      padding:10px 8px;
+      text-align:left;
+      white-space:nowrap;
+    }
+    th{ font-size:12px; opacity:.8; }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      display:inline-block;
+    }
+    .warn{ border-color:#ffd29e; background:#fff6eb; }
+    .danger{ border-color:#ffb3b3; background:#fff0f0; }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="title">総務部管理</div>
+      <div class="sub">月次40h監視（実績）／日次一覧／年度推移</div>
+    </div>
+    <div class="row">
+      <a href="?page=top" class="sub">トップへ</a>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <div class="card">
+      <div class="row">
+        <div>
+          <div class="sub">月（yyyy-mm）</div>
+          <input id="ym" value="" placeholder="2026-02">
+        </div>
+        <div>
+          <div class="sub">部署</div>
+          <select id="dept">
+            <option value="ALL">全体</option>
+          </select>
+        </div>
+        <button onclick="loadMonthly()">月次を更新</button>
+
+        <div style="flex:1"></div>
+
+        <div>
+          <div class="sub">日（yyyy-mm-dd）</div>
+          <input id="day" value="" placeholder="2026-02-13">
+        </div>
+        <button onclick="loadDaily()">日次を表示</button>
+      </div>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <div class="grid">
+      <div class="card">
+        <div class="sub">40h超（実績）人数</div>
+        <div class="kpi" id="kpi40">-</div>
+      </div>
+      <div class="card">
+        <div class="sub">60h超（実績）人数</div>
+        <div class="kpi" id="kpi60">-</div>
+      </div>
+      <div class="card">
+        <div class="sub">PDF未作成（承認済み＋実績あり）</div>
+        <div class="kpi" id="kpiPdf">-</div>
+      </div>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <div class="card">
+      <div class="sub">月次：個人別 実績（残業＋休日 合算）</div>
+      <div style="height:10px"></div>
+      <table id="tblMonthly">
+        <thead>
+          <tr>
+            <th>部署</th><th>氏名</th>
+            <th>合算(分)</th><th>合算</th>
+            <th>残業</th><th>休日</th>
+            <th>40hライン</th><th>60hライン</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+      <div class="sub" style="margin-top:10px">
+        ※グラフ表示（棒/折れ線）は次のステップでChart.js等を追加して仕上げます（APIは既に分単位で提供）。
+      </div>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <div class="card">
+      <div class="sub">日次：申請一覧（承認・実績・PDF）</div>
+      <div style="height:10px"></div>
+      <table id="tblDaily">
+        <thead>
+          <tr>
+            <th>部署</th><th>氏名</th><th>種別</th>
+            <th>承認</th><th>実績</th><th>休憩</th><th>実残業/実働</th>
+            <th>PDF</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+  </div>
+
+<script>
+function todayYMD(){
+  var d=new Date();
+  var z=function(n){return String(n).padStart(2,'0');};
+  return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());
+}
+function todayYM(){
+  var d=new Date();
+  var z=function(n){return String(n).padStart(2,'0');};
+  return d.getFullYear()+'-'+z(d.getMonth()+1);
+}
+function fmtMin(min){
+  min = Number(min||0);
+  var h = Math.floor(min/60), r=min%60;
+  if(h===0) return r+'分';
+  if(r===0) return h+'時間';
+  return h+'時間'+r+'分';
+}
+
+document.getElementById('ym').value = todayYM();
+document.getElementById('day').value = todayYMD();
+
+// 部署プルダウンをサーバから取得
+google.script.run.withSuccessHandler(function(list){
+  var sel=document.getElementById('dept');
+  sel.innerHTML='';
+  list.forEach(function(d){
+    var opt=document.createElement('option');
+    opt.value=d;
+    opt.textContent=(d==='ALL'?'全体':d);
+    sel.appendChild(opt);
+  });
+}).api_adminDeptOptions();
+
+function loadMonthly(){
+  var ym = document.getElementById('ym').value.trim();
+  var dept = document.getElementById('dept').value;
+
+  google.script.run.withSuccessHandler(function(res){
+    document.getElementById('kpi40').innerText = res.kpi.over40;
+    document.getElementById('kpi60').innerText = res.kpi.over60;
+    document.getElementById('kpiPdf').innerText = res.kpi.pdfMissingTotal;
+
+    var tb = document.querySelector('#tblMonthly tbody');
+    tb.innerHTML='';
+    res.people.forEach(function(p){
+      var tr=document.createElement('tr');
+      var remain40 = Math.max(0, 2400 - p.totalNet);
+      var remain60 = Math.max(0, 3600 - p.totalNet);
+      var pill40 = remain40===0 ? '<span class="pill danger">超過</span>' : '<span class="pill">'+fmtMin(remain40)+'残</span>';
+      var pill60 = remain60===0 ? '<span class="pill danger">超過</span>' : '<span class="pill">'+fmtMin(remain60)+'残</span>';
+      tr.innerHTML =
+        '<td>'+p.dept+'</td>'+
+        '<td>'+p.workerName+'</td>'+
+        '<td>'+p.totalNet+'</td>'+
+        '<td>'+fmtMin(p.totalNet)+'</td>'+
+        '<td>'+fmtMin(p.overtimeNet)+'</td>'+
+        '<td>'+fmtMin(p.holidayNet)+'</td>'+
+        '<td>'+pill40+'</td>'+
+        '<td>'+pill60+'</td>';
+      tb.appendChild(tr);
+    });
+  }).withFailureHandler(function(err){
+    alert(err.message || err);
+  }).api_adminMonthlySummary(ym, dept);
+}
+
+function loadDaily(){
+  var day = document.getElementById('day').value.trim();
+  var dept = document.getElementById('dept').value;
+
+  google.script.run.withSuccessHandler(function(res){
+    var tb = document.querySelector('#tblDaily tbody');
+    tb.innerHTML='';
+    res.items.forEach(function(it){
+      var typeJa = it.requestType==='overtime'?'残業':'休日出勤';
+      var pdf = it.pdfFileId ? '<span class="pill">作成済</span>' : '<span class="pill warn">未作成</span>';
+      var tr=document.createElement('tr');
+      tr.innerHTML=
+        '<td>'+it.dept+'</td>'+
+        '<td>'+it.workerName+'</td>'+
+        '<td>'+typeJa+'</td>'+
+        '<td>'+fmtMin(it.approvedMinutes)+'</td>'+
+        '<td>'+fmtMin(it.actualMinutes)+'</td>'+
+        '<td>'+fmtMin(it.breakMinutes)+'</td>'+
+        '<td><b>'+fmtMin(it.netMinutes)+'</b></td>'+
+        '<td>'+pdf+'</td>';
+      tb.appendChild(tr);
+    });
+  }).withFailureHandler(function(err){
+    alert(err.message || err);
+  }).api_adminDailyDetail(day, dept);
+}
+
+loadMonthly();
+</script>
+</body>
+</html>
