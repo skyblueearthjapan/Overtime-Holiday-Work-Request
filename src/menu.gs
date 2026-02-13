@@ -5,6 +5,11 @@ function onOpen() {
     .createMenu('残業休日アプリ')
     .addItem('フォームを全更新（マスタ反映）', 'nightlyUpdateAllForms_')
     .addItem('フォーム生成テスト（残業×先頭部署）', 'debugCreateFirstDeptOvertime_')
+    .addSeparator()
+    .addItem('夕方メール送信（手動）', 'sendEveningMail_')
+    .addItem('朝メール送信（手動）', 'sendMorningMail_')
+    .addSeparator()
+    .addItem('全トリガー初期セットアップ', 'setupAllTriggers_')
     .addToUi();
 }
 
@@ -16,7 +21,7 @@ function debugCreateFirstDeptOvertime_() {
   Logger.log(JSON.stringify(res, null, 2));
 }
 
-// ====== トリガー作成（毎朝更新） ======
+// ====== トリガー作成（フォーム毎朝更新） ======
 
 function setupTriggers_() {
   // 既存同名トリガーを重複作成しない簡易対策
@@ -31,4 +36,47 @@ function setupTriggers_() {
     // 6時台
     .nearMinute(30)
     .create();
+}
+
+// ====== トリガー作成（メール：夕方2回＋朝1回） ======
+
+function setupMailTriggers_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  const has = (fn) => triggers.some(t => t.getHandlerFunction() === fn);
+
+  // 夕方 17:10（17時台）
+  if (!triggers.some(t => t.getHandlerFunction()==='sendEveningMail_' && t.getEventType()===ScriptApp.EventType.CLOCK)) {
+    ScriptApp.newTrigger('sendEveningMail_')
+      .timeBased()
+      .everyDays(1)
+      .atHour(17)
+      .nearMinute(10)
+      .create();
+  }
+
+  // 夕方 18:10（18時台）…同じ関数をもう1本
+  ScriptApp.newTrigger('sendEveningMail_')
+    .timeBased()
+    .everyDays(1)
+    .atHour(18)
+    .nearMinute(10)
+    .create();
+
+  // 朝 07:10（7時台）
+  if (!has('sendMorningMail_')) {
+    ScriptApp.newTrigger('sendMorningMail_')
+      .timeBased()
+      .everyDays(1)
+      .atHour(7)
+      .nearMinute(10)
+      .create();
+  }
+}
+
+// ====== 全トリガー一括セットアップ ======
+
+function setupAllTriggers_() {
+  setupTriggers_();       // フォーム毎朝更新（6:30）
+  setupMailTriggers_();   // 夕方2回（17:10, 18:10）＋朝（7:10）
+  Logger.log('全トリガーをセットアップしました。');
 }

@@ -401,13 +401,29 @@ const workerCode = answer.split(" ")[0];  // "A001"
 | `getOrCreateDateFolder_(rootFolderId, dateObj)` | 内部 | yyyy.MM.dd フォルダを取得 or 作成 |
 | `exportSheetToPdfBlob_(ssId, sheetId, filename)` | 内部 | 指定シートを A4 PDF Blob にエクスポート |
 
-### 11.5 Web アプリ / メニュー
+### 11.5 メール自動送信
+
+| 関数名 | トリガー | 概要 |
+|--------|----------|------|
+| `sendEveningMail_()` | 時間トリガー（17:10, 18:10 の 2 回） | 承認済み申請の予定時間を部署別に本文で報告 |
+| `sendMorningMail_()` | 時間トリガー（7:10） | 実績一覧を CSV + Excel 添付で送信、PDF 作成件数を本文に記載 |
+| `listApprovedRequestsByDate_(dateObj)` | 内部 | 対象日の承認済み申請一覧を取得 |
+| `buildWorkLogsMapByRequestId_()` | 内部 | WorkLogs 全件を requestId → 実績データの Map に変換 |
+| `buildEveningMailBody_(dateObj)` | 内部 | 夕方メール本文を生成（部署別グループ表示） |
+| `buildMorningReportRows_(dateObj)` | 内部 | 朝レポート用の 2D 配列（CSV/Excel のデータソース）を生成 |
+| `makeCsvBlob_(rows, filename)` | 内部 | 2D 配列 → CSV Blob に変換 |
+| `exportRowsToXlsxBlob_(rows, filename)` | 内部 | 2D 配列 → 一時 SS → xlsx Blob にエクスポート |
+| `countGeneratedPdfsForDate_(dateObj)` | 内部 | 対象日の PDF 作成件数（残業/休日/合計） |
+
+### 11.6 Web アプリ / メニュー / トリガー
 
 | 関数名 | トリガー | 概要 |
 |--------|----------|------|
 | `doGet(e)` / `doPost(e)` | Web アプリ | 部署選択モーダル表示、フォーム URL リダイレクト |
-| `onOpen()` | スプレッドシート起動 | 管理者メニュー（フォーム全更新 / テスト生成） |
+| `onOpen()` | スプレッドシート起動 | 管理者メニュー（フォーム全更新 / テスト / メール手動送信） |
 | `setupTriggers_()` | 手動 1 回実行 | nightlyUpdateAllForms_ の毎朝トリガーを作成 |
+| `setupMailTriggers_()` | 手動 1 回実行 | 夕方メール 2 回（17:10, 18:10）＋朝メール（7:10）のトリガーを作成 |
+| `setupAllTriggers_()` | 手動 1 回実行 | 上記全トリガーを一括セットアップ |
 
 ---
 
@@ -425,12 +441,25 @@ src/
 ├── approval.gs        # 承認権限チェック + 承認実行 API
 ├── worklog.gs         # 開始/完了ボタン + 休憩控除 + net 算出
 ├── pdfExport.gs       # PDF 生成（テンプレSS複製→操作!B3→PDF→Drive保存）
-└── menu.gs            # onOpen メニュー + setupTriggers_
+├── mail.gs            # 夕方メール（17:10, 18:10）+ 朝メール（7:10, CSV/Excel添付）
+└── menu.gs            # onOpen メニュー + setupAllTriggers_（フォーム更新＋メール）
 ```
 
-### Settings 必須キー（PDF 生成用）
+### Settings 必須キー
 
-| Key | 説明 |
-|-----|------|
-| `PDF_ROOT_FOLDER_ID` | PDF 保存先ルートフォルダの Google Drive ID |
-| `TEMPLATE_SSID` | 申請書テンプレートのスプレッドシート ID（操作/申請書フォーム シートを含む） |
+| Key | 説明 | 例 |
+|-----|------|----|
+| `PDF_ROOT_FOLDER_ID` | PDF 保存先ルートフォルダの Google Drive ID | *(Drive フォルダ ID)* |
+| `TEMPLATE_SSID` | 申請書テンプレートのスプレッドシート ID | *(SS ID)* |
+| `HR_MAIL_TO` | 総務部宛先メールアドレス（複数はカンマ区切り） | `soumu@example.com,xxx@example.com` |
+| `APP_URL` | この Web アプリの URL（メール本文に記載） | `https://script.google.com/macros/s/.../exec` |
+
+### トリガー一覧
+
+| トリガー | 関数 | 時刻 | 目的 |
+|----------|------|------|------|
+| 時間トリガー | `nightlyUpdateAllForms_()` | 毎朝 6:30 | フォーム選択肢を最新マスタで更新 |
+| 時間トリガー | `sendEveningMail_()` | 毎日 17:10 | 夕方メール 1 回目（承認時間報告） |
+| 時間トリガー | `sendEveningMail_()` | 毎日 18:10 | 夕方メール 2 回目（承認増分反映） |
+| 時間トリガー | `sendMorningMail_()` | 毎朝 7:10 | 朝メール（実績CSV/Excel＋PDF件数） |
+| フォームトリガー | `handleFormSubmit_(e)` | フォーム送信時 | 自動（フォーム生成時に付与） |
