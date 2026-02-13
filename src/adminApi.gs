@@ -419,21 +419,24 @@ function api_adminDeptOptions() {
 function doGet(e) {
   const page = (e && e.parameter && e.parameter.page) ? e.parameter.page : 'top';
 
-  if (page === 'admin') {
+  // ページ名のホワイトリスト（ここ以外は top に落とす）
+  const allowed = new Set(['top', 'approver', 'admin']);
+  const safePage = allowed.has(page) ? page : 'top';
+
+  // admin のみ権限チェック
+  if (safePage === 'admin') {
     assertAdmin_();
-    return HtmlService.createHtmlOutputFromFile('admin')
-      .setTitle('総務部管理')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
-  if (page === 'approver') {
-    return HtmlService.createHtmlOutputFromFile('approver')
-      .setTitle('承認者画面')
-      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-  }
+  const t = HtmlService.createTemplateFromFile(safePage);
+  t.APP_URL = ScriptApp.getService().getUrl(); // /exec の絶対 URL を全ページに配る
 
-  // デフォルト：作業者TOP
-  return HtmlService.createHtmlOutputFromFile('top')
-    .setTitle('残業・休日出勤 申請TOP')
+  return t.evaluate()
+    .setTitle('残業・休日出勤申請')
     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+
+/** HTML include 用（共通パーツ読込用） */
+function include_(name) {
+  return HtmlService.createHtmlOutputFromFile(name).getContent();
 }
