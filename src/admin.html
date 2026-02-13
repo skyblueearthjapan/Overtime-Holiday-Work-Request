@@ -5,42 +5,60 @@
   <meta charset="utf-8" />
   <style>
     :root{
-      --bg1:#eaf6ff; /* 薄水色 */
-      --bg2:#f7fffb; /* ほんのり白緑 */
-      --accent:#1f9d55; /* 緑 */
+      --bg1:#eaf6ff;
+      --bg2:#f7fffb;
+      --accent:#1f9d55;
+      --accent2:#0ea5e9;
       --text:#0b2545;
+      --muted:#5c6b7a;
       --card:#ffffffcc;
       --line:#d7e7f5;
+      --danger:#ff5a5f;
+      --warn:#ffb020;
     }
     body{
       margin:0;
       font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
       color:var(--text);
-      background: radial-gradient(1200px 600px at 20% 0%, var(--bg1), transparent),
-                  radial-gradient(1200px 600px at 90% 20%, var(--bg2), transparent),
-                  linear-gradient(180deg, #ffffff, #f3fbff);
+      background:
+        radial-gradient(1100px 600px at 18% 0%, var(--bg1), transparent),
+        radial-gradient(1100px 600px at 92% 20%, var(--bg2), transparent),
+        linear-gradient(180deg, #ffffff, #f3fbff);
     }
     header{
       padding:18px 22px;
-      display:flex; align-items:center; justify-content:space-between;
+      display:flex; align-items:flex-end; justify-content:space-between;
       border-bottom:1px solid var(--line);
       backdrop-filter: blur(8px);
+      position:sticky; top:0;
+      background: rgba(255,255,255,.55);
+      z-index: 10;
     }
-    .title{
-      font-weight:800; letter-spacing:.04em;
-    }
-    .wrap{ padding:18px 22px; max-width:1200px; margin:0 auto; }
-    .grid{ display:grid; gap:12px; grid-template-columns: 1fr 1fr 1fr; }
+    .title{ font-weight:900; letter-spacing:.06em; }
+    .sub{ opacity:.8; font-size:12px; color:var(--muted); }
+    .wrap{ padding:18px 22px; max-width:1280px; margin:0 auto; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
     .card{
       background:var(--card);
       border:1px solid var(--line);
-      border-radius:16px;
+      border-radius:18px;
       padding:14px 14px;
       box-shadow: 0 10px 30px rgba(10,40,80,.06);
     }
-    .kpi{ font-size:22px; font-weight:800; }
-    .sub{ opacity:.75; font-size:12px; }
-    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+    .grid{ display:grid; gap:12px; grid-template-columns: 1fr 1fr 1fr 1fr; }
+    .kpi{ font-size:22px; font-weight:900; }
+    .kpi2{ font-size:18px; font-weight:900; }
+    .chip{
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:999px;
+      padding:8px 10px;
+      display:flex; gap:8px; align-items:center;
+      font-size:12px;
+      cursor:pointer;
+      user-select:none;
+    }
+    .chip input{ transform: scale(1.1); }
     select, input{
       padding:10px 10px;
       border-radius:12px;
@@ -52,10 +70,37 @@
       padding:10px 12px;
       border-radius:12px;
       border:0;
-      background:var(--accent);
-      color:#fff; font-weight:700;
+      background:linear-gradient(135deg, var(--accent), #1bd67f);
+      color:#fff; font-weight:800;
       cursor:pointer;
+      box-shadow: 0 10px 22px rgba(31,157,85,.20);
     }
+    .ghost{
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--line);
+      box-shadow:none;
+    }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      display:inline-block;
+      color:var(--text);
+    }
+    .danger{ border-color:#ffb3b3; background:#fff0f0; color:#7a0b0b; }
+    .warn{ border-color:#ffd29e; background:#fff6eb; color:#7a4a0b; }
+    .ok{ border-color:#bfe9d0; background:#f0fff6; color:#0b5a2b; }
+
+    .sectionTitle{
+      font-weight:900;
+      letter-spacing:.05em;
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:8px;
+    }
+
     table{
       width:100%;
       border-collapse:collapse;
@@ -67,24 +112,38 @@
       text-align:left;
       white-space:nowrap;
     }
-    th{ font-size:12px; opacity:.8; }
-    .pill{
-      padding:4px 10px;
-      border-radius:999px;
+    th{
       font-size:12px;
+      color:var(--muted);
+      cursor:pointer;
+    }
+    .muted{ color:var(--muted); }
+    .split{ display:grid; grid-template-columns: 2fr 1fr; gap:12px; }
+    .split2{ display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+
+    canvas{ width:100%; height:280px; }
+    .small canvas{ height:220px; }
+
+    .hr{ height:1px; background:var(--line); margin:10px 0; }
+
+    .badge{
+      display:inline-flex;
+      align-items:center;
+      gap:6px;
+      padding:6px 10px;
+      border-radius:999px;
       border:1px solid var(--line);
       background:#fff;
-      display:inline-block;
+      font-size:12px;
     }
-    .warn{ border-color:#ffd29e; background:#fff6eb; }
-    .danger{ border-color:#ffb3b3; background:#fff0f0; }
+    .dot{ width:8px; height:8px; border-radius:999px; background:var(--accent); display:inline-block; }
   </style>
 </head>
 <body>
   <header>
     <div>
-      <div class="title">総務部管理</div>
-      <div class="sub">月次40h監視（実績）／日次一覧／年度推移</div>
+      <div class="title">総務部管理（見える化DX）</div>
+      <div class="sub">月次40h監視（実績net）／予測（ペース）／部署配分／年度推移／PDF未作成抽出</div>
     </div>
     <div class="row">
       <a href="?page=top" class="sub">トップへ</a>
@@ -92,6 +151,8 @@
   </header>
 
   <div class="wrap">
+
+    <!-- Filters -->
     <div class="card">
       <div class="row">
         <div>
@@ -104,7 +165,19 @@
             <option value="ALL">全体</option>
           </select>
         </div>
+
+        <div>
+          <div class="sub">検索（氏名）</div>
+          <input id="q" placeholder="例：今泉">
+        </div>
+
+        <div class="chip"><input type="checkbox" id="fOver40"> 実績40h超のみ</div>
+        <div class="chip"><input type="checkbox" id="fOver60"> 実績60h超のみ</div>
+        <div class="chip"><input type="checkbox" id="fProj40"> 予測40h超のみ</div>
+        <div class="chip"><input type="checkbox" id="fPdfMiss"> PDF未作成のみ</div>
+
         <button onclick="loadMonthly()">月次を更新</button>
+        <button class="ghost" onclick="exportVisible()">表示中をCSV</button>
 
         <div style="flex:1"></div>
 
@@ -112,53 +185,131 @@
           <div class="sub">日（yyyy-mm-dd）</div>
           <input id="day" value="" placeholder="2026-02-13">
         </div>
-        <button onclick="loadDaily()">日次を表示</button>
+        <button class="ghost" onclick="loadDaily()">日次を表示</button>
+      </div>
+      <div class="sub" style="margin-top:10px">
+        ※実績は <b>WorkLogs.netMinutes</b> を使用（残業＋休日を合算）。予測は「今月累計÷経過日×月日数」。
       </div>
     </div>
 
     <div style="height:12px"></div>
 
+    <!-- KPIs -->
     <div class="grid">
       <div class="card">
-        <div class="sub">40h超（実績）人数</div>
+        <div class="sub">実績40h超（今月）</div>
         <div class="kpi" id="kpi40">-</div>
+        <div class="sub" id="kpi40sub"></div>
       </div>
       <div class="card">
-        <div class="sub">60h超（実績）人数</div>
+        <div class="sub">実績60h超（今月）</div>
         <div class="kpi" id="kpi60">-</div>
+        <div class="sub" id="kpi60sub"></div>
+      </div>
+      <div class="card">
+        <div class="sub">予測40h超（ペース換算）</div>
+        <div class="kpi" id="kpiP40">-</div>
+        <div class="sub" id="kpiP40sub"></div>
       </div>
       <div class="card">
         <div class="sub">PDF未作成（承認済み＋実績あり）</div>
         <div class="kpi" id="kpiPdf">-</div>
+        <div class="sub">未作成は監査上の要注意</div>
+      </div>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <!-- Charts -->
+    <div class="split">
+      <div class="card">
+        <div class="sectionTitle">
+          <div>月次：個人別 実績（棒）＋予測（薄棒）</div>
+          <div class="badge"><span class="dot"></span> 40h / 60h ライン</div>
+        </div>
+        <canvas id="cPeople"></canvas>
+        <div class="sub" id="chartInfo"></div>
+      </div>
+
+      <div class="card small">
+        <div class="sectionTitle">
+          <div>部署別配分（円）</div>
+          <div class="sub">合算実績</div>
+        </div>
+        <canvas id="cDept"></canvas>
       </div>
     </div>
 
     <div style="height:12px"></div>
 
     <div class="card">
-      <div class="sub">月次：個人別 実績（残業＋休日 合算）</div>
-      <div style="height:10px"></div>
+      <div class="sectionTitle">
+        <div>年度推移（4/1〜3/31）</div>
+        <div class="row">
+          <span class="sub">基準日</span>
+          <input id="fyBase" style="min-width:160px" placeholder="2026-02-13">
+          <button class="ghost" onclick="loadFiscal()">更新</button>
+        </div>
+      </div>
+      <canvas id="cFiscal"></canvas>
+      <div class="sub" id="fyInfo"></div>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <!-- Monthly Table -->
+    <div class="card">
+      <div class="sectionTitle">
+        <div>月次：個人別（検索・フィルタ・ソート）</div>
+        <div class="sub">列見出しクリックで並び替え</div>
+      </div>
       <table id="tblMonthly">
         <thead>
           <tr>
-            <th>部署</th><th>氏名</th>
-            <th>合算(分)</th><th>合算</th>
-            <th>残業</th><th>休日</th>
-            <th>40hライン</th><th>60hライン</th>
+            <th data-k="dept">部署</th>
+            <th data-k="workerName">氏名</th>
+            <th data-k="totalNet">合算(分)</th>
+            <th data-k="totalNetH">合算</th>
+            <th data-k="overtimeNet">残業</th>
+            <th data-k="holidayNet">休日</th>
+            <th data-k="remain40">40まで残</th>
+            <th data-k="projectedTotal">予測（月末）</th>
+            <th data-k="pdfMissing">PDF未作成</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
-      <div class="sub" style="margin-top:10px">
-        ※グラフ表示（棒/折れ線）は次のステップでChart.js等を追加して仕上げます（APIは既に分単位で提供）。
-      </div>
     </div>
 
     <div style="height:12px"></div>
 
+    <!-- Watch list -->
     <div class="card">
-      <div class="sub">日次：申請一覧（承認・実績・PDF）</div>
-      <div style="height:10px"></div>
+      <div class="sectionTitle">
+        <div>注意対象（DX抽出）</div>
+        <div class="sub">30h超 or 予測40h超</div>
+      </div>
+      <table id="tblWatch">
+        <thead>
+          <tr>
+            <th>部署</th><th>氏名</th>
+            <th>実績</th><th>予測</th>
+            <th>40残</th><th>60残</th>
+            <th>PDF</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+
+    <div style="height:12px"></div>
+
+    <!-- Daily -->
+    <div class="card">
+      <div class="sectionTitle">
+        <div>日次：申請一覧（承認・実績・PDF）</div>
+        <div class="sub">PDF未作成は強調</div>
+      </div>
       <table id="tblDaily">
         <thead>
           <tr>
@@ -174,28 +325,37 @@
   </div>
 
 <script>
+var STATE = {
+  monthly: null,
+  fiscal: null,
+  sortKey: 'totalNet',
+  sortDir: 'desc',
+  visiblePeople: []
+};
+
+function z(n){ return String(n).padStart(2,'0'); }
 function todayYMD(){
   var d=new Date();
-  var z=function(n){return String(n).padStart(2,'0');};
   return d.getFullYear()+'-'+z(d.getMonth()+1)+'-'+z(d.getDate());
 }
 function todayYM(){
   var d=new Date();
-  var z=function(n){return String(n).padStart(2,'0');};
   return d.getFullYear()+'-'+z(d.getMonth()+1);
 }
 function fmtMin(min){
-  min = Number(min||0);
-  var h = Math.floor(min/60), r=min%60;
+  min = Math.max(0, Math.round(Number(min||0)));
+  var h = Math.floor(min/60), r = min % 60;
   if(h===0) return r+'分';
   if(r===0) return h+'時間';
   return h+'時間'+r+'分';
 }
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
 
 document.getElementById('ym').value = todayYM();
 document.getElementById('day').value = todayYMD();
+document.getElementById('fyBase').value = todayYMD();
 
-// 部署プルダウンをサーバから取得
+// 部署候補
 google.script.run.withSuccessHandler(function(list){
   var sel=document.getElementById('dept');
   sel.innerHTML='';
@@ -205,36 +365,121 @@ google.script.run.withSuccessHandler(function(list){
     opt.textContent=(d==='ALL'?'全体':d);
     sel.appendChild(opt);
   });
-}).api_adminDeptOptions();
+}).withFailureHandler(function(err){alert(err.message||err);}).api_adminDeptOptions();
+
+function applyFiltersPeople(people){
+  var q = document.getElementById('q').value.trim();
+  var fOver40 = document.getElementById('fOver40').checked;
+  var fOver60 = document.getElementById('fOver60').checked;
+  var fProj40 = document.getElementById('fProj40').checked;
+  var fPdfMiss = document.getElementById('fPdfMiss').checked;
+
+  var out = people.slice();
+
+  if(q) out = out.filter(function(p){ return (p.workerName||'').indexOf(q) >= 0; });
+  if(fOver40) out = out.filter(function(p){ return p.totalNet >= 2400; });
+  if(fOver60) out = out.filter(function(p){ return p.totalNet >= 3600; });
+  if(fProj40) out = out.filter(function(p){ return p.projectedTotal >= 2400; });
+  if(fPdfMiss) out = out.filter(function(p){ return (p.pdfMissing||0) > 0; });
+
+  // sort
+  var k = STATE.sortKey;
+  var dir = STATE.sortDir;
+  out.sort(function(a,b){
+    var av = (k==='totalNetH') ? a.totalNet : (a[k] != null ? a[k] : '');
+    var bv = (k==='totalNetH') ? b.totalNet : (b[k] != null ? b[k] : '');
+    if(typeof av === 'number' && typeof bv === 'number'){
+      return dir==='asc' ? av-bv : bv-av;
+    }
+    return dir==='asc'
+      ? String(av).localeCompare(String(bv),'ja')
+      : String(bv).localeCompare(String(av),'ja');
+  });
+
+  return out;
+}
+
+function renderMonthly(){
+  var res = STATE.monthly;
+  if(!res) return;
+
+  // KPI
+  document.getElementById('kpi40').innerText = res.kpi.over40;
+  document.getElementById('kpi60').innerText = res.kpi.over60;
+  document.getElementById('kpiP40').innerText = res.kpi.projectedOver40;
+  document.getElementById('kpiPdf').innerText = res.kpi.pdfMissingTotal;
+
+  var mi = res.monthInfo;
+  document.getElementById('kpi40sub').innerText = '対象人数：'+res.kpi.totalPeople+' / 経過：'+mi.dayOfMonth+'/'+mi.daysInMonth+'日';
+  document.getElementById('kpi60sub').innerText = '実績60h超は特別条項レベル';
+  document.getElementById('kpiP40sub').innerText = '予測は"ペース換算"';
+
+  // フィルタ＆ソート後の可視データ
+  var visible = applyFiltersPeople(res.people);
+  STATE.visiblePeople = visible;
+
+  // Table
+  var tb = document.querySelector('#tblMonthly tbody');
+  tb.innerHTML='';
+  visible.forEach(function(p){
+    var remain40 = Math.max(0, 2400 - p.totalNet);
+
+    var badge40 = remain40===0 ? '<span class="pill danger">超過</span>' :
+      (remain40<=300 ? '<span class="pill warn">'+fmtMin(remain40)+'残</span>' : '<span class="pill">'+fmtMin(remain40)+'残</span>');
+    var proj = p.projectedTotal >= 3600 ? '<span class="pill danger">60超予測</span>' :
+                 p.projectedTotal >= 2400 ? '<span class="pill warn">40超予測</span>' :
+                 '<span class="pill ok">範囲内</span>';
+
+    var pdf = (p.pdfMissing||0) > 0 ? '<span class="pill warn">'+p.pdfMissing+'件</span>' : '<span class="pill ok">0</span>';
+
+    var tr=document.createElement('tr');
+    tr.innerHTML =
+      '<td>'+p.dept+'</td>'+
+      '<td><b>'+p.workerName+'</b></td>'+
+      '<td>'+p.totalNet+'</td>'+
+      '<td><b>'+fmtMin(p.totalNet)+'</b></td>'+
+      '<td>'+fmtMin(p.overtimeNet)+'</td>'+
+      '<td>'+fmtMin(p.holidayNet)+'</td>'+
+      '<td>'+badge40+'</td>'+
+      '<td>'+fmtMin(p.projectedTotal)+' '+proj+'</td>'+
+      '<td>'+pdf+'</td>';
+    tb.appendChild(tr);
+  });
+
+  // Watch
+  var wb = document.querySelector('#tblWatch tbody');
+  wb.innerHTML='';
+  (res.watch||[]).forEach(function(w){
+    var pdf = (w.pdfMissing||0) > 0 ? '<span class="pill warn">'+w.pdfMissing+'件</span>' : '<span class="pill ok">0</span>';
+    var projBadge = w.projectedOver60 ? '<span class="pill danger">60超</span>' :
+                    (w.projectedOver40 ? '<span class="pill warn">40超</span>' : '<span class="pill ok">範囲内</span>');
+    var tr=document.createElement('tr');
+    tr.innerHTML =
+      '<td>'+w.dept+'</td>'+
+      '<td><b>'+w.workerName+'</b></td>'+
+      '<td><b>'+fmtMin(w.totalNet)+'</b></td>'+
+      '<td>'+fmtMin(w.projectedTotal)+' '+projBadge+'</td>'+
+      '<td>'+fmtMin(w.remain40)+'</td>'+
+      '<td>'+fmtMin(w.remain60)+'</td>'+
+      '<td>'+pdf+'</td>';
+    wb.appendChild(tr);
+  });
+
+  // Charts
+  drawPeopleBar('cPeople', visible, res.charts.people.limit40, res.charts.people.limit60);
+  drawDeptPie('cDept', res.charts.dept.labels, res.charts.dept.values);
+
+  document.getElementById('chartInfo').innerText =
+    '棒：表示中 '+visible.length+'名（実績=濃、予測=薄）。40h/60hラインは固定。';
+}
 
 function loadMonthly(){
   var ym = document.getElementById('ym').value.trim();
   var dept = document.getElementById('dept').value;
 
   google.script.run.withSuccessHandler(function(res){
-    document.getElementById('kpi40').innerText = res.kpi.over40;
-    document.getElementById('kpi60').innerText = res.kpi.over60;
-    document.getElementById('kpiPdf').innerText = res.kpi.pdfMissingTotal;
-
-    var tb = document.querySelector('#tblMonthly tbody');
-    tb.innerHTML='';
-    res.people.forEach(function(p){
-      var tr=document.createElement('tr');
-      var remain40 = Math.max(0, 2400 - p.totalNet);
-      var remain60 = Math.max(0, 3600 - p.totalNet);
-      var pill40 = remain40===0 ? '<span class="pill danger">超過</span>' : '<span class="pill">'+fmtMin(remain40)+'残</span>';
-      var pill60 = remain60===0 ? '<span class="pill danger">超過</span>' : '<span class="pill">'+fmtMin(remain60)+'残</span>';
-      tr.innerHTML =
-        '<td>'+p.dept+'</td>'+
-        '<td>'+p.workerName+'</td>'+
-        '<td>'+p.totalNet+'</td>'+
-        '<td>'+fmtMin(p.totalNet)+'</td>'+
-        '<td>'+fmtMin(p.overtimeNet)+'</td>'+
-        '<td>'+fmtMin(p.holidayNet)+'</td>'+
-        '<td>'+pill40+'</td>'+
-        '<td>'+pill60+'</td>';
-      tb.appendChild(tr);
-    });
+    STATE.monthly = res;
+    renderMonthly();
   }).withFailureHandler(function(err){
     alert(err.message || err);
   }).api_adminMonthlySummary(ym, dept);
@@ -249,11 +494,11 @@ function loadDaily(){
     tb.innerHTML='';
     res.items.forEach(function(it){
       var typeJa = it.requestType==='overtime'?'残業':'休日出勤';
-      var pdf = it.pdfFileId ? '<span class="pill">作成済</span>' : '<span class="pill warn">未作成</span>';
+      var pdf = it.pdfFileId ? '<span class="pill ok">作成済</span>' : '<span class="pill warn">未作成</span>';
       var tr=document.createElement('tr');
       tr.innerHTML=
         '<td>'+it.dept+'</td>'+
-        '<td>'+it.workerName+'</td>'+
+        '<td><b>'+it.workerName+'</b></td>'+
         '<td>'+typeJa+'</td>'+
         '<td>'+fmtMin(it.approvedMinutes)+'</td>'+
         '<td>'+fmtMin(it.actualMinutes)+'</td>'+
@@ -267,7 +512,265 @@ function loadDaily(){
   }).api_adminDailyDetail(day, dept);
 }
 
+function loadFiscal(){
+  var base = document.getElementById('fyBase').value.trim();
+  var dept = document.getElementById('dept').value;
+
+  google.script.run.withSuccessHandler(function(res){
+    STATE.fiscal = res;
+    drawLine('cFiscal', res.labels, res.values, 2400);
+    document.getElementById('fyInfo').innerText =
+      '年度：'+res.fiscalYearStart+' 〜 '+res.fiscalYearEnd+'（'+(dept==='ALL'?'全体':dept)+'）';
+  }).withFailureHandler(function(err){
+    alert(err.message || err);
+  }).api_adminFiscalTrend(base, dept);
+}
+
+// ====== Sorting ======
+document.querySelectorAll('#tblMonthly thead th').forEach(function(th){
+  th.addEventListener('click', function(){
+    var k = th.dataset.k;
+    if(!k) return;
+    if(STATE.sortKey === k){
+      STATE.sortDir = (STATE.sortDir === 'asc') ? 'desc' : 'asc';
+    } else {
+      STATE.sortKey = k;
+      STATE.sortDir = 'desc';
+    }
+    renderMonthly();
+  });
+});
+
+// ====== Export visible to CSV ======
+function exportVisible(){
+  var rows = [];
+  rows.push(['部署','氏名','合算(分)','合算','残業','休日','40残(分)','予測(分)','PDF未作成']);
+  STATE.visiblePeople.forEach(function(p){
+    rows.push([
+      p.dept,
+      p.workerName,
+      p.totalNet,
+      fmtMin(p.totalNet),
+      fmtMin(p.overtimeNet),
+      fmtMin(p.holidayNet),
+      Math.max(0,2400-p.totalNet),
+      p.projectedTotal,
+      p.pdfMissing||0
+    ]);
+  });
+  var csv = rows.map(function(r){return r.map(function(v){
+    var s=String(v!=null?v:'');
+    return /[",\n]/.test(s) ? '"'+s.replace(/"/g,'""')+'"' : s;
+  }).join(',');}).join('\n');
+
+  var blob = new Blob([csv], {type:'text/csv'});
+  var url = URL.createObjectURL(blob);
+  var a = document.createElement('a');
+  a.href = url;
+  a.download = '総務_月次_'+document.getElementById('ym').value+'_'+document.getElementById('dept').value+'.csv';
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+// ====== CANVAS CHARTS (lightweight, no external libs) ======
+function clearCanvas(id){
+  var c=document.getElementById(id);
+  var ctx=c.getContext('2d');
+  var rect=c.getBoundingClientRect();
+  c.width = Math.floor(rect.width * devicePixelRatio);
+  c.height = Math.floor(rect.height * devicePixelRatio);
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0,0,rect.width,rect.height);
+  return {c:c,ctx:ctx,w:rect.width,h:rect.height};
+}
+
+function drawPeopleBar(canvasId, people, limit40, limit60){
+  var o = clearCanvas(canvasId);
+  var ctx=o.ctx, w=o.w, h=o.h;
+  var padL=44, padR=14, padT=14, padB=46;
+  var innerW = w - padL - padR;
+  var innerH = h - padT - padB;
+
+  var maxVal = Math.max(limit60, 4000);
+  for(var i=0;i<people.length;i++){
+    if(people[i].totalNet > maxVal) maxVal = people[i].totalNet;
+    if((people[i].projectedTotal||0) > maxVal) maxVal = people[i].projectedTotal;
+  }
+  var n = Math.max(1, people.length);
+  var gap = 6;
+  var barW = clamp((innerW - gap*(n-1)) / n, 6, 20);
+
+  // grid lines
+  ctx.font = '12px system-ui';
+  ctx.fillStyle = '#5c6b7a';
+  ctx.strokeStyle = '#d7e7f5';
+
+  var ticks = [0, limit40, limit60, maxVal];
+  ticks.forEach(function(t){
+    var y = padT + innerH - (t/maxVal)*innerH;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+innerW,y); ctx.stroke();
+    ctx.fillText(Math.round(t/60)+'h', 8, y+4);
+  });
+
+  // limit lines emphasized
+  function drawLimitLine(yVal, label){
+    ctx.save();
+    var y = padT + innerH - (yVal/maxVal)*innerH;
+    ctx.strokeStyle = '#1f9d55';
+    ctx.setLineDash([6,4]);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+innerW,y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#1f9d55';
+    ctx.fillText(label, padL+6, y-6);
+    ctx.restore();
+  }
+  drawLimitLine(limit40, '40h');
+  drawLimitLine(limit60, '60h');
+
+  // bars
+  people.forEach(function(p,i){
+    var x = padL + i*(barW+gap);
+    var v = p.totalNet;
+    var pv = p.projectedTotal || 0;
+
+    // projected (light)
+    var ph = (pv/maxVal)*innerH;
+    ctx.fillStyle = 'rgba(14,165,233,0.18)';
+    ctx.fillRect(x, padT + innerH - ph, barW, ph);
+
+    // actual (solid)
+    var ah = (v/maxVal)*innerH;
+    var over60 = v>=3600;
+    var over40 = v>=2400;
+
+    ctx.fillStyle = over60 ? 'rgba(255,90,95,0.68)' : (over40 ? 'rgba(255,176,32,0.68)' : 'rgba(31,157,85,0.62)');
+    ctx.fillRect(x, padT + innerH - ah, barW, ah);
+
+    // x label
+    if(n<=40){
+      var name = (p.workerName||'').slice(0,6);
+      ctx.save();
+      ctx.translate(x+barW/2, padT+innerH+22);
+      ctx.rotate(-0.7);
+      ctx.fillStyle='#5c6b7a';
+      ctx.fillText(name, -10, 0);
+      ctx.restore();
+    }
+  });
+
+  // axis frame
+  ctx.strokeStyle = '#d7e7f5';
+  ctx.strokeRect(padL, padT, innerW, innerH);
+}
+
+function drawDeptPie(canvasId, labels, values){
+  var o = clearCanvas(canvasId);
+  var ctx=o.ctx, w=o.w, h=o.h;
+  var cx=w/2, cy=h/2, r=Math.min(w,h)*0.32;
+  var total = 0;
+  for(var i=0;i<values.length;i++) total += (values[i]||0);
+  if(total===0) total=1;
+
+  var start = -Math.PI/2;
+  labels.forEach(function(lab,i){
+    var v=values[i]||0;
+    var ang = (v/total)*Math.PI*2;
+    var end = start + ang;
+
+    var hue = (hashCode(lab) % 360 + 360) % 360;
+    ctx.fillStyle = 'hsla('+hue+', 65%, 55%, 0.55)';
+
+    ctx.beginPath();
+    ctx.moveTo(cx,cy);
+    ctx.arc(cx,cy,r,start,end);
+    ctx.closePath();
+    ctx.fill();
+
+    start=end;
+  });
+
+  // legend
+  ctx.font='12px system-ui';
+  var y=18;
+  labels.slice(0,10).forEach(function(lab,i){
+    var hue = (hashCode(lab) % 360 + 360) % 360;
+    ctx.fillStyle = 'hsla('+hue+', 65%, 55%, 0.55)';
+    ctx.fillRect(10,y-10,10,10);
+    ctx.fillStyle='#5c6b7a';
+    var pct = Math.round((values[i]/total)*100);
+    ctx.fillText(lab+' '+pct+'%', 26, y);
+    y += 16;
+  });
+}
+
+function drawLine(canvasId, labels, values, hintLineMin){
+  var o = clearCanvas(canvasId);
+  var ctx=o.ctx, w=o.w, h=o.h;
+  var padL=44, padR=14, padT=14, padB=32;
+  var innerW=w-padL-padR;
+  var innerH=h-padT-padB;
+
+  var maxVal = Math.max(hintLineMin||0, 3000);
+  for(var i=0;i<values.length;i++){
+    if(values[i]>maxVal) maxVal=values[i];
+  }
+  var n = Math.max(1, labels.length);
+
+  // grid
+  ctx.font='12px system-ui';
+  ctx.fillStyle='#5c6b7a';
+  ctx.strokeStyle='#d7e7f5';
+
+  var ticks=[0, hintLineMin||0, maxVal];
+  ticks.forEach(function(t){
+    var y = padT + innerH - (t/maxVal)*innerH;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+innerW,y); ctx.stroke();
+    ctx.fillText(Math.round(t/60)+'h', 8, y+4);
+  });
+
+  // line
+  ctx.strokeStyle='rgba(31,157,85,0.75)';
+  ctx.lineWidth=2;
+  ctx.beginPath();
+  values.forEach(function(v,i){
+    var x = padL + (i/(n-1||1))*innerW;
+    var y = padT + innerH - (v/maxVal)*innerH;
+    if(i===0) ctx.moveTo(x,y);
+    else ctx.lineTo(x,y);
+  });
+  ctx.stroke();
+
+  // points
+  ctx.fillStyle='rgba(31,157,85,0.75)';
+  values.forEach(function(v,i){
+    var x = padL + (i/(n-1||1))*innerW;
+    var y = padT + innerH - (v/maxVal)*innerH;
+    ctx.beginPath(); ctx.arc(x,y,3,0,Math.PI*2); ctx.fill();
+  });
+
+  // x labels
+  ctx.fillStyle='#5c6b7a';
+  labels.forEach(function(lab,i){
+    var x = padL + (i/(n-1||1))*innerW;
+    if(i%2===0){
+      ctx.fillText(lab.slice(5), x-8, padT+innerH+22);
+    }
+  });
+
+  // frame
+  ctx.strokeStyle='#d7e7f5';
+  ctx.strokeRect(padL,padT,innerW,innerH);
+}
+
+function hashCode(str){
+  var h=0;
+  for(var i=0;i<str.length;i++) h = ((h<<5)-h) + str.charCodeAt(i) | 0;
+  return h;
+}
+
+// Initial load
 loadMonthly();
+loadFiscal();
 </script>
 </body>
 </html>

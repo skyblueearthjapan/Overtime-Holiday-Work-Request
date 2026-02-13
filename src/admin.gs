@@ -130,19 +130,29 @@ function api_adminDailyDetail(dateYmd, deptFilter) {
 function api_adminMonthlySummary(yearMonth, deptFilter) {
   assertAdmin_();
 
-  // yearMonth: "yyyy-mm"
   const [yStr, mStr] = String(yearMonth).split('-');
   const y = Number(yStr), m = Number(mStr);
-  if (!y || !m || m<1 || m>12) throw new Error('yearMonthは yyyy-mm で指定してください');
+  if (!y || !m || m < 1 || m > 12) throw new Error('yearMonthは yyyy-mm で指定してください');
 
-  const from = new Date(y, m-1, 1, 0,0,0);
-  const to = new Date(y, m, 1, 0,0,0);
+  const from = new Date(y, m - 1, 1, 0, 0, 0);
+  const to = new Date(y, m, 1, 0, 0, 0);
 
   let recs = buildJoinedRecords_(from, to);
   if (deptFilter && deptFilter !== 'ALL') recs = recs.filter(r => r.dept === deptFilter);
 
+  // 月の進捗（日数）
+  const today = new Date();
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const todayInSameMonth = (today >= from && today < to);
+  const dayOfMonth = todayInSameMonth ? today.getDate() : daysInMonth; // 過去月は月末扱い
+
+  const LIMIT40 = 2400;
+  const LIMIT60 = 3600;
+
   // 個人集計
   const map = new Map(); // key=dept|name
+  const deptSum = new Map(); // dept -> totalNet
+
   for (const r of recs) {
     const key = `${r.dept}__${r.workerName}`;
     if (!map.has(key)) {
@@ -154,47 +164,103 @@ function api_adminMonthlySummary(yearMonth, deptFilter) {
         totalNet: 0,
         approvedTotal: 0,
         pdfMissing: 0,
+        // 予測
+        pacePerDay: 0,
+        projectedTotal: 0,
+        projectedOver40: false,
+        projectedOver60: false,
+        remain40: LIMIT40,
+        remain60: LIMIT60,
       });
     }
     const agg = map.get(key);
-    agg.approvedTotal += Number(r.approvedMinutes||0);
+
+    agg.approvedTotal += Number(r.approvedMinutes || 0);
     if (r.requestType === 'overtime') agg.overtimeNet += r.netMinutes;
     if (r.requestType === 'holiday') agg.holidayNet += r.netMinutes;
     agg.totalNet += r.netMinutes;
 
-    // PDF未作成（承認済み＆実績あり＆pdf空）
     if (r.status === 'approved' && r.netMinutes > 0 && !r.pdfFileId) agg.pdfMissing++;
+
+    deptSum.set(r.dept, (deptSum.get(r.dept) || 0) + r.netMinutes);
   }
 
   const people = Array.from(map.values());
+
+  // 予測計算（今月累計 / 経過日 × 月日数）
+  for (const p of people) {
+    const pace = p.totalNet / Math.max(1, dayOfMonth);
+    p.pacePerDay = pace;
+    p.projectedTotal = Math.round(pace * daysInMonth);
+    p.projectedOver40 = p.projectedTotal >= LIMIT40;
+    p.projectedOver60 = p.projectedTotal >= LIMIT60;
+    p.remain40 = Math.max(0, LIMIT40 - p.totalNet);
+    p.remain60 = Math.max(0, LIMIT60 - p.totalNet);
+  }
+
+  // 並び：実績降順
   people.sort((a,b)=> b.totalNet - a.totalNet);
 
-  // KPI
-  const LIMIT40 = 2400, LIMIT60 = 3600;
   const over40 = people.filter(p => p.totalNet >= LIMIT40).length;
   const over60 = people.filter(p => p.totalNet >= LIMIT60).length;
+  const projOver40 = people.filter(p => p.projectedOver40).length;
+  const projOver60 = people.filter(p => p.projectedOver60).length;
   const pdfMissingTotal = people.reduce((s,p)=>s+p.pdfMissing,0);
 
-  // グラフ用（棒グラフ）
-  const chart = {
-    labels: people.map(p => `${p.workerName}`),
+  // 注意対象：実績30h超 or 予測40h超
+  const watch = people
+    .filter(p => p.totalNet >= 1800 || p.projectedOver40)
+    .map(p => ({
+      dept: p.dept,
+      workerName: p.workerName,
+      totalNet: p.totalNet,
+      projectedTotal: p.projectedTotal,
+      remain40: p.remain40,
+      remain60: p.remain60,
+      projectedOver40: p.projectedOver40,
+      projectedOver60: p.projectedOver60,
+      pdfMissing: p.pdfMissing,
+    }));
+
+  // グラフ用（棒：個人）
+  const chartPeople = {
+    labels: people.map(p => p.workerName),
     values: people.map(p => p.totalNet), // 分
+    projected: people.map(p => p.projectedTotal), // 分
     limit40: LIMIT40,
     limit60: LIMIT60,
+  };
+
+  // グラフ用（円：部署）
+  const deptLabels = Array.from(deptSum.keys()).sort((a,b)=>a.localeCompare(b,'ja'));
+  const chartDept = {
+    labels: deptLabels,
+    values: deptLabels.map(d => deptSum.get(d) || 0),
   };
 
   return {
     yearMonth,
     deptFilter: deptFilter || 'ALL',
+    monthInfo: {
+      daysInMonth,
+      dayOfMonth,
+      isCurrentMonth: todayInSameMonth,
+    },
     kpi: {
       totalPeople: people.length,
       over40,
       over60,
+      projectedOver40: projOver40,
+      projectedOver60: projOver60,
       pdfMissingTotal,
       totalNetMinutes: people.reduce((s,p)=>s+p.totalNet,0),
     },
     people,
-    chart,
+    watch,
+    charts: {
+      people: chartPeople,
+      dept: chartDept,
+    }
   };
 }
 

@@ -426,9 +426,34 @@ const workerCode = answer.split(" ")[0];  // "A001"
 | `toDate_(v)` | 内部 | 値 → Date 変換（無効なら null） |
 | `buildJoinedRecords_(dateFrom, dateTo)` | 内部 | Requests × WorkLogs を join し期間内の行データを返す |
 | `api_adminDailyDetail(dateYmd, deptFilter)` | Web API | 指定日の申請一覧（承認/実績/PDF 状況） |
-| `api_adminMonthlySummary(yearMonth, deptFilter)` | Web API | 月次40h監視：個人別集計 + KPI + グラフ用データ |
+| `api_adminMonthlySummary(yearMonth, deptFilter)` | Web API | 月次40h監視：個人別集計 + KPI + 予測 + 注意対象 + グラフ（棒/円） |
 | `api_adminFiscalTrend(baseDateYmd, deptFilter)` | Web API | 年度月別推移（4月〜3月、折れ線用） |
 | `api_adminDeptOptions()` | Web API | 部署プルダウン用選択肢 |
+
+#### 総務部ダッシュボード UI 機能（admin.html — DX 完成版）
+
+| 機能 | 概要 |
+|------|------|
+| KPI カード（4 枚） | 実績 40h 超人数、60h 超人数、予測 40h 超人数、PDF 未作成件数 |
+| 棒グラフ（Canvas 自前描画） | 個人別：実績（濃色）+ 予測（薄色）、40h/60h ライン付き。超過は赤/黄で色分け |
+| 円グラフ | 部署別の実績配分（パーセント表示） |
+| 折れ線グラフ | 年度推移（4 月〜3 月、月別合計 netMinutes） |
+| 月次テーブル | 個人別：合算/残業/休日/40h 残/予測（月末）/PDF 未作成。列ヘッダクリックでソート |
+| 注意対象テーブル | 30h 超 or 予測 40h 超を自動抽出（DX 抽出） |
+| 日次テーブル | 承認時間/実績/休憩/net/PDF 状態。PDF 未作成は `.warn` で強調 |
+| フィルタ | 部署、氏名検索、40h 超のみ、60h 超のみ、予測 40h 超のみ、PDF 未作成のみ |
+| CSV エクスポート | 表示中のフィルタ結果をブラウザ側で CSV ダウンロード |
+
+#### 40h/60h 判定仕様
+
+| 項目 | 定義 |
+|------|------|
+| 実績 | `WorkLogs.netMinutes` 合算（残業 + 休日） |
+| 40h ライン | 2400 分 |
+| 60h ライン | 3600 分 |
+| 月末予測 | `今月累計実績 / 経過日 × 月日数`（ペース換算） |
+| 注意対象 | 実績 30h(1800 分)超 or 予測 40h 超 |
+| PDF 未作成 | `status=approved` かつ `netMinutes>0` かつ `pdfFileId` 空 |
 
 ### 11.7 Web アプリ / メニュー / トリガー
 
