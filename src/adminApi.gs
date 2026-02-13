@@ -427,13 +427,15 @@ function doGet(e) {
   // admin のみ権限チェック（エラー時はフレンドリーな画面を返す）
   if (safePage === 'admin') {
     const email = Session.getActiveUser().getEmail();
-    if (!isAdmin_(email)) {
+    const adminResult = isAdminWithDebug_(email);
+    if (!adminResult.ok) {
       const t = HtmlService.createTemplateFromFile('no_auth');
       t.APP_URL = appUrl;
       t.message = '総務部（管理者）権限がありません。\n'
         + 'ApproverMap シートに role=admin で登録されているか、\n'
         + 'Settings シートの ADMIN_EMAILS にメールアドレスが含まれているか確認してください。\n'
-        + '（現在のアカウント: ' + (email || '取得不可') + '）';
+        + '（現在のアカウント: ' + (email || '取得不可') + '）\n\n'
+        + '--- デバッグ情報 ---\n' + adminResult.debug;
       return t.evaluate()
         .setTitle('権限エラー')
         .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
