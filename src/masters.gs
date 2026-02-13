@@ -122,7 +122,7 @@ function api_getWorkerInfo() {
     code: H.indexOf('作業員コード'),
     name: H.indexOf('氏名'),
     dept: H.indexOf('部署'),
-    email: H.indexOf('Googleアカウント'),
+    email: H.findIndex(h => h.startsWith('Googleアカウント')),
     active: H.indexOf('在籍フラグ'),
   };
   if (idx.email < 0) return null;
