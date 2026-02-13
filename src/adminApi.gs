@@ -418,18 +418,30 @@ function api_adminDeptOptions() {
 
 function doGet(e) {
   const page = (e && e.parameter && e.parameter.page) ? e.parameter.page : 'top';
+  const appUrl = ScriptApp.getService().getUrl();
 
   // ページ名のホワイトリスト（ここ以外は top に落とす）
   const allowed = new Set(['top', 'approver', 'admin']);
   const safePage = allowed.has(page) ? page : 'top';
 
-  // admin のみ権限チェック
+  // admin のみ権限チェック（エラー時はフレンドリーな画面を返す）
   if (safePage === 'admin') {
-    assertAdmin_();
+    const email = Session.getActiveUser().getEmail();
+    if (!isAdmin_(email)) {
+      const t = HtmlService.createTemplateFromFile('no_auth');
+      t.APP_URL = appUrl;
+      t.message = '総務部（管理者）権限がありません。\n'
+        + 'ApproverMap シートに role=admin で登録されているか、\n'
+        + 'Settings シートの ADMIN_EMAILS にメールアドレスが含まれているか確認してください。\n'
+        + '（現在のアカウント: ' + (email || '取得不可') + '）';
+      return t.evaluate()
+        .setTitle('権限エラー')
+        .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+    }
   }
 
   const t = HtmlService.createTemplateFromFile(safePage);
-  t.APP_URL = ScriptApp.getService().getUrl(); // /exec の絶対 URL を全ページに配る
+  t.APP_URL = appUrl;
 
   return t.evaluate()
     .setTitle('残業・休日出勤申請')

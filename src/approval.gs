@@ -1,6 +1,16 @@
 // ====== 承認権限チェック（ApproverMap） ======
 
 function isAdmin_(email) {
+  if (!email) return false;
+
+  // 1. Settings の ADMIN_EMAILS もチェック（カンマ区切り複数可）
+  try {
+    const settings = getSettings_();
+    const adminEmails = String(settings['ADMIN_EMAILS'] || '').split(',').map(s => s.trim().toLowerCase());
+    if (adminEmails.indexOf(email.toLowerCase()) >= 0) return true;
+  } catch (e) { /* Settings未設定でもOK */ }
+
+  // 2. ApproverMap で role=admin チェック
   const sh = requireSheet_('ApproverMap');
   const values = sh.getDataRange().getValues();
   // ヘッダ想定：部署, 承認者メール, role(approver/admin), 有効フラグ

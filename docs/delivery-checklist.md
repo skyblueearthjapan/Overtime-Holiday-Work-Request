@@ -280,16 +280,16 @@
 
 ## 納品物チェック（提出物）
 
-- [ ] GAS ソース一式（.gs 13 ファイル ＋ .html 3 ファイル）
+- [ ] GAS ソース一式（.gs 13 ファイル ＋ .html 4 ファイル）
 - [ ] DB スプレッドシート（テンプレに従う全 16 シート）
 - [ ] PDF テンプレートシート（操作!B3 → 申請書フォームの構成）
-- [ ] 設定値一覧（Settings キー表：PDF_ROOT_FOLDER_ID, TEMPLATE_SSID, HR_MAIL_TO, APP_URL）
+- [ ] 設定値一覧（Settings キー表：PDF_ROOT_FOLDER_ID, TEMPLATE_SSID, HR_MAIL_TO, APP_URL, ADMIN_EMAILS）
 - [ ] トリガー設定手順（`setupAllTriggers_()` 実行手順）
 - [ ] 運用手順（総務宛先変更方法、承認者追加方法、部署追加方法）
 
 ---
 
-## GAS ソースファイル一覧（全 16 ファイル）
+## GAS ソースファイル一覧（全 17 ファイル）
 
 | ファイル | 役割 |
 |----------|------|
@@ -309,3 +309,4 @@
 | admin.html | 総務部DX画面（KPI/Canvas/テーブル/フィルタ） |
 | top.html | 作業者TOP画面（申請/一覧/完了ボタン） |
 | approver.html | 承認者画面（部署選択/承認/一括承認） |
+| no_auth.html | 権限エラー画面（フレンドリー表示） |

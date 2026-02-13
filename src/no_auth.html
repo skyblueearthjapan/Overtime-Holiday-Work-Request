@@ -1,0 +1,76 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <style>
+    :root{
+      --bg1:#eaf6ff;
+      --bg2:#f7fffb;
+      --accent:#1f9d55;
+      --accent2:#0ea5e9;
+      --text:#0b2545;
+      --muted:#5c6b7a;
+      --card:#ffffffcc;
+      --line:#d7e7f5;
+      --danger:#ff5a5f;
+    }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(1100px 600px at 18% 0%, var(--bg1), transparent),
+        radial-gradient(1100px 600px at 92% 20%, var(--bg2), transparent),
+        linear-gradient(180deg, #ffffff, #f3fbff);
+      min-height:100vh;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+    }
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:32px 36px;
+      box-shadow: 0 10px 30px rgba(10,40,80,.06);
+      max-width:480px;
+      text-align:center;
+    }
+    .icon{
+      font-size:48px;
+      margin-bottom:12px;
+    }
+    h2{
+      margin:0 0 8px;
+      font-weight:900;
+      letter-spacing:.04em;
+    }
+    .msg{
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.7;
+      margin-bottom:18px;
+    }
+    a.btn{
+      display:inline-block;
+      padding:10px 20px;
+      border-radius:12px;
+      background:linear-gradient(135deg, var(--accent2), #38bdf8);
+      color:#fff;
+      font-weight:800;
+      text-decoration:none;
+      box-shadow:0 10px 22px rgba(14,165,233,.20);
+    }
+    a.btn:hover{ opacity:.9; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">&#128274;</div>
+    <h2>アクセス権限がありません</h2>
+    <div class="msg"><?= message ?></div>
+    <a href="<?= APP_URL ?>?page=top" target="_top" class="btn">トップ画面へ戻る</a>
+  </div>
+</body>
+</html>
