@@ -516,7 +516,7 @@ src/
 ├── worklog.gs         # 開始/完了ボタン + 休憩控除 + net 算出
 ├── pdfExport.gs       # PDF 生成（テンプレSS複製→操作!B3→PDF→Drive保存）
 ├── mail.gs            # 夕方メール（17:10, 18:10）+ 朝メール（7:10, CSV/Excel添付）
-├── admin.gs           # 総務部ダッシュボード API（日次/月次40h/年度推移）+ doGet ルーティング
+├── adminApi.gs        # 総務部ダッシュボード API（日次/月次40h/年度推移）+ doGet ルーティング
 ├── admin.html         # 総務部画面 UI（KPI + Canvas チャート + 月次/日次テーブル）
 ├── top.html           # 作業者 TOP 画面（フォーム申請ボタン + 本日申請一覧 + 完了/開始ボタン）
 ├── approver.html      # 承認者画面（部署選択 + 本日申請テーブル + 承認/一括承認ボタン）
