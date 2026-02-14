@@ -9,10 +9,10 @@
  *   転記先は config.gs の SHEET 定数を参照。
  */
 const SYNC_MAP = [
-  { src: '部署マスタ',     dst: SHEET.DEPTS   },   // 部署マスタ → 部署マスタ
-  { src: '作業員マスタ',   dst: SHEET.WORKERS },   // 作業員マスタ → 作業員マスタ
-  { src: '業務NO.マスタ',  dst: SHEET.JOBS    },   // 業務NO.マスタ → 業務NOマスタ
-  { src: '工番マスタ',     dst: SHEET.ORDERS  },   // 工番マスタ → 工番マスタ
+  { src: '部署マスタ',     dst: SHEET.DEPTS   },
+  { src: '作業員マスタ',   dst: SHEET.WORKERS, maxRows: 81 },  // ヘッダ+80人
+  { src: '業務NO.マスタ',  dst: SHEET.JOBS    },
+  { src: '工番マスタ',     dst: SHEET.ORDERS  },
 ];
 
 /**
@@ -52,6 +52,14 @@ function syncAllMasters() {
 
         var data = readSheetData_(srcSh);
         if (!data || !data.length) { log.push('SKIP ' + m.src + ': 空'); continue; }
+
+        // 空行除外（1列目が空の行を除去、ヘッダは維持）
+        data = compactRows_(data);
+
+        // maxRows 制限（ヘッダ含む行数）
+        if (m.maxRows && data.length > m.maxRows) {
+          data = data.slice(0, m.maxRows);
+        }
 
         // 通常の置換を試行、失敗時はシート再作成で回避
         try {
@@ -155,6 +163,20 @@ function replaceMasterData_(sh, values) {
 
   // 値貼り付け
   sh.getRange(1, 1, rows, cols).setValues(values);
+}
+
+/**
+ * 空行を除外（1列目が空の行を除去、ヘッダ行は維持）。
+ */
+function compactRows_(values) {
+  var header = values[0];
+  var body = [];
+  for (var i = 1; i < values.length; i++) {
+    if (String(values[i][0] || '').trim() !== '') {
+      body.push(values[i]);
+    }
+  }
+  return [header].concat(body);
 }
 
 // ====== 診断用（切り分けテスト） ======
