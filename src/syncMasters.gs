@@ -50,15 +50,12 @@ function syncAllMasters() {
         const dstSh = dstSS.getSheetByName(m.dst);
         if (!dstSh) { log.push('SKIP ' + m.dst + ': 転記先シートなし'); continue; }
 
-        // getDataRange() は空行・空列まで含むことがあるため、
-        // getLastRow/getLastColumn で実データ範囲のみ読み取る
-        var lastRow = srcSh.getLastRow();
-        var lastCol = srcSh.getLastColumn();
-        if (lastRow === 0 || lastCol === 0) { log.push('SKIP ' + m.src + ': 空'); continue; }
-        var data = srcSh.getRange(1, 1, lastRow, lastCol).getValues();
+        var data = readSheetData_(srcSh);
+        if (!data || !data.length) { log.push('SKIP ' + m.src + ': 空'); continue; }
 
         replaceMasterData_(dstSh, data);
-        log.push('OK ' + m.src + ' -> ' + m.dst + ' (' + data.length + ' rows)');
+        SpreadsheetApp.flush();
+        log.push('OK ' + m.src + ' -> ' + m.dst + ' (' + data.length + ' rows, ' + data[0].length + ' cols)');
       } catch (e) {
         log.push('ERROR ' + m.src + ': ' + e.message);
       }
@@ -69,6 +66,50 @@ function syncAllMasters() {
     console.log(summary);
   } finally {
     lock.releaseLock();
+  }
+}
+
+/**
+ * シートデータを読み取る。
+ * Service error 対策：リトライ → バッチ読み取りフォールバック。
+ */
+function readSheetData_(sh) {
+  var lastRow = sh.getLastRow();
+  var lastCol = sh.getLastColumn();
+  if (lastRow === 0 || lastCol === 0) return null;
+
+  // 1st: 通常読み取り
+  try {
+    return sh.getRange(1, 1, lastRow, lastCol).getValues();
+  } catch (e) {
+    console.warn('readSheetData_ 1st try failed (rows=' + lastRow +
+      ', cols=' + lastCol + '): ' + e.message);
+  }
+
+  // 2nd: 2秒待ってリトライ
+  Utilities.sleep(2000);
+  try {
+    return sh.getRange(1, 1, lastRow, lastCol).getValues();
+  } catch (e) {
+    console.warn('readSheetData_ 2nd try failed: ' + e.message);
+  }
+
+  // 3rd: バッチ読み取り（50行ずつ）
+  Utilities.sleep(2000);
+  try {
+    var BATCH = 50;
+    var all = [];
+    for (var r = 1; r <= lastRow; r += BATCH) {
+      var n = Math.min(BATCH, lastRow - r + 1);
+      var batch = sh.getRange(r, 1, n, lastCol).getValues();
+      for (var i = 0; i < batch.length; i++) all.push(batch[i]);
+    }
+    return all;
+  } catch (e) {
+    throw new Error(
+      'Read failed after all retries (rows=' + lastRow +
+      ', cols=' + lastCol + '): ' + e.message
+    );
   }
 }
 
