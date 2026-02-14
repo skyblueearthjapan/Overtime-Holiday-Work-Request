@@ -9,6 +9,8 @@ function onOpen() {
     .addItem('夕方メール送信（手動）', 'sendEveningMail_')
     .addItem('朝メール送信（手動）', 'sendMorningMail_')
     .addSeparator()
+    .addItem('マスタ転記（手動実行）', 'syncAllMasters')
+    .addSeparator()
     .addItem('全トリガー初期セットアップ', 'setupAllTriggers_')
     .addToUi();
 }
@@ -73,9 +75,25 @@ function setupMailTriggers_() {
   }
 }
 
+// ====== トリガー作成（マスタ自動転記） ======
+
+function setupSyncTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  if (triggers.some(t => t.getHandlerFunction() === 'syncAllMasters')) return;
+
+  // 毎日 06:00 にマスタ同期（フォーム更新 06:30 より前に実行）
+  ScriptApp.newTrigger('syncAllMasters')
+    .timeBased()
+    .everyDays(1)
+    .atHour(6)
+    .nearMinute(0)
+    .create();
+}
+
 // ====== 全トリガー一括セットアップ ======
 
 function setupAllTriggers_() {
+  setupSyncTrigger_();    // マスタ転記（6:00）
   setupTriggers_();       // フォーム毎朝更新（6:30）
   setupMailTriggers_();   // 夕方2回（17:10, 18:10）＋朝（7:10）
   Logger.log('全トリガーをセットアップしました。');

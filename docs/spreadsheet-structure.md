@@ -45,7 +45,18 @@ UI 操作用シート（ボタン配置等）。システム利用者が直接�
 |----|-----|------|
 | ― | 各種設定キー | Web アプリ URL、PDF 出力先フォルダ ID、メール送信先など |
 
-> ※ GAS から `getSettings()` 等で読み取り、各機能の動作パラメータとして使用する想定。
+### 主な設定キー
+
+| Key | 必須 | 説明 | 例 |
+|-----|------|------|----|
+| `SOURCE_SSID` | マスタ転記時 | 元スプレッドシート（作業日報\_全従業員用）の ID | `1iu5Hoa...` |
+| `PDF_ROOT_FOLDER_ID` | PDF 出力時 | PDF 保存先 Google Drive フォルダ ID | `abc123...` |
+| `TEMPLATE_SSID` | PDF 出力時 | PDF テンプレートスプレッドシート ID | `xyz789...` |
+| `HR_MAIL_TO` | メール送信時 | 人事部門メールアドレス（カンマ区切り） | `hr@example.com` |
+| `APP_URL` | メール送信時 | Web アプリ URL | `https://script.google.com/...` |
+| `ADMIN_EMAILS` | 管理者判定 | 管理者メールアドレス（カンマ区切り） | `admin@example.com` |
+
+> ※ GAS から `getSettings_()` で読み取り、各機能の動作パラメータとして使用する。
 
 ---
 
