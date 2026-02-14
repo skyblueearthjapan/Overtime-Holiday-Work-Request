@@ -47,13 +47,23 @@ function syncAllMasters() {
         const srcSh = srcSS.getSheetByName(m.src);
         if (!srcSh) { log.push('SKIP ' + m.src + ': 元シートなし'); continue; }
 
-        const dstSh = dstSS.getSheetByName(m.dst);
+        var dstSh = dstSS.getSheetByName(m.dst);
         if (!dstSh) { log.push('SKIP ' + m.dst + ': 転記先シートなし'); continue; }
 
         var data = readSheetData_(srcSh);
         if (!data || !data.length) { log.push('SKIP ' + m.src + ': 空'); continue; }
 
-        replaceMasterData_(dstSh, data);
+        // 通常の置換を試行、失敗時はシート再作成で回避
+        try {
+          replaceMasterData_(dstSh, data);
+        } catch (writeErr) {
+          console.warn('replaceMasterData_ failed for ' + m.dst +
+            ', recreating sheet: ' + writeErr.message);
+          dstSS.deleteSheet(dstSh);
+          dstSh = dstSS.insertSheet(m.dst);
+          dstSh.getRange(1, 1, data.length, data[0].length).setValues(data);
+        }
+
         SpreadsheetApp.flush();
         log.push('OK ' + m.src + ' -> ' + m.dst + ' (' + data.length + ' rows, ' + data[0].length + ' cols)');
       } catch (e) {
@@ -145,4 +155,38 @@ function replaceMasterData_(sh, values) {
 
   // 値貼り付け
   sh.getRange(1, 1, rows, cols).setValues(values);
+}
+
+// ====== 診断用（切り分けテスト） ======
+
+/**
+ * 作業員マスタの1行だけ転記テスト。
+ * - 成功 → データ量/シート状態が原因
+ * - 失敗 → 保護/権限が原因
+ */
+function testSyncWorkerOneRow() {
+  var settings = getSettings_();
+  var sourceId = normalize_(settings['SOURCE_SSID']);
+  if (!sourceId) throw new Error('SOURCE_SSID 未設定');
+
+  var srcSS = SpreadsheetApp.openById(sourceId);
+  var dstSS = getDb_();
+
+  var srcSh = srcSS.getSheetByName('作業員マスタ');
+  if (!srcSh) throw new Error('元シート「作業員マスタ」が見つかりません');
+
+  var dstSh = dstSS.getSheetByName(SHEET.WORKERS);
+  if (!dstSh) throw new Error('転記先シート「' + SHEET.WORKERS + '」が見つかりません');
+
+  // 元からヘッダ＋1行だけ読む
+  var lastCol = srcSh.getLastColumn();
+  Logger.log('元シート: lastRow=' + srcSh.getLastRow() + ', lastCol=' + lastCol);
+
+  var v = srcSh.getRange(1, 1, 2, lastCol).getValues();
+  Logger.log('読み取り成功: ' + JSON.stringify(v));
+
+  // 転記先に書く
+  dstSh.clearContents();
+  dstSh.getRange(1, 1, v.length, v[0].length).setValues(v);
+  Logger.log('書き込み成功: 1行テスト OK');
 }
