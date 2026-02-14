@@ -12,7 +12,7 @@ const SYNC_MAP = [
   { src: '部署マスタ',     dst: SHEET.DEPTS   },   // 部署マスタ → 部署マスタ
   { src: '作業員マスタ',   dst: SHEET.WORKERS },   // 作業員マスタ → 作業員マスタ
   { src: '業務NO.マスタ',  dst: SHEET.JOBS    },   // 業務NO.マスタ → 業務NOマスタ
-  { src: '工番',           dst: SHEET.ORDERS  },   // 工番 → 工番マスタ
+  { src: '工番マスタ',     dst: SHEET.ORDERS  },   // 工番マスタ → 工番マスタ
 ];
 
 /**
@@ -50,8 +50,12 @@ function syncAllMasters() {
         const dstSh = dstSS.getSheetByName(m.dst);
         if (!dstSh) { log.push('SKIP ' + m.dst + ': 転記先シートなし'); continue; }
 
-        const data = srcSh.getDataRange().getValues();
-        if (!data.length) { log.push('SKIP ' + m.src + ': 空'); continue; }
+        // getDataRange() は空行・空列まで含むことがあるため、
+        // getLastRow/getLastColumn で実データ範囲のみ読み取る
+        var lastRow = srcSh.getLastRow();
+        var lastCol = srcSh.getLastColumn();
+        if (lastRow === 0 || lastCol === 0) { log.push('SKIP ' + m.src + ': 空'); continue; }
+        var data = srcSh.getRange(1, 1, lastRow, lastCol).getValues();
 
         replaceMasterData_(dstSh, data);
         log.push('OK ' + m.src + ' -> ' + m.dst + ' (' + data.length + ' rows)');
