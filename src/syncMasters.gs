@@ -88,12 +88,27 @@ function syncAllMasters() {
 }
 
 /**
+ * ヘッダ行の実データ末尾から最終列を検出する。
+ * ゴースト列（書式だけ残った空列）を無視し、再発を防止する。
+ */
+function detectLastColByHeader_(sh) {
+  var lastCol = sh.getLastColumn();
+  if (lastCol === 0) return 0;
+  var header = sh.getRange(1, 1, 1, lastCol).getValues()[0];
+  for (var c = header.length; c >= 1; c--) {
+    if (String(header[c - 1] || '').trim() !== '') return c;
+  }
+  return 1;
+}
+
+/**
  * シートデータを読み取る。
- * Service error 対策：リトライ → バッチ読み取りフォールバック。
+ * - ヘッダ基準で最終列を検出（ゴースト列対策）
+ * - Service error 対策：リトライ → バッチ読み取りフォールバック
  */
 function readSheetData_(sh) {
   var lastRow = sh.getLastRow();
-  var lastCol = sh.getLastColumn();
+  var lastCol = detectLastColByHeader_(sh);
   if (lastRow === 0 || lastCol === 0) return null;
 
   // 1st: 通常読み取り
