@@ -10,6 +10,7 @@ const SHEET = {
   WORKERS: '作業員マスタ',
   JOBS: '業務NOマスタ',
   ORDERS: '工番マスタ',
+  BATCH_LOGS: 'BatchLogs',
 };
 
 // フォーム内の質問タイトル（テンプレフォームにこの通り配置してください）

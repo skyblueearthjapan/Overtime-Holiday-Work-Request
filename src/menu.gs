@@ -8,12 +8,27 @@ function onOpen() {
     .addItem('全部署フォーム一括生成', 'buildAllDeptForms')
     .addSeparator()
     .addItem('夕方メール送信（手動）', 'sendEveningMail_')
-    .addItem('朝メール送信（手動）', 'sendMorningMail_')
+    .addItem('朝バッチ（PDF生成+朝メール）', 'morningBatch_')
+    .addItem('朝メールのみ（手動）', 'sendMorningMail_')
+    .addItem('PDF一括生成（本日分）', 'manualBatchPdfs_')
     .addSeparator()
     .addItem('マスタ転記（手動実行）', 'syncAllMasters')
     .addSeparator()
     .addItem('全トリガー初期セットアップ', 'setupAllTriggers_')
     .addToUi();
+}
+
+/** PDF一括生成（手動）— 本日分の承認済み＆PDF未生成を処理 */
+function manualBatchPdfs_() {
+  const result = batchGeneratePdfs_(new Date());
+  logBatchResult_('manualBatchPdfs', new Date(), result);
+  const msg = 'PDF一括生成 完了\n'
+    + '成功: ' + result.ok + ' 件\n'
+    + 'スキップ（作成済）: ' + result.skip + ' 件\n'
+    + '失敗: ' + result.fail + ' 件'
+    + (result.errors.length ? '\n\nエラー:\n' + result.errors.join('\n') : '');
+  Logger.log(msg);
+  SpreadsheetApp.getUi().alert(msg);
 }
 
 function debugCreateFirstDeptOvertime_() {
@@ -92,9 +107,9 @@ function setupMailTriggers_() {
     .nearMinute(10)
     .create();
 
-  // 朝 07:10（7時台）
-  if (!has('sendMorningMail_')) {
-    ScriptApp.newTrigger('sendMorningMail_')
+  // 朝 07:10（7時台）— PDF一括生成 + 朝メール
+  if (!has('morningBatch_')) {
+    ScriptApp.newTrigger('morningBatch_')
       .timeBased()
       .everyDays(1)
       .atHour(7)
@@ -123,6 +138,6 @@ function setupSyncTrigger_() {
 function setupAllTriggers_() {
   setupSyncTrigger_();    // マスタ転記（6:00）
   setupTriggers_();       // フォーム毎朝更新（6:30）
-  setupMailTriggers_();   // 夕方2回（17:10, 18:10）＋朝（7:10）
+  setupMailTriggers_();   // 夕方2回（17:10, 18:10）＋朝バッチ（7:10: PDF生成+メール）
   Logger.log('全トリガーをセットアップしました。');
 }

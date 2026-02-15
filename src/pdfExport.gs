@@ -1,3 +1,26 @@
+// ====== PDF_MAP：申請書フォーム テンプレートのセル位置マッピング ======
+// テンプレートSSの '申請書フォーム' シートに直接値を書き込む場合に使用
+const PDF_MAP = {
+  createdDate: 'G1',       // 作成日
+  dept: 'B4',              // 部署
+  name: 'D4',              // 氏名
+  typeLabelBig: 'F4',      // 残業/休日出勤
+  kubun: 'C6',             // 区分（残業/半日/1日）
+  targetDate: 'C7',        // 作業実施日
+  startAt: 'C10',          // 開始時刻
+  endAt: 'F10',            // 終了時刻
+  breakMin: 'C12',         // 休憩時間（分）
+  netMin: 'F12',           // 実残業/実働時間（分）
+  detail: [
+    { workNo: 'B18', customer: 'D18', product: 'F18' },
+    { workNo: 'B19', customer: 'D19', product: 'F19' },
+    { workNo: 'B20', customer: 'D20', product: 'F20' },
+  ],
+  workContent: 'A23',      // 業務内容
+  reason: 'A29',           // 理由
+  approverBox: 'F34',      // 承認者
+};
+
 // ====== Drive フォルダ作成（YYYY.MM.DD） ======
 
 function getOrCreateDateFolder_(rootFolderId, dateObj) {
@@ -112,4 +135,227 @@ function exportSheetToPdfBlob_(spreadsheetId, sheetId, filename) {
 
   const blob = res.getBlob().setName(filename);
   return blob;
+}
+
+// ====== Requestsの全列データ取得（PDF直接書込用） ======
+
+function getRequestFullData_(requestId) {
+  const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null;
+
+  const values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    if (normalize_(row[idx['requestId']]) === requestId) {
+      const data = { rowNo: i + 2 };
+      for (const [key, col] of Object.entries(idx)) {
+        data[key] = row[col];
+      }
+      return data;
+    }
+  }
+  return null;
+}
+
+// ====== PDF直接書込方式（XLOOKUP不要、PDF_MAPでセルに直接値を書く） ======
+
+function generatePdfDirect_(requestId) {
+  const req = getRequestFullData_(requestId);
+  if (!req) throw new Error('申請が見つかりません。');
+
+  const status = normalize_(req['status(submitted/approved/canceled)']);
+  if (status !== 'approved') throw new Error('未承認のためPDF生成できません。');
+
+  const existingPdfId = normalize_(req['pdfFileId']);
+  const existingPdfAt = req['pdfGeneratedAt'];
+  if (existingPdfAt && existingPdfId) {
+    return { already: true, pdfFileId: existingPdfId };
+  }
+
+  const settings = getSettings_();
+  const rootFolderId = normalize_(settings['PDF_ROOT_FOLDER_ID']);
+  const templateSsid = normalize_(settings['TEMPLATE_SSID']);
+  if (!rootFolderId) throw new Error('Settingsに PDF_ROOT_FOLDER_ID が未設定です。');
+  if (!templateSsid) throw new Error('Settingsに TEMPLATE_SSID が未設定です。');
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    // テンプレSSをコピー
+    const templateFile = DriveApp.getFileById(templateSsid);
+    const tmpName = 'TMP_' + requestId + '_' + fmtDate_(new Date(), 'yyyyMMdd_HHmmss');
+    const tmpFile = templateFile.makeCopy(tmpName);
+    const tmpSs = SpreadsheetApp.openById(tmpFile.getId());
+
+    // 申請書フォーム シートに直接書込み
+    const formSheet = tmpSs.getSheetByName('申請書フォーム');
+    if (!formSheet) throw new Error('テンプレに「申請書フォーム」シートがありません。');
+
+    fillPdfTemplate_(formSheet, req, requestId);
+    SpreadsheetApp.flush();
+
+    // 保存先フォルダ（targetDate基準で日付フォルダ）
+    const targetDateVal = req['targetDate'];
+    const targetDate = targetDateVal instanceof Date ? targetDateVal : new Date(targetDateVal);
+    const dateFolder = getOrCreateDateFolder_(rootFolderId, targetDate);
+
+    // ファイル名
+    const requestType = normalize_(req['requestType(overtime/holiday)']);
+    const dept = normalize_(req['dept']);
+    const workerName = normalize_(req['workerName']);
+    const ymd = fmtDate_(targetDate, 'yyyyMMdd');
+    const typeLabel = requestType === 'overtime' ? '残業' : '休日出勤';
+    const safeDept = dept.replace(/[\\\/\:\*\?\"\<\>\|]/g, '_');
+    const safeName = workerName.replace(/[\\\/\:\*\?\"\<\>\|]/g, '_');
+    const pdfName = ymd + '_' + safeDept + '_' + safeName + '_' + typeLabel + '.pdf';
+
+    // PDFエクスポート（対象シートのみ）
+    const pdfBlob = exportSheetToPdfBlob_(tmpSs.getId(), formSheet.getSheetId(), pdfName);
+
+    // Drive保存
+    const pdfFile = dateFolder.createFile(pdfBlob).setName(pdfName);
+
+    // Requestsに記録
+    const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    const now = new Date();
+    if (idx['pdfGeneratedAt'] !== undefined) sh.getRange(req.rowNo, idx['pdfGeneratedAt'] + 1).setValue(now);
+    if (idx['pdfFileId'] !== undefined) sh.getRange(req.rowNo, idx['pdfFileId'] + 1).setValue(pdfFile.getId());
+    if (idx['pdfFolderId'] !== undefined) sh.getRange(req.rowNo, idx['pdfFolderId'] + 1).setValue(dateFolder.getId());
+
+    // 一時コピー削除
+    tmpFile.setTrashed(true);
+
+    return { ok: true, pdfFileId: pdfFile.getId(), pdfName: pdfName, folderId: dateFolder.getId() };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ====== 申請書フォームへのセル直接書込 ======
+
+function fillPdfTemplate_(sheet, reqData, requestId) {
+  const now = new Date();
+  const requestType = normalize_(reqData['requestType(overtime/holiday)']);
+  const targetDateVal = reqData['targetDate'];
+  const targetDate = targetDateVal instanceof Date ? targetDateVal : new Date(targetDateVal);
+  const typeLabel = requestType === 'overtime' ? '残業' : '休日出勤';
+
+  // WorkLogs データ取得
+  const wlMap = buildWorkLogsMapByRequestId_();
+  const wl = wlMap.get(requestId) || {};
+
+  // 基本情報
+  sheet.getRange(PDF_MAP.createdDate).setValue(fmtDate_(now, 'yyyy/MM/dd'));
+  sheet.getRange(PDF_MAP.dept).setValue(normalize_(reqData['dept']));
+  sheet.getRange(PDF_MAP.name).setValue(normalize_(reqData['workerName']));
+  sheet.getRange(PDF_MAP.typeLabelBig).setValue(typeLabel);
+
+  // 区分
+  if (requestType === 'overtime') {
+    sheet.getRange(PDF_MAP.kubun).setValue('残業');
+  } else {
+    const mins = Number(reqData['approvedMinutes'] || 0);
+    sheet.getRange(PDF_MAP.kubun).setValue(mins <= 240 ? '半日' : '1日');
+  }
+
+  // 日付
+  sheet.getRange(PDF_MAP.targetDate).setValue(fmtDate_(targetDate, 'yyyy/MM/dd'));
+
+  // 実績時刻
+  if (wl.actualStartAt instanceof Date) {
+    sheet.getRange(PDF_MAP.startAt).setValue(fmtDate_(wl.actualStartAt, 'HH:mm'));
+  }
+  if (wl.actualEndAt instanceof Date) {
+    sheet.getRange(PDF_MAP.endAt).setValue(fmtDate_(wl.actualEndAt, 'HH:mm'));
+  }
+
+  // 休憩・実残業
+  sheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
+  sheet.getRange(PDF_MAP.netMin).setValue(Number(wl.netMinutes || 0));
+
+  // 明細行（最大3行）
+  for (let i = 0; i < PDF_MAP.detail.length; i++) {
+    const d = PDF_MAP.detail[i];
+    const suffix = String(i + 1);
+    const workNo = normalize_(reqData['workNo' + suffix] || reqData['orderNo' + suffix]);
+    const customer = normalize_(reqData['customer' + suffix]);
+    const product = normalize_(reqData['product' + suffix]);
+    if (workNo) sheet.getRange(d.workNo).setValue(workNo);
+    if (customer) sheet.getRange(d.customer).setValue(customer);
+    if (product) sheet.getRange(d.product).setValue(product);
+  }
+
+  // 業務内容
+  const workContent = normalize_(reqData['workContent']);
+  if (workContent) sheet.getRange(PDF_MAP.workContent).setValue(workContent);
+
+  // 理由
+  const reason = normalize_(reqData['reason']);
+  if (reason) sheet.getRange(PDF_MAP.reason).setValue(reason);
+
+  // 承認者
+  const approvedBy = normalize_(reqData['approvedBy']);
+  if (approvedBy) sheet.getRange(PDF_MAP.approverBox).setValue(approvedBy);
+}
+
+// ====== PDF一括生成（本日の承認済み＆PDF未生成を処理） ======
+
+function batchGeneratePdfs_(dateObj) {
+  const target = dateObj || new Date();
+  const items = listApprovedRequestsByDate_(target);
+  const results = { ok: 0, skip: 0, fail: 0, errors: [] };
+
+  // Settings で直接書込方式かXLOOKUP方式か判定
+  const settings = getSettings_();
+  const useDirect = normalize_(settings['PDF_MODE']) === 'direct';
+
+  for (const it of items) {
+    if (it.pdfFileId) {
+      results.skip++;
+      continue;
+    }
+    try {
+      if (useDirect) {
+        generatePdfDirect_(it.requestId);
+      } else {
+        generatePdfForRequest_(it.requestId);
+      }
+      results.ok++;
+    } catch (e) {
+      results.fail++;
+      results.errors.push(it.requestId + ' (' + it.dept + '/' + it.workerName + '): ' + e.message);
+    }
+    // API負荷軽減
+    if (items.length > 5) Utilities.sleep(500);
+  }
+
+  return results;
+}
+
+// ====== BatchLogs 記録 ======
+
+function logBatchResult_(batchName, dateObj, result) {
+  const ss = getDb_();
+  let sh = ss.getSheetByName(SHEET.BATCH_LOGS);
+  if (!sh) {
+    sh = ss.insertSheet(SHEET.BATCH_LOGS);
+    sh.appendRow(['実行日時', 'バッチ名', '対象日', '成功', 'スキップ', '失敗', 'エラー詳細']);
+  }
+
+  const now = new Date();
+  const targetYmd = fmtDate_(dateObj, 'yyyy-MM-dd');
+  const errText = (result.errors && result.errors.length > 0)
+    ? result.errors.join('\n')
+    : '';
+
+  sh.appendRow([
+    now,
+    batchName,
+    targetYmd,
+    result.ok || 0,
+    result.skip || 0,
+    result.fail || 0,
+    errText,
+  ]);
 }

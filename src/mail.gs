@@ -307,3 +307,22 @@ function sendMorningMail_() {
     attachments: [csvBlob, xlsxBlob],
   });
 }
+
+// ====================================================================
+// 朝バッチ（PDF一括生成 → 朝メール送信）
+// トリガーからはこの関数を呼ぶ（sendMorningMail_の代わり）
+// ====================================================================
+
+function morningBatch_() {
+  const today = new Date();
+
+  // 1) 承認済み＆PDF未生成の申請をまとめてPDF化
+  const pdfResult = batchGeneratePdfs_(today);
+  Logger.log('morningBatch_ PDF: ok=' + pdfResult.ok + ' skip=' + pdfResult.skip + ' fail=' + pdfResult.fail);
+
+  // 2) BatchLogsに記録
+  logBatchResult_('morningBatch', today, pdfResult);
+
+  // 3) 朝メール送信（CSV/XLSX添付）
+  sendMorningMail_();
+}
