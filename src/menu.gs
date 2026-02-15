@@ -5,6 +5,7 @@ function onOpen() {
     .createMenu('残業休日アプリ')
     .addItem('フォームを全更新（マスタ反映）', 'nightlyUpdateAllForms_')
     .addItem('フォーム生成テスト（残業×先頭部署）', 'debugCreateFirstDeptOvertime_')
+    .addItem('全部署フォーム一括生成', 'buildAllDeptForms')
     .addSeparator()
     .addItem('夕方メール送信（手動）', 'sendEveningMail_')
     .addItem('朝メール送信（手動）', 'sendMorningMail_')
@@ -21,6 +22,33 @@ function debugCreateFirstDeptOvertime_() {
   const dept = depts[0];
   const res = getOrCreateDeptForm_('overtime', dept);
   Logger.log(JSON.stringify(res, null, 2));
+}
+
+/**
+ * 全部署×残業/休日 フォームを一括生成（初期展開用）。
+ * FormMap に既にある部署はスキップされる。
+ */
+function buildAllDeptForms() {
+  const depts = loadDeptList_();
+  if (!depts.length) throw new Error('部署マスタが空です。');
+
+  const log = [];
+  for (const dept of depts) {
+    for (const type of ['overtime', 'holiday']) {
+      try {
+        const res = getOrCreateDeptForm_(type, dept);
+        const label = res.created ? 'CREATED' : 'EXISTS';
+        log.push(label + ' ' + type + ' / ' + dept + ' -> ' + res.formUrl);
+      } catch (e) {
+        log.push('ERROR ' + type + ' / ' + dept + ': ' + e.message);
+      }
+      Utilities.sleep(500); // API負荷軽減
+    }
+  }
+
+  const summary = 'buildAllDeptForms:\n' + log.join('\n');
+  Logger.log(summary);
+  console.log(summary);
 }
 
 // ====== トリガー作成（フォーム毎朝更新） ======

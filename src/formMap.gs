@@ -43,11 +43,29 @@ function upsertFormMap_(type, dept, formId, formUrl) {
 }
 
 // ====== テンプレフォームID取得 ======
+// Settings → FormTemplates シートの順で探す
 
 function getTemplateFormId_(type) {
-  const sh = requireSheet_(SHEET.FORM_TEMPLATES);
+  // 1) Settings から取得（OVERTIME_TEMPLATE_FORM_ID / HOLIDAY_TEMPLATE_FORM_ID）
+  const settingsKey = (type === 'overtime')
+    ? 'OVERTIME_TEMPLATE_FORM_ID'
+    : 'HOLIDAY_TEMPLATE_FORM_ID';
+  try {
+    const settings = getSettings_();
+    const id = normalize_(settings[settingsKey]);
+    if (id) return id;
+  } catch (_) { /* Settings取得失敗は無視して次へ */ }
+
+  // 2) FormTemplates シートから取得（従来方式）
+  const ss = getDb_();
+  const sh = ss.getSheetByName(SHEET.FORM_TEMPLATES);
+  if (!sh) {
+    throw new Error(
+      'テンプレフォームIDが見つかりません。\n' +
+      `Settings に ${settingsKey} を設定するか、FormTemplates シートを用意してください。`
+    );
+  }
   const values = sh.getDataRange().getValues();
-  // ヘッダ想定：type, templateFormId, note
   const H = values[0].map(h => normalize_(h));
   const idxType = H.indexOf('type');
   const idxId = H.indexOf('templateFormId');
@@ -63,13 +81,25 @@ function getTemplateFormId_(type) {
   throw new Error(`FormTemplatesにtypeがありません: ${type}`);
 }
 
-// ====== フォームURL取得（TOP画面用） ======
+// ====== フォームURL取得（TOP画面用：未作成なら自動生成） ======
 
 function api_getFormUrl(type, dept) {
+  // 既存を探す
   const found = findFormMapRow_(type, dept);
-  if (!found) return null;
-  const isActive = found.isActive;
-  if (isActive === false || String(isActive).toLowerCase() === 'false') return null;
-  const url = found.idx.formUrl >= 0 ? normalize_(found.row[found.idx.formUrl]) : '';
-  return url || null;
+  if (found) {
+    const isActive = found.isActive;
+    if (isActive !== false && String(isActive).toLowerCase() !== 'false') {
+      const url = found.idx.formUrl >= 0 ? normalize_(found.row[found.idx.formUrl]) : '';
+      if (url) return url;
+    }
+  }
+
+  // 未作成 → 自動生成を試みる
+  try {
+    const result = getOrCreateDeptForm_(type, dept);
+    return result.formUrl || null;
+  } catch (e) {
+    console.warn('api_getFormUrl: auto-create failed for ' + type + '/' + dept + ': ' + e.message);
+    return null;
+  }
 }

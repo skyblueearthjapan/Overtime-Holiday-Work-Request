@@ -420,6 +420,11 @@ function doGet(e) {
   const page = (e && e.parameter && e.parameter.page) ? e.parameter.page : 'top';
   const appUrl = ScriptApp.getService().getUrl();
 
+  // redirect: ユーザー部署を自動判定し、該当フォームへ遷移
+  if (page === 'redirect') {
+    return handleFormRedirect_(e);
+  }
+
   // ページ名のホワイトリスト（ここ以外は top に落とす）
   const allowed = new Set(['top', 'approver', 'admin']);
   const safePage = allowed.has(page) ? page : 'top';
@@ -453,4 +458,51 @@ function doGet(e) {
 /** HTML include 用（共通パーツ読込用） */
 function include_(name) {
   return HtmlService.createHtmlOutputFromFile(name).getContent();
+}
+
+// ====================================================================
+// redirect: ユーザー部署判定 → 該当フォームへ自動遷移
+// 使い方: ?page=redirect&type=overtime  or  ?page=redirect&type=holiday
+// ====================================================================
+
+function handleFormRedirect_(e) {
+  const type = normalize_((e.parameter || {}).type).toLowerCase();
+  if (type !== 'overtime' && type !== 'holiday') {
+    return HtmlService.createHtmlOutput(
+      '<p>エラー: type パラメータが不正です（overtime / holiday）</p>'
+    ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
+  // ユーザー部署判定（api_getWorkerInfo と同じロジック）
+  const worker = api_getWorkerInfo();
+  if (!worker || !worker.dept) {
+    const email = Session.getActiveUser().getEmail() || '(取得不可)';
+    return HtmlService.createHtmlOutput(
+      '<h3>作業員マスタに未登録です</h3>' +
+      '<p>管理者に連絡し、作業員マスタの「Googleアカウント」列に<br>' +
+      'あなたのメールアドレスを登録してもらってください。</p>' +
+      '<p style="color:#888">アカウント: ' + email + '</p>' +
+      '<p><a href="' + ScriptApp.getService().getUrl() + '">トップへ戻る</a></p>'
+    ).setTitle('未登録エラー')
+     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
+  // フォームURL取得（未作成なら自動生成）
+  const formUrl = api_getFormUrl(type, worker.dept);
+  if (!formUrl) {
+    const label = (type === 'overtime') ? '残業' : '休日出勤';
+    return HtmlService.createHtmlOutput(
+      '<h3>' + label + '申請フォームを準備できませんでした</h3>' +
+      '<p>テンプレフォームIDが Settings に設定されていない可能性があります。<br>' +
+      '管理者に連絡してください。</p>' +
+      '<p><a href="' + ScriptApp.getService().getUrl() + '">トップへ戻る</a></p>'
+    ).setTitle('フォーム未設定')
+     .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
+
+  // フォームへリダイレクト
+  return HtmlService.createHtmlOutput(
+    '<script>window.top.location.href="' + formUrl + '";</script>' +
+    '<p>フォームへ遷移中... <a href="' + formUrl + '">こちらをクリック</a></p>'
+  ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
 }

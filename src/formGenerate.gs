@@ -19,7 +19,19 @@ function getOrCreateDeptForm_(type, dept) {
       ? `【残業申請】${dept}`
       : `【休日申請】${dept}`;
 
-    const copyFile = templateFile.makeCopy(formTitle);
+    // フォルダ指定があればそこへ複製
+    let copyFile;
+    try {
+      const settings = getSettings_();
+      const folderId = normalize_(settings['FORMS_PARENT_FOLDER_ID']);
+      if (folderId) {
+        copyFile = templateFile.makeCopy(formTitle, DriveApp.getFolderById(folderId));
+      } else {
+        copyFile = templateFile.makeCopy(formTitle);
+      }
+    } catch (_) {
+      copyFile = templateFile.makeCopy(formTitle);
+    }
     const newFormId = copyFile.getId();
     const form = FormApp.openById(newFormId);
 

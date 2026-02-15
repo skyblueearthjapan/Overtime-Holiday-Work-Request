@@ -245,12 +245,36 @@ function loadFormUrl(type, dept){
 
 function openForm(type){
   var url = FORM_URLS[type];
-  if(!url){
-    var label = (type === 'overtime') ? '残業' : '休日出勤';
-    alert(label + '申請フォームが未作成です。管理者に連絡してください。');
+  if(url){
+    window.open(url, '_blank');
     return;
   }
-  window.open(url, '_blank');
+  // URL未取得 → サーバーで自動生成を試みる
+  if(!WORKER || !WORKER.dept){
+    alert('作業員マスタに未登録のため、フォームを開けません。管理者に連絡してください。');
+    return;
+  }
+  var label = (type === 'overtime') ? '残業' : '休日出勤';
+  var cards = document.getElementById('formCards');
+  cards.style.opacity = '0.5';
+  cards.style.pointerEvents = 'none';
+  google.script.run
+    .withSuccessHandler(function(newUrl){
+      cards.style.opacity = '1';
+      cards.style.pointerEvents = '';
+      if(newUrl){
+        FORM_URLS[type] = newUrl;
+        window.open(newUrl, '_blank');
+      } else {
+        alert(label + '申請フォームを作成できませんでした。管理者に連絡してください。');
+      }
+    })
+    .withFailureHandler(function(err){
+      cards.style.opacity = '1';
+      cards.style.pointerEvents = '';
+      alert(label + 'フォーム取得エラー: ' + (err.message || err));
+    })
+    .api_getFormUrl(type, WORKER.dept);
 }
 
 // ====== 本日の申請 更新 ======
