@@ -153,9 +153,13 @@
 
   <div class="wrap">
 
-    <!-- Worker info -->
-    <div style="margin-bottom:12px">
-      <span class="worker-badge" id="workerBadge">読込中...</span>
+    <!-- 部署選択 + 作業者情報 -->
+    <div style="margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <label style="font-weight:700; font-size:14px;">部署：</label>
+      <select id="deptSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:180px;">
+        <option value="">読込中...</option>
+      </select>
+      <span class="worker-badge" id="workerBadge" style="display:none"></span>
     </div>
 
     <!-- Action cards -->
@@ -200,6 +204,7 @@
 <script>
 var WORKER = null;
 var FORM_URLS = {};
+var SELECTED_DEPT = '';
 
 function fmtMin(min){
   min = Math.max(0, Math.round(Number(min||0)));
@@ -209,29 +214,70 @@ function fmtMin(min){
   return h+'時間'+r+'分';
 }
 
-// ====== 初期ロード ======
+// ====== 初期ロード：部署一覧 + 作業者情報（あれば） ======
+// 1) 部署一覧を読み込む
+google.script.run
+  .withSuccessHandler(function(depts){
+    var sel = document.getElementById('deptSelect');
+    sel.innerHTML = '<option value="">-- 部署を選択 --</option>';
+    (depts || []).forEach(function(d){
+      var opt = document.createElement('option');
+      opt.value = d;
+      opt.textContent = d;
+      sel.appendChild(opt);
+    });
+    // 作業者情報があれば自動選択
+    if(WORKER && WORKER.dept){
+      sel.value = WORKER.dept;
+      onDeptChange();
+    }
+  })
+  .withFailureHandler(function(){})
+  .api_getDeptList();
+
+// 2) 作業者情報を取得（あれば表示、なくてもOK）
 google.script.run
   .withSuccessHandler(function(res){
     WORKER = res.workerInfo;
     if(WORKER){
-      document.getElementById('workerBadge').innerText =
-        WORKER.dept + ' / ' + WORKER.workerName + '（' + WORKER.workerCode + '）';
+      var badge = document.getElementById('workerBadge');
+      badge.style.display = '';
+      badge.innerText = WORKER.workerName + '（' + WORKER.workerCode + '）';
       document.getElementById('workerSub').innerText =
-        WORKER.dept + ' - ' + WORKER.email;
-      // フォームURL読込
-      loadFormUrl('overtime', WORKER.dept);
-      loadFormUrl('holiday', WORKER.dept);
+        WORKER.dept + ' - ' + WORKER.workerName;
+      // 部署セレクタを自動選択
+      var sel = document.getElementById('deptSelect');
+      if(sel.querySelector('option[value="' + WORKER.dept + '"]')){
+        sel.value = WORKER.dept;
+      }
+      onDeptChange();
     } else {
-      document.getElementById('workerBadge').innerText = '作業員マスタに未登録';
       document.getElementById('workerSub').innerText =
-        '作業員マスタにGoogleアカウントが登録されていません';
+        '部署を選択して申請してください';
     }
     renderToday(res);
   })
   .withFailureHandler(function(err){
-    alert(err.message || err);
+    document.getElementById('workerSub').innerText =
+      '部署を選択して申請してください';
+    document.querySelector('#tblToday tbody').innerHTML =
+      '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">' +
+      '本日の申請はありません</td></tr>';
   })
   .api_getTodayRequestsForWorker();
+
+// ====== 部署変更時 ======
+document.getElementById('deptSelect').addEventListener('change', onDeptChange);
+
+function onDeptChange(){
+  var dept = document.getElementById('deptSelect').value;
+  SELECTED_DEPT = dept;
+  FORM_URLS = {}; // リセット
+  if(dept){
+    loadFormUrl('overtime', dept);
+    loadFormUrl('holiday', dept);
+  }
+}
 
 // ====== フォームURL取得 ======
 function loadFormUrl(type, dept){
@@ -244,16 +290,19 @@ function loadFormUrl(type, dept){
 }
 
 function openForm(type){
+  var dept = SELECTED_DEPT || document.getElementById('deptSelect').value;
+  if(!dept){
+    alert('部署を選択してください。');
+    return;
+  }
+
   var url = FORM_URLS[type];
   if(url){
     window.open(url, '_blank');
     return;
   }
+
   // URL未取得 → サーバーで自動生成を試みる
-  if(!WORKER || !WORKER.dept){
-    alert('作業員マスタに未登録のため、フォームを開けません。管理者に連絡してください。');
-    return;
-  }
   var label = (type === 'overtime') ? '残業' : '休日出勤';
   var cards = document.getElementById('formCards');
   cards.style.opacity = '0.5';
@@ -274,7 +323,7 @@ function openForm(type){
       cards.style.pointerEvents = '';
       alert(label + 'フォーム取得エラー: ' + (err.message || err));
     })
-    .api_getFormUrl(type, WORKER.dept);
+    .api_getFormUrl(type, dept);
 }
 
 // ====== 本日の申請 更新 ======

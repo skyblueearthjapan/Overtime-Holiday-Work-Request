@@ -13,13 +13,15 @@ function isAdminWithDebug_(email) {
   if (!email) return { ok: false, debug: 'email が空です' };
   log.push('チェック対象: ' + email);
 
-  // 1. Settings の ADMIN_EMAILS もチェック（カンマ区切り複数可）
+  // 1. Settings の ADMIN_EMAILS / GENERAL_AFFAIRS_EMAILS をチェック（カンマ区切り複数可）
   try {
     const settings = getSettings_();
     const raw = settings['ADMIN_EMAILS'];
+    const gaRaw = settings['GENERAL_AFFAIRS_EMAILS'];
     log.push('Settings ADMIN_EMAILS 生値: [' + String(raw) + ']');
-    log.push('Settings 全キー: ' + Object.keys(settings).map(k => '"' + k + '"').join(', '));
-    const adminEmails = String(raw || '').split(',').map(s => s.trim().toLowerCase());
+    log.push('Settings GENERAL_AFFAIRS_EMAILS 生値: [' + String(gaRaw) + ']');
+    const combined = String(raw || '') + ',' + String(gaRaw || '');
+    const adminEmails = combined.split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
     log.push('パース後: ' + JSON.stringify(adminEmails));
     if (adminEmails.indexOf(email.toLowerCase()) >= 0) {
       return { ok: true, debug: log.join('\n') };
@@ -64,23 +66,12 @@ function isAdminWithDebug_(email) {
 
 function canApproveDept_(email, dept) {
   if (isAdmin_(email)) return true;
-  const sh = requireSheet_('ApproverMap');
-  const values = sh.getDataRange().getValues();
-  const H = values[0].map(h => normalize_(h));
-  const idx = {
-    dept: H.indexOf('部署'),
-    mail: H.indexOf('承認者メール'),
-    role: H.indexOf('role(approver/admin)'),
-    enabled: H.indexOf('有効フラグ'),
-  };
-  for (let r=1; r<values.length; r++) {
-    const row = values[r];
-    const d = normalize_(row[idx.dept]);
-    const mail = normalize_(row[idx.mail]);
-    const enabled = idx.enabled >= 0 ? row[idx.enabled] : true;
-    if (enabled === false || String(enabled).toLowerCase()==='false') continue;
-    if (mail === email && d === dept) return true;
-  }
+
+  // DeptApprovers / ApproverMap 両対応（getDeptApproverMap_ は deptAuth.gs）
+  const map = getDeptApproverMap_();
+  const set = map[dept];
+  if (set && set.has(email.toLowerCase())) return true;
+
   return false;
 }
 
@@ -169,36 +160,24 @@ function api_approveRequest(requestId) {
 
 function api_getApproverDepts() {
   const email = Session.getActiveUser().getEmail();
-  const sh = requireSheet_('ApproverMap');
-  const values = sh.getDataRange().getValues();
-  const H = values[0].map(h => normalize_(h));
-  const idx = {
-    dept: H.indexOf('部署'),
-    mail: H.indexOf('承認者メール'),
-    role: H.indexOf('role(approver/admin)'),
-    enabled: H.indexOf('有効フラグ'),
-  };
+  if (!email) throw new Error('メールアドレスが取得できません。');
 
-  const depts = [];
-  let isAdminRole = false;
-
-  for (let r = 1; r < values.length; r++) {
-    const row = values[r];
-    const mail = normalize_(row[idx.mail]);
-    const enabled = idx.enabled >= 0 ? row[idx.enabled] : true;
-    if (enabled === false || String(enabled).toLowerCase() === 'false') continue;
-    if (mail !== email) continue;
-
-    const role = normalize_(row[idx.role]);
-    if (role === 'admin') isAdminRole = true;
-
-    const dept = normalize_(row[idx.dept]);
-    if (dept && !depts.includes(dept)) depts.push(dept);
-  }
-
-  if (isAdminRole) {
+  // admin なら全部署
+  if (isAdmin_(email)) {
     return { isAdmin: true, depts: loadDeptList_() };
   }
 
-  return { isAdmin: isAdminRole, depts };
+  // DeptApprovers / ApproverMap 両対応
+  const map = getDeptApproverMap_();
+  const emailLc = email.toLowerCase();
+  const depts = [];
+  for (const dept of Object.keys(map)) {
+    if (map[dept].has(emailLc)) depts.push(dept);
+  }
+
+  if (depts.length === 0) {
+    throw new Error('承認者権限がありません。DeptApprovers または ApproverMap に登録してください。');
+  }
+
+  return { isAdmin: false, depts };
 }

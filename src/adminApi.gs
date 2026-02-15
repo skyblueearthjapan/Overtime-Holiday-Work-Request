@@ -461,8 +461,9 @@ function include_(name) {
 }
 
 // ====================================================================
-// redirect: ユーザー部署判定 → 該当フォームへ自動遷移
-// 使い方: ?page=redirect&type=overtime  or  ?page=redirect&type=holiday
+// redirect: 部署フォームへ自動遷移
+// 使い方: ?page=redirect&type=overtime&dept=機械設計
+// dept 省略時は作業員マスタのGoogleアカウントで判定（従来互換）
 // ====================================================================
 
 function handleFormRedirect_(e) {
@@ -473,22 +474,28 @@ function handleFormRedirect_(e) {
     ).setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
-  // ユーザー部署判定（api_getWorkerInfo と同じロジック）
-  const worker = api_getWorkerInfo();
-  if (!worker || !worker.dept) {
-    const email = Session.getActiveUser().getEmail() || '(取得不可)';
+  // dept パラメータがあればそのまま使う（TOPの部署選択から来る）
+  let dept = normalize_((e.parameter || {}).dept);
+
+  // dept 省略時のみ、従来の作業員マスタ照合を試みる
+  if (!dept) {
+    try {
+      const worker = api_getWorkerInfo();
+      if (worker && worker.dept) dept = worker.dept;
+    } catch (_) {}
+  }
+
+  if (!dept) {
     return HtmlService.createHtmlOutput(
-      '<h3>作業員マスタに未登録です</h3>' +
-      '<p>管理者に連絡し、作業員マスタの「Googleアカウント」列に<br>' +
-      'あなたのメールアドレスを登録してもらってください。</p>' +
-      '<p style="color:#888">アカウント: ' + email + '</p>' +
+      '<h3>部署が指定されていません</h3>' +
+      '<p>トップ画面から部署を選択して申請してください。</p>' +
       '<p><a href="' + ScriptApp.getService().getUrl() + '">トップへ戻る</a></p>'
-    ).setTitle('未登録エラー')
+    ).setTitle('部署未指定')
      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
 
   // フォームURL取得（未作成なら自動生成）
-  const formUrl = api_getFormUrl(type, worker.dept);
+  const formUrl = api_getFormUrl(type, dept);
   if (!formUrl) {
     const label = (type === 'overtime') ? '残業' : '休日出勤';
     return HtmlService.createHtmlOutput(
