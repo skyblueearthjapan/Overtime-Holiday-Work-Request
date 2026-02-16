@@ -55,8 +55,6 @@ function getOrCreateDeptForm_(type, dept) {
     // 先に公開してからでないと各種操作がエラーになる
     try { form.setPublished(true); } catch (_) { /* 旧環境では不要 */ }
 
-    form.setAcceptingResponses(true);
-
     // タイトル・説明
     form.setTitle(formTitle);
     form.setDescription([
@@ -75,6 +73,9 @@ function getOrCreateDeptForm_(type, dept) {
 
     // onFormSubmit トリガーを付与
     addFormSubmitTrigger_(newFormId);
+
+    // 全設定完了後に回答受付を開始（途中で呼ぶとリセットされる場合がある）
+    form.setAcceptingResponses(true);
 
     // 保存
     upsertFormMap_(type, dept, newFormId, form.getPublishedUrl());
