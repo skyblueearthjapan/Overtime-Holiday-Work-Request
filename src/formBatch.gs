@@ -1,7 +1,7 @@
 // ====== 全フォーム更新（毎朝バッチ） ======
 
 function nightlyUpdateAllForms_() {
-  const sh = requireSheet_(SHEET.FORM_MAP);
+  const sh = ensureFormMapSheet_();
   const values = sh.getDataRange().getValues();
   const H = values[0].map(h => normalize_(h));
   const idx = {

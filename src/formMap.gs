@@ -1,9 +1,24 @@
-// ====== FormMap の検索/書き込み ======
+// ====== FormMap の自動作成/取得 ======
+
+function ensureFormMapSheet_() {
+  const ss = getDb_();
+  let sh = ss.getSheetByName(SHEET.FORM_MAP);
+  if (sh) return sh;
+
+  // FormMap が無ければ自動作成（ヘッダ付き）
+  sh = ss.insertSheet(SHEET.FORM_MAP);
+  sh.appendRow(['type', 'dept', 'formId', 'formUrl', 'updatedAt', 'isActive']);
+  return sh;
+}
+
+// ====== FormMap の検索 ======
 
 function findFormMapRow_(type, dept) {
-  const sh = requireSheet_(SHEET.FORM_MAP);
+  const sh = ensureFormMapSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return null; // ヘッダのみ → 該当なし
+
   const values = sh.getDataRange().getValues();
-  // ヘッダ想定：type, dept, formId, formUrl, updatedAt, isActive
   const H = values[0].map(h => normalize_(h));
   const idx = {
     type: H.indexOf('type'),
@@ -27,8 +42,10 @@ function findFormMapRow_(type, dept) {
   return null;
 }
 
+// ====== FormMap の書き込み ======
+
 function upsertFormMap_(type, dept, formId, formUrl) {
-  const sh = requireSheet_(SHEET.FORM_MAP);
+  const sh = ensureFormMapSheet_();
   const found = findFormMapRow_(type, dept);
   const now = new Date();
   if (found) {
