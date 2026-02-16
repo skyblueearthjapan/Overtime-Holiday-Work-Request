@@ -33,7 +33,12 @@ function getOrCreateDeptForm_(type, dept) {
       copyFile = templateFile.makeCopy(formTitle);
     }
     const newFormId = copyFile.getId();
+
+    // リンクを知っている全員がフォームを開けるように共有設定
+    copyFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+
     const form = FormApp.openById(newFormId);
+    form.setAcceptingResponses(true);
 
     // タイトル・説明
     form.setTitle(formTitle);
