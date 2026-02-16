@@ -34,8 +34,14 @@ function getOrCreateDeptForm_(type, dept) {
     }
     const newFormId = copyFile.getId();
 
-    // リンクを知っている全員がフォームを開けるように共有設定
-    copyFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    // 組織内のリンク共有を有効化（Workspace環境向け）
+    // ANYONE_WITH_LINK が管理ポリシーで制限されている場合に備え、
+    // 全体公開 → ドメイン内共有の順でフォールバック
+    try {
+      copyFile.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    } catch (_) {
+      copyFile.setSharing(DriveApp.Access.ANYONE_WITHIN_DOMAIN_WITH_LINK, DriveApp.Permission.VIEW);
+    }
 
     const form = FormApp.openById(newFormId);
     form.setAcceptingResponses(true);
