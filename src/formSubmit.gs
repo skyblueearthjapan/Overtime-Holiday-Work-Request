@@ -64,6 +64,106 @@ function lookupOrderInfo_(orderNo) {
   return null;
 }
 
+// ====== 工番番号の正規化（全角→半角、5桁ゼロ埋め） ======
+
+function normalize5Digits_(s) {
+  // 全角数字→半角数字（normalize_ が英数字全般を変換するので流用）
+  let x = normalize_(s);
+  // 数字以外を除去（保険）
+  x = x.replace(/[^0-9]/g, '');
+  // 左ゼロ埋め（5桁未満の場合）
+  if (x.length > 0 && x.length < 5) x = x.padStart(5, '0');
+  return x;
+}
+
+// ====== 工番コード生成（プレフィックス＋5桁番号） ======
+
+function buildWorkNo_(prefix, numberRaw) {
+  const p = normalize_(prefix);
+  const n = normalize5Digits_(numberRaw);
+  if (!p) return { workNo: '', error: '工番プレフィックスが空です' };
+  if (!/^[0-9]{5}$/.test(n)) return { workNo: '', error: '工番番号は5桁数字である必要があります: ' + numberRaw };
+  return { workNo: p + n, error: '' };
+}
+
+// ====== フォーム回答から工番1〜3をパース ======
+
+function parseWorkNosFromForm_(ans) {
+  const pairs = [
+    { prefix: ans.get(Q.ORDER_PREFIX_1), number: ans.get(Q.ORDER_NUMBER_1), required: true },
+    { prefix: ans.get(Q.ORDER_PREFIX_2), number: ans.get(Q.ORDER_NUMBER_2), required: false },
+    { prefix: ans.get(Q.ORDER_PREFIX_3), number: ans.get(Q.ORDER_NUMBER_3), required: false },
+  ];
+
+  const workNos = [];
+  const errors = [];
+
+  pairs.forEach((x, i) => {
+    const idx = i + 1;
+    const p = normalize_(x.prefix || '');
+    const n = normalize_(x.number || '');
+    const hasP = p !== '';
+    const hasN = n !== '';
+
+    if (x.required) {
+      // 1件目は必須
+      if (!hasP || !hasN) {
+        errors.push('工番' + idx + ': プレフィックスと番号は両方必須です');
+        workNos.push('');
+        return;
+      }
+      const result = buildWorkNo_(p, n);
+      if (result.error) errors.push('工番' + idx + ': ' + result.error);
+      workNos.push(result.workNo);
+      return;
+    }
+
+    // 2,3件目は任意（ただし片方だけはNG）
+    if (!hasP && !hasN) {
+      workNos.push('');
+      return;
+    }
+    if (!hasP || !hasN) {
+      errors.push('工番' + idx + ': プレフィックスと番号はセットで入力してください');
+      workNos.push('');
+      return;
+    }
+    const result = buildWorkNo_(p, n);
+    if (result.error) errors.push('工番' + idx + ': ' + result.error);
+    workNos.push(result.workNo);
+  });
+
+  return { workNo1: workNos[0] || '', workNo2: workNos[1] || '', workNo3: workNos[2] || '', errors };
+}
+
+// ====== 工番1〜3をマスタ突合して補完結果を返す ======
+
+function enrichWorkNos_(workNo1, workNo2, workNo3) {
+  const result = {
+    orderNo1: workNo1, customer1: '', product1: '',
+    orderNo2: workNo2, customer2: '', product2: '',
+    orderNo3: workNo3, customer3: '', product3: '',
+    errors: [],
+  };
+
+  const lookup = (workNo, suffix) => {
+    if (!workNo) return;
+    const info = lookupOrderInfo_(workNo);
+    if (info) {
+      result['customer' + suffix] = info.dest || info.customer || '';
+      result['product' + suffix] = info.product || '';
+    } else {
+      result.errors.push('工番マスタ未登録: ' + workNo);
+    }
+  };
+
+  lookup(workNo1, '1');
+  lookup(workNo2, '2');
+  lookup(workNo3, '3');
+
+  return result;
+}
+
 // ====== 業務ID ラベル解析 ======
 
 function parseJobChoice_(label) {
@@ -138,10 +238,11 @@ function handleFormSubmit_(e) {
     const targetDate = targetDateRaw instanceof Date ? targetDateRaw : new Date(targetDateRaw);
     if (!targetDate || isNaN(targetDate.getTime())) throw new Error(`作業実施日が不正です: ${targetDateRaw}`);
 
-    // 工番（プルダウンのラベルから工番コードだけ抽出）
-    const orderLabel = normalize_(ans.get(Q.ORDER));
-    const orderNo = orderLabel.split('｜')[0].trim(); // "123｜..." → "123"
-    if (!orderNo) throw new Error(`工番が取得できません: ${Q.ORDER}`);
+    // 工番（プレフィックス選択＋5桁番号入力 ×最大3件）
+    const { workNo1, workNo2, workNo3, errors: workNoErrors } = parseWorkNosFromForm_(ans);
+    if (!workNo1 && workNoErrors.length > 0) {
+      throw new Error('工番の入力に問題があります: ' + workNoErrors.join('; '));
+    }
 
     // 業務ID（部署で絞っている想定）
     const jobLabel = normalize_(ans.get(Q.JOB));
@@ -165,8 +266,11 @@ function handleFormSubmit_(e) {
       approvedMinutes = plannedMinutesFromHoliday_(ans.get(Q.HD_HOURS));
     }
 
-    // 工番マスタ補完
-    const orderInfo = lookupOrderInfo_(orderNo) || { customer: '', dest: '', product: '' };
+    // 工番マスタ突合（3件分を一括補完）
+    const enriched = enrichWorkNos_(workNo1, workNo2, workNo3);
+
+    // エラー集約（工番パース＋マスタ未登録）
+    const allErrors = [...workNoErrors, ...enriched.errors];
 
     // Requests に追加
     const requestId = Utilities.getUuid();
@@ -187,18 +291,26 @@ function handleFormSubmit_(e) {
       approvedMinutes,
       reason,
       workContent: '', // フォームに業務内容があるならここへ
-      // 明細（今回は1件運用をV1とする）
+      // 明細（最大3件）
       jobId1: jobId,
-      workNo1: jobLabelFull,
-      orderNo1: orderNo,
-      customer1: orderInfo.dest || orderInfo.customer || '',
-      product1: orderInfo.product || '',
+      workNo1: workNo1,
+      orderNo1: enriched.orderNo1,
+      customer1: enriched.customer1,
+      product1: enriched.product1,
+      workNo2: workNo2,
+      orderNo2: enriched.orderNo2,
+      customer2: enriched.customer2,
+      product2: enriched.product2,
+      workNo3: workNo3,
+      orderNo3: enriched.orderNo3,
+      customer3: enriched.customer3,
+      product3: enriched.product3,
       // その他
       hrMailSentAt: '',
       pdfGeneratedAt: '',
       pdfFileId: '',
       pdfFolderId: '',
-      exportError: '',
+      exportError: allErrors.length > 0 ? allErrors.join(' / ') : '',
     });
 
     // WorkLogs プレースホルダ（requestIdの行を作っておく）
@@ -244,6 +356,16 @@ function appendRequestRow_(obj) {
     orderNo1: 'orderNo1',
     customer1: 'customer1',
     product1: 'product1',
+
+    workNo2: 'workNo2',
+    orderNo2: 'orderNo2',
+    customer2: 'customer2',
+    product2: 'product2',
+
+    workNo3: 'workNo3',
+    orderNo3: 'orderNo3',
+    customer3: 'customer3',
+    product3: 'product3',
 
     hrMailSentAt: 'hrMailSentAt',
     pdfGeneratedAt: 'pdfGeneratedAt',

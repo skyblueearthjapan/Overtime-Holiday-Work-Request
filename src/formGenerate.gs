@@ -93,7 +93,7 @@ function updateDeptFormChoices_(formOrFormId, type, dept) {
   // マスタ読み込み
   const workersByDept = loadWorkersByDept_();
   const jobsByDept = loadJobsByDept_();
-  const orders = loadOrderChoices_();
+  const orderPrefixes = loadOrderPrefixes_();
 
   const workerChoices = workersByDept.get(dept) || [];
   const jobChoices = jobsByDept.get(dept) || [];
@@ -106,15 +106,18 @@ function updateDeptFormChoices_(formOrFormId, type, dept) {
     Logger.log(`WARN: 業務ID候補が空のためスキップ: dept=${dept}`);
     return false;
   }
-  if (orders.length === 0) {
-    Logger.log('WARN: 工番候補が空のためスキップ');
+  if (orderPrefixes.length === 0) {
+    Logger.log('WARN: 工番プレフィックス候補が空のためスキップ');
     return false;
   }
 
   // セット
   setDropdownChoices_(findItemByTitle_(form, Q.WORKER), workerChoices);
   setDropdownChoices_(findItemByTitle_(form, Q.JOB), jobChoices);
-  setDropdownChoices_(findItemByTitle_(form, Q.ORDER), orders);
+
+  // 工番：旧プルダウンを削除し、プレフィックス選択＋5桁番号入力（×3件）に差し替え
+  ensureOrderPrefixItems_(form, orderPrefixes);
+
   setDropdownChoices_(findItemByTitle_(form, Q.REASON), REASONS);
 
   if (type === 'overtime') {

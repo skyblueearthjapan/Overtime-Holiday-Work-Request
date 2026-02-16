@@ -18,7 +18,14 @@ const Q = {
   DEPT: '部署',
   WORKER: '作業員',
   DATE: '作業実施日',
-  ORDER: '工番',
+  ORDER: '工番',  // 旧テンプレ互換（削除対象の検出用に残す）
+  // 工番：プレフィックス選択＋5桁番号入力（最大3件）
+  ORDER_PREFIX_1: '工番プレフィックス_1',
+  ORDER_NUMBER_1: '工番番号_1',
+  ORDER_PREFIX_2: '工番プレフィックス_2',
+  ORDER_NUMBER_2: '工番番号_2',
+  ORDER_PREFIX_3: '工番プレフィックス_3',
+  ORDER_NUMBER_3: '工番番号_3',
   JOB: '業務ID',
   REASON: '理由',
   REASON_DETAIL: '補足理由',

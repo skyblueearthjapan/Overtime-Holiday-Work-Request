@@ -106,6 +106,31 @@ function loadOrderChoices_() {
   return uniq;
 }
 
+// ====== 工番プレフィックス一覧を工番マスタから抽出 ======
+
+function loadOrderPrefixes_() {
+  const sh = requireSheet_(SHEET.ORDERS);
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const orderIdx = H.indexOf('工番');
+  if (orderIdx < 0) throw new Error('工番マスタに「工番」列がありません。');
+
+  const prefixes = new Set();
+  for (let r = 1; r < values.length; r++) {
+    const order = normalize_(values[r][orderIdx]);
+    if (!order) continue;
+    // 先頭の英字部分を抽出（例: LWTS01234 → LWTS）
+    const match = order.match(/^[A-Za-z]+/);
+    if (match) prefixes.add(match[0].toUpperCase());
+  }
+
+  const sorted = Array.from(prefixes).sort();
+  if (sorted.length === 0) {
+    Logger.log('WARN: 工番マスタからプレフィックスを抽出できませんでした。');
+  }
+  return sorted;
+}
+
 // ====== 作業者本人情報取得（Googleアカウント列があれば照合、無ければ null） ======
 
 function api_getWorkerInfo() {
