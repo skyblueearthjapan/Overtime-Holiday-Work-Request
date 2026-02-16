@@ -44,6 +44,11 @@ function getOrCreateDeptForm_(type, dept) {
     }
 
     const form = FormApp.openById(newFormId);
+
+    // 新しいGoogle Formsでは複製時に「未公開(draft)」状態になるため、
+    // 先に公開してからでないと各種操作がエラーになる
+    try { form.setPublished(true); } catch (_) { /* 旧環境では不要 */ }
+
     form.setAcceptingResponses(true);
 
     // タイトル・説明
