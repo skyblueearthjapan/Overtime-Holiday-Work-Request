@@ -15,14 +15,13 @@ function loadDeptList_() {
 function loadWorkersByDept_() {
   const sh = requireSheet_(SHEET.WORKERS);
   const values = sh.getDataRange().getValues();
-  // 想定ヘッダ：作業員コード, 氏名, 部署, ..., Googleアカウント, 在籍フラグ
-  // ※列位置が違うなら、ここだけ調整してください
+  // 想定ヘッダ：作業員コード, 氏名, 部署（在籍フラグは任意）
   const H = values[0].map(h => normalize_(h));
   const idx = {
     code: H.indexOf('作業員コード'),
     name: H.indexOf('氏名'),
     dept: H.indexOf('部署'),
-    active: H.indexOf('在籍フラグ'),
+    active: H.indexOf('在籍フラグ'),   // 列が無ければ -1 → 全員有効扱い
   };
   if (idx.code < 0 || idx.name < 0 || idx.dept < 0) {
     throw new Error('作業員マスタのヘッダが想定と違います（作業員コード/氏名/部署）。');
@@ -36,8 +35,11 @@ function loadWorkersByDept_() {
     const name = normalize_(row[idx.name]);
     if (!dept || !code || !name) continue;
 
-    const active = idx.active >= 0 ? normalize_(row[idx.active]) : '1';
-    if (active && active !== '1' && active.toLowerCase() !== 'true') continue;
+    // 在籍フラグ列がある場合のみフィルタ（無ければ全員有効）
+    if (idx.active >= 0) {
+      const active = normalize_(row[idx.active]);
+      if (active && active !== '1' && active.toLowerCase() !== 'true') continue;
+    }
 
     const label = `${code} ${name}`;
     if (!map.has(dept)) map.set(dept, []);
@@ -109,7 +111,7 @@ function loadOrderChoices_() {
   return uniq;
 }
 
-// ====== 作業者本人情報取得（Googleアカウントで照合） ======
+// ====== 作業者本人情報取得（Googleアカウント列があれば照合、無ければ null） ======
 
 function api_getWorkerInfo() {
   const email = Session.getActiveUser().getEmail();
@@ -122,15 +124,19 @@ function api_getWorkerInfo() {
     code: H.indexOf('作業員コード'),
     name: H.indexOf('氏名'),
     dept: H.indexOf('部署'),
-    email: H.findIndex(h => h.startsWith('Googleアカウント')),
-    active: H.indexOf('在籍フラグ'),
+    email: H.findIndex(h => h.startsWith('Googleアカウント')),  // 列が無ければ -1
+    active: H.indexOf('在籍フラグ'),                             // 列が無ければ -1
   };
+  // Googleアカウント列が存在しない場合は照合不可 → null
   if (idx.email < 0) return null;
 
   for (let r = 1; r < values.length; r++) {
     const row = values[r];
-    const active = idx.active >= 0 ? normalize_(row[idx.active]) : '1';
-    if (active && active !== '1' && active.toLowerCase() !== 'true') continue;
+    // 在籍フラグ列がある場合のみフィルタ（無ければ全員有効）
+    if (idx.active >= 0) {
+      const active = normalize_(row[idx.active]);
+      if (active && active !== '1' && active.toLowerCase() !== 'true') continue;
+    }
 
     if (normalize_(row[idx.email]) === email) {
       return {
