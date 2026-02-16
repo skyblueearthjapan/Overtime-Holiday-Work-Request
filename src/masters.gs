@@ -1,15 +1,10 @@
 // ====== マスタ読込（部署/作業員/業務/工番） ======
 
 function loadDeptList_() {
-  const sh = requireSheet_(SHEET.DEPTS);
-  const values = sh.getDataRange().getValues();
-  // 想定：1行目ヘッダ or 説明、部署名がA列
-  const out = [];
-  for (let i = 1; i < values.length; i++) {
-    const dept = normalize_(values[i][0]);
-    if (dept) out.push(dept);
-  }
-  return out;
+  // 作業員マスタの部署列からユニーク値を取得（部署マスタ不要）
+  const workersByDept = loadWorkersByDept_();
+  const depts = Array.from(workersByDept.keys()).sort();
+  return depts;
 }
 
 function loadWorkersByDept_() {

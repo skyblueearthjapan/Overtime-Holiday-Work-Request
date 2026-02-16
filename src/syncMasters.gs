@@ -9,7 +9,6 @@
  *   転記先は config.gs の SHEET 定数を参照。
  */
 const SYNC_MAP = [
-  { src: '部署マスタ',     dst: SHEET.DEPTS   },
   { src: '作業員マスタ',   dst: SHEET.WORKERS, maxRows: 81 },  // ヘッダ+80人
   { src: '業務NO.マスタ',  dst: SHEET.JOBS    },
   { src: '工番マスタ',     dst: SHEET.ORDERS  },

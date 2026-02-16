@@ -6,7 +6,6 @@ const SHEET = {
   FORM_TEMPLATES: 'FormTemplates',
   FORM_MAP: 'FormMap',
   DEPT_APPROVERS: 'DeptApprovers',  // 部署×承認者メール
-  DEPTS: '部署マスタ',
   WORKERS: '作業員マスタ',
   JOBS: '業務NOマスタ',
   ORDERS: '工番マスタ',

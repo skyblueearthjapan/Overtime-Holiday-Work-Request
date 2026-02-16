@@ -33,7 +33,7 @@ function manualBatchPdfs_() {
 
 function debugCreateFirstDeptOvertime_() {
   const depts = loadDeptList_();
-  if (!depts.length) throw new Error('部署マスタが空です。');
+  if (!depts.length) throw new Error('作業員マスタに部署データがありません。');
   const dept = depts[0];
   const res = getOrCreateDeptForm_('overtime', dept);
   Logger.log(JSON.stringify(res, null, 2));
@@ -45,7 +45,7 @@ function debugCreateFirstDeptOvertime_() {
  */
 function buildAllDeptForms() {
   const depts = loadDeptList_();
-  if (!depts.length) throw new Error('部署マスタが空です。');
+  if (!depts.length) throw new Error('作業員マスタに部署データがありません。');
 
   const log = [];
   for (const dept of depts) {
