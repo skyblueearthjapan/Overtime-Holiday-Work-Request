@@ -52,6 +52,10 @@ function buildAllDeptForms() {
     for (const type of ['overtime', 'holiday']) {
       try {
         const res = getOrCreateDeptForm_(type, dept);
+        if (!res) {
+          log.push('SKIP ' + type + ' / ' + dept + ' (作業員0人)');
+          continue;
+        }
         const label = res.created ? 'CREATED' : 'EXISTS';
         log.push(label + ' ' + type + ' / ' + dept + ' -> ' + res.formUrl);
       } catch (e) {

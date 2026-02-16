@@ -11,7 +11,13 @@ function getOrCreateDeptForm_(type, dept) {
       return { formId, formUrl: form.getPublishedUrl(), created: false };
     }
 
-    // 生成
+    // 生成前にマスタを確認（作業員0人の部署はスキップ）
+    const workersByDept = loadWorkersByDept_();
+    if (!workersByDept.has(dept) || workersByDept.get(dept).length === 0) {
+      Logger.log(`SKIP: 作業員が0人のためフォーム未生成: type=${type} dept=${dept}`);
+      return null;
+    }
+
     const templateId = getTemplateFormId_(type);
     const templateFile = DriveApp.getFileById(templateId);
 
@@ -92,14 +98,16 @@ function updateDeptFormChoices_(formOrFormId, type, dept) {
   const jobChoices = jobsByDept.get(dept) || [];
 
   if (workerChoices.length === 0) {
-    // 空だとフォーム送信不能になるので、最低限のダミーを入れる（またはエラーにする）
-    throw new Error(`作業員候補が空です。作業員マスタを確認してください: dept=${dept}`);
+    Logger.log(`WARN: 作業員候補が空のためスキップ: dept=${dept}`);
+    return false;
   }
   if (jobChoices.length === 0) {
-    throw new Error(`業務ID候補が空です。業務NOマスタを確認してください: dept=${dept}`);
+    Logger.log(`WARN: 業務ID候補が空のためスキップ: dept=${dept}`);
+    return false;
   }
   if (orders.length === 0) {
-    throw new Error('工番候補が空です。工番マスタを確認してください。');
+    Logger.log('WARN: 工番候補が空のためスキップ');
+    return false;
   }
 
   // セット
