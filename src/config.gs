@@ -13,16 +13,16 @@ const SHEET = {
   BATCH_LOGS: 'BatchLogs',
 };
 
-// フォーム内の質問タイトル（テンプレフォームの質問タイトルと完全一致させること）
+// フォーム内の質問タイトル（両テンプレフォームで統一すること）
 const Q = {
-  TYPE: '申請の種類',
-  DEPT: '配置',
-  WORKER: '作業員', // 例：A001 今泉雄二
+  TYPE: '申請種別',
+  DEPT: '部署',
+  WORKER: '作業員',
   DATE: '作業実施日',
   ORDER: '工番',
   JOB: '業務ID',
   REASON: '理由',
-  REASON_DETAIL: '納得の理由',
+  REASON_DETAIL: '補足理由',
   OT_HOURS: '予定時間',
   HD_HOURS: '予定時間',
 };
