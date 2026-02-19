@@ -16,6 +16,9 @@ function onOpen() {
     .addSeparator()
     .addItem('全トリガー初期セットアップ', 'setupAllTriggers_')
     .addItem('旧フォームトリガー削除', 'cleanupFormSubmitTriggers_')
+    .addSeparator()
+    .addItem('診断：ポーリング状態確認', 'debugPollStatus_')
+    .addItem('診断：最新回答を手動処理', 'debugProcessLatest_')
     .addToUi();
 }
 

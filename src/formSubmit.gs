@@ -113,6 +113,130 @@ function pollNewResponses_() {
   }
 }
 
+// ====== デバッグ：ポーリング状態確認（手動実行用） ======
+// GASスクリプトエディタから「debugPollStatus_」を実行すると、
+// ポーリング状態と各フォームの未処理回答数がログに出力されます。
+
+function debugPollStatus_() {
+  const props = PropertiesService.getScriptProperties();
+  const lastTs = props.getProperty('POLL_LAST_TS');
+  Logger.log('=== ポーリング診断 ===');
+  Logger.log('POLL_LAST_TS: ' + (lastTs || '(未設定 — ポーリング未実行)'));
+
+  if (lastTs) {
+    const since = new Date(lastTs);
+    const ageMin = Math.round((Date.now() - since.getTime()) / 60000);
+    Logger.log('最終チェック: ' + ageMin + '分前');
+  }
+
+  // トリガー確認
+  const triggers = ScriptApp.getProjectTriggers();
+  const pollTrigger = triggers.find(t => t.getHandlerFunction() === 'pollNewResponses_');
+  Logger.log('pollNewResponses_ トリガー: ' + (pollTrigger ? '存在する (' + pollTrigger.getEventType() + ')' : '存在しない！ setupAllTriggers_ を実行してください'));
+
+  // FormMap の全フォームを確認
+  const sh = ensureFormMapSheet_();
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const formIdCol = H.indexOf('formId');
+  const typeCol = H.indexOf('type');
+  const deptCol = H.indexOf('dept');
+  const activeCol = H.indexOf('isActive');
+  if (formIdCol < 0) {
+    Logger.log('FormMapに formId 列がありません');
+    return;
+  }
+
+  const since = lastTs ? new Date(lastTs) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  for (let r = 1; r < values.length; r++) {
+    const formId = normalize_(values[r][formIdCol]);
+    if (!formId) continue;
+    if (activeCol >= 0) {
+      const a = values[r][activeCol];
+      if (a === false || String(a).toLowerCase() === 'false') {
+        Logger.log('  [SKIP] ' + values[r][typeCol] + '/' + values[r][deptCol] + ' (inactive)');
+        continue;
+      }
+    }
+
+    try {
+      const form = FormApp.openById(formId);
+      const allResp = form.getResponses();
+      const newResp = form.getResponses(since);
+      Logger.log('  ' + values[r][typeCol] + '/' + values[r][deptCol] +
+        ' — 全回答: ' + allResp.length + ', since以降: ' + newResp.length);
+
+      // 最新回答の詳細
+      if (newResp.length > 0) {
+        const latest = newResp[newResp.length - 1];
+        Logger.log('    最新回答: ' + latest.getTimestamp() + ' id=' + latest.getId());
+
+        // 各アイテムの回答を試行
+        try {
+          const irs = latest.getItemResponses();
+          const titles = irs.map(ir => {
+            try { return ir.getItem().getTitle(); }
+            catch (_) { return '(削除済みアイテム)'; }
+          });
+          Logger.log('    回答フィールド: ' + titles.join(', '));
+        } catch (e) {
+          Logger.log('    getItemResponses() エラー: ' + e.message);
+        }
+      }
+    } catch (e) {
+      Logger.log('  [ERROR] ' + values[r][typeCol] + '/' + values[r][deptCol] + ': ' + e.message);
+    }
+  }
+
+  Logger.log('=== 診断完了 ===');
+}
+
+// ====== デバッグ：手動で1件処理テスト ======
+// 最新の未処理回答を1件だけ処理してエラーを確認する。
+
+function debugProcessLatest_() {
+  const sh = ensureFormMapSheet_();
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const formIdCol = H.indexOf('formId');
+  const activeCol = H.indexOf('isActive');
+  if (formIdCol < 0) return;
+
+  const props = PropertiesService.getScriptProperties();
+  const lastTs = props.getProperty('POLL_LAST_TS');
+  const since = lastTs ? new Date(lastTs) : new Date(Date.now() - 24 * 60 * 60 * 1000);
+
+  for (let r = 1; r < values.length; r++) {
+    const formId = normalize_(values[r][formIdCol]);
+    if (!formId) continue;
+    if (activeCol >= 0) {
+      const a = values[r][activeCol];
+      if (a === false || String(a).toLowerCase() === 'false') continue;
+    }
+
+    try {
+      const form = FormApp.openById(formId);
+      const newResp = form.getResponses(since);
+      if (newResp.length === 0) continue;
+
+      const resp = newResp[newResp.length - 1];
+      Logger.log('処理テスト: formId=' + formId + ' respId=' + resp.getId());
+
+      handleFormSubmit_({ response: resp });
+      Logger.log('処理成功！Requestsシートを確認してください。');
+
+      // 成功したらタイムスタンプを更新
+      props.setProperty('POLL_LAST_TS', new Date().toISOString());
+      return;
+    } catch (e) {
+      Logger.log('処理エラー: ' + e.message + '\n' + e.stack);
+    }
+  }
+
+  Logger.log('未処理の回答が見つかりませんでした。');
+}
+
 // ====== Requests/WorkLogs 共通ヘルパー ======
 
 function buildHeaderIndex_(headerRow) {
@@ -240,14 +364,27 @@ function handleFormSubmit_(e) {
   try {
     // e.response.getItemResponses() を使う（タイトルで拾うのでフォームが増えても堅い）
     const response = e.response;
-    const itemResponses = response.getItemResponses();
+    let itemResponses;
+    try {
+      itemResponses = response.getItemResponses();
+    } catch (irErr) {
+      console.error('getItemResponses() 失敗（フォーム構造変更の影響の可能性）: ' + irErr.message);
+      throw irErr;
+    }
 
     // タイトル→回答 のMap
+    // 注: ensureOrderItems_ でフォームアイテムを削除した場合、
+    //     旧回答の ir.getItem() がエラーになることがあるため try/catch で保護
     const ans = new Map();
     for (const ir of itemResponses) {
-      const title = normalize_(ir.getItem().getTitle());
-      const value = ir.getResponse();
-      ans.set(title, value);
+      try {
+        const title = normalize_(ir.getItem().getTitle());
+        const value = ir.getResponse();
+        ans.set(title, value);
+      } catch (itemErr) {
+        // 削除済みアイテムの回答 → スキップ（工番旧形式の残骸など）
+        console.warn('回答アイテム読取スキップ（削除済みの可能性）: ' + itemErr.message);
+      }
     }
 
     // 種別・部署
@@ -344,7 +481,13 @@ function handleFormSubmit_(e) {
     });
 
     // WorkLogs プレースホルダ（requestIdの行を作っておく）
-    ensureWorkLogRow_(requestId);
+    // ※ WorkLogs書き込みは補助的なので、失敗しても Requests 書き込み済みなら
+    //    処理成功とみなす（次回ポーリングで無限ループしないため）
+    try {
+      ensureWorkLogRow_(requestId);
+    } catch (wlErr) {
+      console.warn('ensureWorkLogRow_ 警告（Requests書込みは成功済み）: ' + wlErr.message);
+    }
 
   } catch (err) {
     // フォーム送信を止めることはできないので、ログに残す
