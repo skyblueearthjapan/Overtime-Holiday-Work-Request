@@ -15,6 +15,7 @@ function onOpen() {
     .addItem('マスタ転記（手動実行）', 'syncAllMasters')
     .addSeparator()
     .addItem('全トリガー初期セットアップ', 'setupAllTriggers_')
+    .addItem('旧フォームトリガー削除', 'cleanupFormSubmitTriggers_')
     .addToUi();
 }
 
@@ -149,11 +150,48 @@ function setupSyncTrigger_() {
     .create();
 }
 
+// ====== 旧フォームトリガー一括削除 ======
+// 個別 onFormSubmit トリガー（handleFormSubmit_）をすべて削除する。
+// ポーリング方式への移行時に実行が必要。
+
+function cleanupFormSubmitTriggers_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  let deleted = 0;
+  for (const t of triggers) {
+    if (t.getHandlerFunction() === 'handleFormSubmit_') {
+      ScriptApp.deleteTrigger(t);
+      deleted++;
+    }
+  }
+  Logger.log('cleanupFormSubmitTriggers_: ' + deleted + ' 個の旧トリガーを削除');
+  return deleted;
+}
+
+// ====== ポーリングトリガー設定（1分間隔） ======
+
+function setupFormPollTrigger_() {
+  // 旧フォーム個別トリガーを先に削除
+  cleanupFormSubmitTriggers_();
+
+  // 既存のポーリングトリガーがあればスキップ
+  const triggers = ScriptApp.getProjectTriggers();
+  if (triggers.some(t => t.getHandlerFunction() === 'pollNewResponses_')) return;
+
+  ScriptApp.newTrigger('pollNewResponses_')
+    .timeBased()
+    .everyMinutes(1)
+    .create();
+
+  Logger.log('setupFormPollTrigger_: ポーリングトリガーを作成（1分間隔）');
+}
+
 // ====== 全トリガー一括セットアップ ======
 
 function setupAllTriggers_() {
-  setupSyncTrigger_();    // マスタ転記（6:00）
-  setupTriggers_();       // フォーム毎朝更新（6:30）
-  setupMailTriggers_();   // 夕方2回（17:10, 18:10）＋朝バッチ（7:10: PDF生成+メール）
+  cleanupFormSubmitTriggers_(); // 旧フォーム個別トリガーを削除
+  setupSyncTrigger_();          // マスタ転記（6:00）
+  setupTriggers_();              // フォーム毎朝更新（6:30）
+  setupMailTriggers_();          // 夕方2回（17:10, 18:10）＋朝バッチ（7:10）
+  setupFormPollTrigger_();       // フォーム回答ポーリング（1分間隔）
   Logger.log('全トリガーをセットアップしました。');
 }

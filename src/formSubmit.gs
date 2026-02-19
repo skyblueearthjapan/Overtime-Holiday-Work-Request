@@ -1,20 +1,83 @@
 // ====== フォーム送信トリガー付与 ======
+// ※ ポーリング方式（pollNewResponses_）に移行済みのため、
+//    個別フォームに onFormSubmit トリガーは作成しない。
+//    GAS のトリガー上限（20個/プロジェクト）を回避するための設計変更。
 
 function addFormSubmitTrigger_(formId) {
-  const form = FormApp.openById(formId);
+  // No-op: pollNewResponses_（1分間隔の時間トリガー）で全フォームを一括処理
+}
 
-  // 重複作成防止（同じフォームに同じハンドラが既にあれば作らない）
-  const triggers = ScriptApp.getProjectTriggers();
-  for (const t of triggers) {
-    if (t.getHandlerFunction() === 'handleFormSubmit_' && t.getTriggerSourceId && t.getTriggerSourceId() === formId) {
-      return;
-    }
+// ====== フォーム回答ポーリング（全フォーム一括チェック） ======
+// 個別 onFormSubmit トリガーの代わりに、時間駆動で全フォームの新規回答を処理する。
+// setupAllTriggers_ で1分間隔の時間トリガーとして登録される。
+
+function pollNewResponses_() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(10000)) {
+    Logger.log('pollNewResponses_: lock取得失敗（別プロセスが実行中）');
+    return;
   }
 
-  ScriptApp.newTrigger('handleFormSubmit_')
-    .forForm(form)
-    .onFormSubmit()
-    .create();
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const lastTs = props.getProperty('POLL_LAST_TS');
+    const since = lastTs ? new Date(lastTs) : null;
+    const now = new Date();
+
+    // 初回実行時はタイムスタンプだけセットして終了（過去分は処理しない）
+    if (!since) {
+      props.setProperty('POLL_LAST_TS', now.toISOString());
+      Logger.log('pollNewResponses_: 初回実行 — 基準タイムスタンプをセット');
+      return;
+    }
+
+    // FormMap から全アクティブフォームを取得
+    const sh = ensureFormMapSheet_();
+    const values = sh.getDataRange().getValues();
+    const H = values[0].map(h => normalize_(h));
+    const formIdCol = H.indexOf('formId');
+    const activeCol = H.indexOf('isActive');
+    if (formIdCol < 0) return;
+
+    let processed = 0;
+    let errors = 0;
+
+    for (let r = 1; r < values.length; r++) {
+      const formId = normalize_(values[r][formIdCol]);
+      if (!formId) continue;
+      if (activeCol >= 0) {
+        const a = values[r][activeCol];
+        if (a === false || String(a).toLowerCase() === 'false') continue;
+      }
+
+      try {
+        const form = FormApp.openById(formId);
+        // since 以降の新規回答だけ取得（GAS組込のフィルタ）
+        const responses = form.getResponses(since);
+
+        for (const resp of responses) {
+          try {
+            handleFormSubmit_({ response: resp });
+            processed++;
+          } catch (e) {
+            errors++;
+            console.error('pollNewResponses_ handler error (form=' + formId + '): ' + e.message);
+          }
+        }
+      } catch (e) {
+        console.warn('pollNewResponses_ form open error (' + formId + '): ' + e.message);
+      }
+    }
+
+    // タイムスタンプ更新（次回はこの時刻以降のみ処理）
+    props.setProperty('POLL_LAST_TS', now.toISOString());
+
+    if (processed > 0 || errors > 0) {
+      Logger.log('pollNewResponses_: processed=' + processed + ' errors=' + errors);
+    }
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 // ====== Requests/WorkLogs 共通ヘルパー ======
