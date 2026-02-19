@@ -114,6 +114,7 @@ function api_getFormUrl(type, dept) {
   // 未作成 → 自動生成を試みる
   try {
     const result = getOrCreateDeptForm_(type, dept);
+    if (!result) return null;
     return result.formUrl || null;
   } catch (e) {
     console.warn('api_getFormUrl: auto-create failed for ' + type + '/' + dept + ': ' + e.message);

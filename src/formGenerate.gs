@@ -64,21 +64,30 @@ function getOrCreateDeptForm_(type, dept) {
       '・実績はトップ画面のボタン（残業=完了のみ／休日=開始・完了）で記録します。',
     ].join('\n'));
 
-    // 質問の固定（部署/種別は1択にして実質編集不可）
-    setDropdownChoices_(findItemByTitle_(form, Q.TYPE), [type === 'overtime' ? '残業' : '休日']);
-    setDropdownChoices_(findItemByTitle_(form, Q.DEPT), [dept]);
+    // 質問の固定・選択肢セット・トリガー付与
+    // ※ 失敗してもフォームは FormMap に登録する（孤立ファイル防止）
+    let setupError = null;
+    try {
+      setDropdownChoices_(findItemByTitle_(form, Q.TYPE), [type === 'overtime' ? '残業' : '休日']);
+      setDropdownChoices_(findItemByTitle_(form, Q.DEPT), [dept]);
+      updateDeptFormChoices_(form, type, dept);
+    } catch (e) {
+      setupError = e;
+      console.error('フォーム選択肢セットエラー: ' + e.message);
+    }
 
-    // 選択肢を最新マスタでセット
-    updateDeptFormChoices_(form, type, dept);
+    // トリガー付与と回答受付は選択肢設定と独立して試行
+    try { addFormSubmitTrigger_(newFormId); } catch (e) {
+      console.error('トリガー付与エラー: ' + e.message);
+    }
+    try { form.setAcceptingResponses(true); } catch (_) {}
 
-    // onFormSubmit トリガーを付与
-    addFormSubmitTrigger_(newFormId);
-
-    // 全設定完了後に回答受付を開始（途中で呼ぶとリセットされる場合がある）
-    form.setAcceptingResponses(true);
-
-    // 保存
+    // FormMap に必ず登録（フォーム孤立を防ぐ）
     upsertFormMap_(type, dept, newFormId, form.getPublishedUrl());
+
+    if (setupError) {
+      console.warn('フォームは登録済みですが選択肢設定に失敗しました: ' + setupError.message);
+    }
     return { formId: newFormId, formUrl: form.getPublishedUrl(), created: true };
   } finally {
     lock.releaseLock();
