@@ -145,6 +145,9 @@ function buildPrefillUrl_(formId, requestType, dept, workerLabel) {
     formResponse = addPrefill_(formResponse, form, Q.WORKER, workerLabel);
   }
 
+  // 作業実施日を今日でプリフィル
+  formResponse = addDatePrefill_(formResponse, form, Q.DATE);
+
   return formResponse.toPrefilledUrl();
 }
 
@@ -168,5 +171,23 @@ function addPrefill_(formResponse, form, questionTitle, value) {
     return formResponse; // 未対応タイプはスキップ
   }
 
+  return formResponse.withItemResponse(itemResponse);
+}
+
+/**
+ * 日付フィールドに今日の日付をプリフィルするヘルパー。
+ */
+function addDatePrefill_(formResponse, form, questionTitle) {
+  const item = findItemByTitleOrNull_(form, questionTitle);
+  if (!item) return formResponse;
+
+  if (item.getType() !== FormApp.ItemType.DATE) return formResponse;
+
+  const today = new Date();
+  const year = Number(Utilities.formatDate(today, TZ, 'yyyy'));
+  const month = Number(Utilities.formatDate(today, TZ, 'M'));
+  const day = Number(Utilities.formatDate(today, TZ, 'd'));
+
+  const itemResponse = item.asDateItem().createResponse(year, month, day);
   return formResponse.withItemResponse(itemResponse);
 }
