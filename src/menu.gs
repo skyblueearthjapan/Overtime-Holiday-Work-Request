@@ -93,23 +93,35 @@ function setupMailTriggers_() {
   const triggers = ScriptApp.getProjectTriggers();
   const has = (fn) => triggers.some(t => t.getHandlerFunction() === fn);
 
-  // 夕方 17:10（17時台）
-  if (!triggers.some(t => t.getHandlerFunction()==='sendEveningMail_' && t.getEventType()===ScriptApp.EventType.CLOCK)) {
+  // sendEveningMail_ の既存トリガー数をカウント
+  const eveningCount = triggers.filter(
+    t => t.getHandlerFunction() === 'sendEveningMail_'
+      && t.getEventType() === ScriptApp.EventType.CLOCK
+  ).length;
+
+  // 夕方 17:10 + 18:10 の2本が必要（既に2本以上あればスキップ）
+  if (eveningCount < 2) {
+    // 既存をすべて削除してから再作成（半端な状態を解消）
+    triggers
+      .filter(t => t.getHandlerFunction() === 'sendEveningMail_')
+      .forEach(t => ScriptApp.deleteTrigger(t));
+
+    // 夕方 17:10（17時台）
     ScriptApp.newTrigger('sendEveningMail_')
       .timeBased()
       .everyDays(1)
       .atHour(17)
       .nearMinute(10)
       .create();
-  }
 
-  // 夕方 18:10（18時台）…同じ関数をもう1本
-  ScriptApp.newTrigger('sendEveningMail_')
-    .timeBased()
-    .everyDays(1)
-    .atHour(18)
-    .nearMinute(10)
-    .create();
+    // 夕方 18:10（18時台）
+    ScriptApp.newTrigger('sendEveningMail_')
+      .timeBased()
+      .everyDays(1)
+      .atHour(18)
+      .nearMinute(10)
+      .create();
+  }
 
   // 朝 07:10（7時台）— PDF一括生成 + 朝メール
   if (!has('morningBatch_')) {

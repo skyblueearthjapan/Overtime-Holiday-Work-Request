@@ -169,3 +169,24 @@ function api_getWorkerInfo() {
   }
   return null;
 }
+
+// ====== 作業員コードからメールアドレスを引く（フォーム送信時の補完用） ======
+
+function lookupWorkerEmail_(workerCode) {
+  if (!workerCode) return '';
+  const sh = requireSheet_(SHEET.WORKERS);
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const idx = {
+    code: H.indexOf('作業員コード'),
+    email: H.findIndex(h => h.startsWith('Googleアカウント')),
+  };
+  if (idx.code < 0 || idx.email < 0) return '';
+
+  for (let r = 1; r < values.length; r++) {
+    if (normalize_(values[r][idx.code]) === workerCode) {
+      return normalize_(values[r][idx.email]) || '';
+    }
+  }
+  return '';
+}

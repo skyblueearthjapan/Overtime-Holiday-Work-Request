@@ -3,6 +3,7 @@
 <head>
   <base target="_top">
   <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
     :root{
       --bg1:#eaf6ff;
@@ -118,6 +119,16 @@
     }
     .nav-link:hover{ background:var(--bg1); text-decoration:none; }
     .loading{ text-align:center; padding:30px; color:var(--muted); }
+
+    @media (max-width:640px){
+      header{ flex-direction:column; align-items:flex-start; gap:8px; }
+      .wrap{ padding:12px 10px; }
+      .grid3{ grid-template-columns:1fr; }
+      .row{ flex-direction:column; align-items:stretch; }
+      select, input{ min-width:auto; width:100%; }
+      table{ font-size:12px; }
+      th, td{ padding:8px 4px; }
+    }
   </style>
 </head>
 <body>

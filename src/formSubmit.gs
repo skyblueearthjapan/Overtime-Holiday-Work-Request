@@ -233,6 +233,9 @@ function handleFormSubmit_(e) {
     const { workerCode, workerName } = parseWorkerChoice_(workerLabel);
     if (!workerCode) throw new Error(`作業員が取得できません: ${Q.WORKER}`);
 
+    // 作業員マスタからメールアドレスを補完
+    const workerEmail = lookupWorkerEmail_(workerCode);
+
     // 実施日
     const targetDateRaw = ans.get(Q.DATE);
     const targetDate = targetDateRaw instanceof Date ? targetDateRaw : new Date(targetDateRaw);
@@ -283,13 +286,14 @@ function handleFormSubmit_(e) {
       dept,
       workerCode,
       workerName,
-      workerEmail: '', // 作業員マスタにメール列がある場合、ここで補完する（後述の補助関数で対応可）
+      workerEmail,
       targetDate,
       submittedAt: now,
       approvedAt: '',
       approvedBy: '',
       approvedMinutes,
       reason,
+      reasonDetail,
       workContent: '', // フォームに業務内容があるならここへ
       // 明細（最大3件）
       jobId1: jobId,
@@ -349,6 +353,7 @@ function appendRequestRow_(obj) {
     approvedBy: 'approvedBy',
     approvedMinutes: 'approvedMinutes',
     reason: 'reason',
+    reasonDetail: 'reasonDetail',
     workContent: 'workContent',
 
     jobId1: 'jobId1',
