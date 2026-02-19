@@ -661,16 +661,23 @@ function loadDashboard(){
 
   google.script.run
     .withSuccessHandler(function(res){
+      console.log('api_getDashboard 結果:', JSON.stringify(res));
       if(!res){
-        otTb.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">データを取得できませんでした</td></tr>';
-        hdTb.innerHTML = '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">データを取得できませんでした</td></tr>';
+        otTb.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">データを取得できませんでした（res=null）</td></tr>';
+        hdTb.innerHTML = '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">デプロイの更新を確認してください</td></tr>';
+        return;
+      }
+      if(res.error){
+        otTb.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">サーバーエラー: ' + escHtml(res.error) + '</td></tr>';
+        hdTb.innerHTML = '<tr><td colspan="10"></td></tr>';
         return;
       }
       renderDashboard(res);
     })
     .withFailureHandler(function(err){
-      otTb.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">エラー: ' + escHtml(err.message || err) + '</td></tr>';
-      hdTb.innerHTML = '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">エラー: ' + escHtml(err.message || err) + '</td></tr>';
+      console.error('api_getDashboard 失敗:', err);
+      otTb.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">API失敗: ' + escHtml(err.message || err) + '</td></tr>';
+      hdTb.innerHTML = '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">GASエディタのログも確認してください</td></tr>';
     })
     .api_getDashboard();
 }

@@ -288,91 +288,99 @@ function api_getTodayRequestsForWorker(workerCode) {
 // 全社員の申請を取得し、残業と休日に分けて返す。
 
 function api_getDashboard() {
-  const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
-  const values = sh.getDataRange().getValues();
-  const wlMap = buildWorkLogsMapByRequestId_();
+  try {
+    const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    const values = sh.getDataRange().getValues();
+    const wlMap = buildWorkLogsMapByRequestId_();
 
-  const now = new Date();
-  const today = fmtDate_(now, 'yyyy-MM-dd');
+    const now = new Date();
+    const today = fmtDate_(now, 'yyyy-MM-dd');
 
-  // 今週末の日付範囲を算出（土〜日＋振替月曜まで）
-  const dow = now.getDay(); // 0=Sun..6=Sat
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
-  monday.setHours(0, 0, 0, 0);
-  const saturday = new Date(monday);
-  saturday.setDate(monday.getDate() + 5);
-  const nextMonday = new Date(monday);
-  nextMonday.setDate(monday.getDate() + 7);
+    // 今週末の日付範囲を算出（土〜日＋振替月曜まで）
+    const dow = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+    monday.setHours(0, 0, 0, 0);
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
 
-  // 土曜〜翌月曜（振替休日を含む）
-  const weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
-  const weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
+    const weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
+    const weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
 
-  const dayNames = ['日','月','火','水','木','金','土'];
-  const overtime = [];
-  const holiday = [];
+    const dayNames = ['日','月','火','水','木','金','土'];
+    const overtime = [];
+    const holiday = [];
 
-  for (let r = 1; r < values.length; r++) {
-    const row = values[r];
-    const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
-    if (!status || status === 'canceled') continue;
+    for (let r = 1; r < values.length; r++) {
+      const row = values[r];
+      const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+      if (!status || status === 'canceled') continue;
 
-    const targetDateVal = row[idx['targetDate']];
-    const targetDate = targetDateVal instanceof Date
-      ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
-      : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+      const targetDateVal = row[idx['targetDate']];
+      let targetDate;
+      try {
+        targetDate = targetDateVal instanceof Date
+          ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
+          : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+      } catch (e) { continue; }
 
-    const requestType = normalize_(row[idx['requestType(overtime/holiday)']]);
-    const requestId = normalize_(row[idx['requestId']]);
-    const wl = wlMap.get(requestId) || {};
+      const requestType = normalize_(row[idx['requestType(overtime/holiday)']]);
+      const requestId = normalize_(row[idx['requestId']]);
+      const wl = wlMap.get(requestId) || {};
 
-    const item = {
-      requestId,
-      requestType,
-      status,
-      dept: normalize_(row[idx['dept']]),
-      workerCode: normalize_(row[idx['workerCode']]),
-      workerName: normalize_(row[idx['workerName']]),
-      targetDate,
-      targetDateLabel: '',
-      approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
-      actualStartAt: wl.actualStartAt || '',
-      actualEndAt: wl.actualEndAt || '',
-      actualMinutes: Number(wl.actualMinutes || 0),
-      breakMinutes: Number(wl.breakMinutes || 0),
-      netMinutes: Number(wl.netMinutes || 0),
-      pdfFileId: normalize_(row[idx['pdfFileId']]),
-    };
+      // Date→文字列変換（GASシリアライズ問題回避）
+      const actualStartAt = wl.actualStartAt instanceof Date
+        ? fmtDate_(wl.actualStartAt, 'yyyy-MM-dd HH:mm:ss') : String(wl.actualStartAt || '');
+      const actualEndAt = wl.actualEndAt instanceof Date
+        ? fmtDate_(wl.actualEndAt, 'yyyy-MM-dd HH:mm:ss') : String(wl.actualEndAt || '');
 
-    if (requestType === 'overtime' && targetDate === today) {
-      overtime.push(item);
-    } else if (requestType === 'holiday' && targetDate >= weekendStart && targetDate <= weekendEnd) {
-      // 日付ラベルを付与（例: "2/22(土)"）
-      const d = new Date(targetDate + 'T00:00:00');
-      item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
-      holiday.push(item);
+      const item = {
+        requestId: requestId || '',
+        requestType: requestType || '',
+        status: status || '',
+        dept: normalize_(row[idx['dept']]) || '',
+        workerCode: normalize_(row[idx['workerCode']]) || '',
+        workerName: normalize_(row[idx['workerName']]) || '',
+        targetDate: targetDate || '',
+        targetDateLabel: '',
+        approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
+        actualStartAt: actualStartAt,
+        actualEndAt: actualEndAt,
+        actualMinutes: Number(wl.actualMinutes || 0),
+        breakMinutes: Number(wl.breakMinutes || 0),
+        netMinutes: Number(wl.netMinutes || 0),
+        pdfFileId: normalize_(row[idx['pdfFileId']]) || '',
+      };
+
+      if (requestType === 'overtime' && targetDate === today) {
+        overtime.push(item);
+      } else if (requestType === 'holiday' && targetDate >= weekendStart && targetDate <= weekendEnd) {
+        const d = new Date(targetDate + 'T00:00:00');
+        item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+        holiday.push(item);
+      }
     }
+
+    overtime.sort(function(a, b) {
+      if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
+      return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
+    });
+
+    holiday.sort(function(a, b) {
+      if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
+      if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
+      return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
+    });
+
+    return {
+      today: today, weekendStart: weekendStart, weekendEnd: weekendEnd,
+      overtime: overtime, holiday: holiday,
+    };
+  } catch (err) {
+    console.error('api_getDashboard エラー: ' + err.message + '\n' + err.stack);
+    return { today: '', weekendStart: '', weekendEnd: '',
+             overtime: [], holiday: [], error: err.message };
   }
-
-  // 残業は部署→名前順
-  overtime.sort(function(a, b) {
-    if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
-    return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
-  });
-
-  // 休日は日付→部署→名前順
-  holiday.sort(function(a, b) {
-    if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
-    if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
-    return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
-  });
-
-  return {
-    today,
-    weekendStart,
-    weekendEnd,
-    overtime,
-    holiday,
-  };
 }
