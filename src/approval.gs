@@ -267,7 +267,7 @@ function api_approveRequest(requestId) {
     if (idx['approvedAt'] !== undefined) sh.getRange(rowNo, idx['approvedAt']+1).setValue(now);
     if (idx['approvedBy'] !== undefined) sh.getRange(rowNo, idx['approvedBy']+1).setValue(email);
 
-    return { ok: true, requestId, approvedBy: email, approvedAt: now };
+    return { ok: true, requestId, approvedBy: email, approvedAt: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') };
   } finally {
     lock.releaseLock();
   }

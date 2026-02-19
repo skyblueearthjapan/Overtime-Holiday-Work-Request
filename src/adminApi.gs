@@ -391,7 +391,7 @@ function api_adminPendingWatch() {
     result.push({
       dept: normalize_(row[idx['dept']]),
       workerName: normalize_(row[idx['workerName']]),
-      submittedAt: submittedAt,
+      submittedAt: fmtDate_(submittedAt, 'yyyy-MM-dd HH:mm:ss'),
       hoursPending: Math.floor(hours),
       isOver48h: hours >= 48
     });

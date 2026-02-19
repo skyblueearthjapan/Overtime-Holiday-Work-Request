@@ -171,7 +171,7 @@ function api_markHolidayStart(requestId) {
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
 
-    return { ok:true, requestId, actualStartAt: now };
+    return { ok:true, requestId, actualStartAt: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') };
   } finally {
     lock.releaseLock();
   }
