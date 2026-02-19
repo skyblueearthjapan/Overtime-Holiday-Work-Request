@@ -100,20 +100,60 @@ function getTemplateFormId_(type) {
 
 // ====== フォームURL取得（TOP画面用：未作成なら自動生成） ======
 
-function api_getFormUrl(type, dept) {
+function api_getFormUrl(type, dept, workerLabel) {
+  let formId = '';
+
   // 既存を探す
   const found = findFormMapRow_(type, dept);
   if (found) {
     const isActive = found.isActive;
     if (isActive !== false && String(isActive).toLowerCase() !== 'false') {
-      const url = found.idx.formUrl >= 0 ? normalize_(found.row[found.idx.formUrl]) : '';
-      if (url) return url;
+      formId = normalize_(found.row[found.idx.formId]);
     }
   }
 
   // 未作成 → 自動生成を試みる
-  // エラーは呼び出し元（withFailureHandler）に伝搬させ、原因を表示する
-  const result = getOrCreateDeptForm_(type, dept);
-  if (!result) return null;
-  return result.formUrl || null;
+  if (!formId) {
+    const result = getOrCreateDeptForm_(type, dept);
+    if (!result) return null;
+    formId = result.formId;
+  }
+
+  if (!formId) return null;
+
+  // workerLabel があればプリフィルURLを生成
+  if (workerLabel) {
+    return buildPrefillUrl_(formId, workerLabel);
+  }
+
+  // workerLabel なし → 通常の公開URL
+  return FormApp.openById(formId).getPublishedUrl();
+}
+
+/**
+ * 作業員プリフィル付きURLを生成する。
+ * FormApp.createResponse() で事前入力URLを作成。
+ */
+function buildPrefillUrl_(formId, workerLabel) {
+  const form = FormApp.openById(formId);
+  const workerItem = findItemByTitleOrNull_(form, Q.WORKER);
+
+  if (!workerItem) {
+    // 作業員質問が見つからなければ通常URLを返す
+    return form.getPublishedUrl();
+  }
+
+  const type = workerItem.getType();
+  let response;
+  if (type === FormApp.ItemType.LIST) {
+    response = workerItem.asListItem().createResponse(workerLabel);
+  } else if (type === FormApp.ItemType.MULTIPLE_CHOICE) {
+    response = workerItem.asMultipleChoiceItem().createResponse(workerLabel);
+  } else {
+    return form.getPublishedUrl();
+  }
+
+  return form.createResponse()
+    .withItemResponse(response)
+    .toPrefilledUrl();
 }

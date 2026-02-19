@@ -209,7 +209,6 @@
   </div>
 
 <script>
-var FORM_URLS = {};
 var SELECTED_DEPT = '';
 var SELECTED_WORKER_CODE = '';
 
@@ -246,7 +245,6 @@ function onDeptChange(){
   var dept = document.getElementById('deptSelect').value;
   SELECTED_DEPT = dept;
   SELECTED_WORKER_CODE = '';
-  FORM_URLS = {};
 
   // 作業員プルダウンをリセット
   var wSel = document.getElementById('workerSelect');
@@ -261,10 +259,6 @@ function onDeptChange(){
     wSel.innerHTML = '<option value="">-- 部署を先に選択 --</option>';
     return;
   }
-
-  // フォームURL取得
-  loadFormUrl('overtime', dept);
-  loadFormUrl('holiday', dept);
 
   // 作業員一覧取得
   google.script.run
@@ -306,16 +300,7 @@ function onWorkerChange(){
   loadToday();
 }
 
-// ====== フォームURL取得 ======
-function loadFormUrl(type, dept){
-  google.script.run
-    .withSuccessHandler(function(url){
-      FORM_URLS[type] = url;
-    })
-    .withFailureHandler(function(){})
-    .api_getFormUrl(type, dept);
-}
-
+// ====== フォームURL取得（プリフィル付き） ======
 function openForm(type){
   var dept = SELECTED_DEPT || document.getElementById('deptSelect').value;
   if(!dept){
@@ -323,24 +308,28 @@ function openForm(type){
     return;
   }
 
-  var url = FORM_URLS[type];
-  if(url){
-    window.open(url, '_blank');
+  // 作業員が選択されていなければ警告
+  var wSel = document.getElementById('workerSelect');
+  var workerLabel = '';
+  if(wSel.selectedIndex > 0){
+    workerLabel = wSel.options[wSel.selectedIndex].textContent;
+  }
+  if(!workerLabel){
+    alert('作業員を選択してください。');
     return;
   }
 
-  // URL未取得 → サーバーで自動生成を試みる
+  // プリフィル付きURLをサーバーから取得して開く
   var label = (type === 'overtime') ? '残業' : '休日出勤';
   var cards = document.getElementById('formCards');
   cards.style.opacity = '0.5';
   cards.style.pointerEvents = 'none';
   google.script.run
-    .withSuccessHandler(function(newUrl){
+    .withSuccessHandler(function(url){
       cards.style.opacity = '1';
       cards.style.pointerEvents = '';
-      if(newUrl){
-        FORM_URLS[type] = newUrl;
-        window.open(newUrl, '_blank');
+      if(url){
+        window.open(url, '_blank');
       } else {
         alert(label + '申請フォームを作成できませんでした。管理者に連絡してください。');
       }
@@ -350,7 +339,7 @@ function openForm(type){
       cards.style.pointerEvents = '';
       alert(label + 'フォーム取得エラー: ' + (err.message || err));
     })
-    .api_getFormUrl(type, dept);
+    .api_getFormUrl(type, dept, workerLabel);
 }
 
 // ====== 本日の申請 更新 ======
