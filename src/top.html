@@ -608,22 +608,56 @@ function doOpenForm(type, dept, workerLabel, targetDateStr, orderCodes){
   var cards = document.getElementById('formCards');
   cards.style.opacity = '0.5';
   cards.style.pointerEvents = 'none';
+
+  // ポップアップブロッカー対策：ユーザー操作の同期コンテキスト内でwindowを先に開く
+  var newWin = window.open('about:blank', '_blank');
+  if(newWin){
+    newWin.document.write(
+      '<html><body style="font-family:system-ui,sans-serif;display:flex;align-items:center;' +
+      'justify-content:center;height:100vh;margin:0;color:#5c6b7a;">' +
+      '<div style="text-align:center;"><p style="font-size:18px;font-weight:700;">' +
+      label + '申請フォームを準備中...</p>' +
+      '<p style="font-size:13px;">しばらくお待ちください</p></div></body></html>'
+    );
+  }
+
   google.script.run
     .withSuccessHandler(function(url){
       cards.style.opacity = '1';
       cards.style.pointerEvents = '';
-      if(url){
-        window.open(url, '_blank');
+      if(url && newWin){
+        newWin.location.href = url;
+      } else if(url && !newWin){
+        // ポップアップがブロックされた場合：リンクを表示
+        showFormLink(url, label);
       } else {
+        if(newWin) newWin.close();
         alert(label + '申請フォームを作成できませんでした。管理者に連絡してください。');
       }
     })
     .withFailureHandler(function(err){
       cards.style.opacity = '1';
       cards.style.pointerEvents = '';
+      if(newWin) newWin.close();
       alert(label + 'フォーム取得エラー: ' + (err.message || err));
     })
     .api_getFormUrl(type, dept, workerLabel, targetDateStr, orderCodes || []);
+}
+
+// ポップアップブロック時のフォールバック：リンクを表示
+function showFormLink(url, label){
+  var div = document.createElement('div');
+  div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
+    'z-index:300;background:#fff;border:2px solid var(--accent2);border-radius:18px;' +
+    'padding:24px;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.15);max-width:360px;width:90%;';
+  div.innerHTML =
+    '<div style="font-weight:900;font-size:16px;margin-bottom:8px;">ポップアップがブロックされました</div>' +
+    '<div class="sub" style="margin-bottom:14px;">下のリンクをクリックしてフォームを開いてください</div>' +
+    '<a href="' + url + '" target="_blank" style="display:inline-block;padding:12px 24px;' +
+    'background:linear-gradient(135deg,var(--accent2),#38bdf8);color:#fff;border-radius:12px;' +
+    'font-weight:800;text-decoration:none;">' + label + 'フォームを開く</a>' +
+    '<div style="margin-top:12px;"><button class="ghost btn-sm" onclick="this.parentElement.parentElement.remove()">閉じる</button></div>';
+  document.body.appendChild(div);
 }
 
 // ====== 本日の申請 更新 ======
