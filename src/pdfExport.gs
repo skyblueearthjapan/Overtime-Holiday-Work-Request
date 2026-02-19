@@ -262,13 +262,11 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   // 日付
   sheet.getRange(PDF_MAP.targetDate).setValue(fmtDate_(targetDate, 'yyyy/MM/dd'));
 
-  // 実績時刻
-  if (wl.actualStartAt instanceof Date) {
-    sheet.getRange(PDF_MAP.startAt).setValue(fmtDate_(wl.actualStartAt, 'HH:mm'));
-  }
-  if (wl.actualEndAt instanceof Date) {
-    sheet.getRange(PDF_MAP.endAt).setValue(fmtDate_(wl.actualEndAt, 'HH:mm'));
-  }
+  // 実績時刻（Date or JST文字列 "yyyy-MM-dd HH:mm:ss" どちらにも対応）
+  const startTime = extractHHmm_(wl.actualStartAt);
+  const endTime   = extractHHmm_(wl.actualEndAt);
+  if (startTime) sheet.getRange(PDF_MAP.startAt).setValue(startTime);
+  if (endTime)   sheet.getRange(PDF_MAP.endAt).setValue(endTime);
 
   // 休憩・実残業
   sheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
@@ -358,4 +356,15 @@ function logBatchResult_(batchName, dateObj, result) {
     result.fail || 0,
     errText,
   ]);
+}
+
+// ====== Date or JST文字列から "HH:mm" を抽出 ======
+
+function extractHHmm_(val) {
+  if (!val) return '';
+  if (val instanceof Date) return fmtDate_(val, 'HH:mm');
+  // JST文字列 "yyyy-MM-dd HH:mm:ss" や "HH:mm" 形式
+  const s = String(val);
+  const m = s.match(/(\d{2}:\d{2})/);
+  return m ? m[1] : '';
 }

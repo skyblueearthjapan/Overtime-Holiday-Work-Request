@@ -130,12 +130,12 @@ function api_markOvertimeDone(requestId) {
     const netMinutes = Math.max(0, actualMinutes - breakMinutes);
 
     updateWorkLog_(requestId, {
-      actualStartAt: start,
-      actualEndAt: now,
+      actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(now,   'yyyy-MM-dd HH:mm:ss'),
       actualMinutes: actualMinutes,
       breakMinutes: breakMinutes,
       netMinutes: netMinutes,
-      updatedAt: new Date(),
+      updatedAt: fmtDate_(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
 
@@ -166,8 +166,8 @@ function api_markHolidayStart(requestId) {
 
     const now = new Date();
     updateWorkLog_(requestId, {
-      actualStartAt: now,
-      updatedAt: now,
+      actualStartAt: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'),
+      updatedAt:     fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'),
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
 
@@ -198,8 +198,18 @@ function api_markHolidayDone(requestId) {
     if (rowNo === -1) throw new Error('休日開始が記録されていません（開始ボタンを押してください）。');
 
     const row = sh.getRange(rowNo,1,1,sh.getLastColumn()).getValues()[0];
-    const start = row[idx['actualStartAt']];
-    if (!(start instanceof Date)) throw new Error('休日開始が記録されていません（開始ボタンを押してください）。');
+    const startRaw = row[idx['actualStartAt']];
+    // actualStartAt は Date オブジェクトまたは JST 文字列のいずれか
+    let start;
+    if (startRaw instanceof Date) {
+      start = startRaw;
+    } else if (startRaw) {
+      // JST文字列 "yyyy-MM-dd HH:mm:ss" → +09:00 付きでパースして正しいUTCに
+      start = new Date(String(startRaw).replace(' ', 'T') + '+09:00');
+    }
+    if (!start || isNaN(start.getTime())) {
+      throw new Error('休日開始が記録されていません（開始ボタンを押してください）。');
+    }
 
     const now = new Date();
     const actualMinutes = Math.max(0, Math.round((now.getTime() - start.getTime()) / 60000));
@@ -207,11 +217,11 @@ function api_markHolidayDone(requestId) {
     const netMinutes = Math.max(0, actualMinutes - breakMinutes);
 
     updateWorkLog_(requestId, {
-      actualEndAt: now,
+      actualEndAt:   fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'),
       actualMinutes: actualMinutes,
       breakMinutes: breakMinutes,
       netMinutes: netMinutes,
-      updatedAt: new Date(),
+      updatedAt: fmtDate_(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
 
