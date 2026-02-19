@@ -30,6 +30,7 @@ const Q = {
   _OLD_ORDER_NUMBER_2: '工番番号_2',
   _OLD_ORDER_PREFIX_3: '工番プレフィックス_3',
   _OLD_ORDER_NUMBER_3: '工番番号_3',
+  WORK_CONTENT: '業務内容',
   REASON: '理由',
   REASON_DETAIL: '補足理由',
   OT_HOURS: '予定時間',

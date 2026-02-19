@@ -237,6 +237,65 @@ function debugProcessLatest_() {
   Logger.log('未処理の回答が見つかりませんでした。');
 }
 
+// ====== 全未処理回答を一括処理（手動実行用） ======
+// POLL_LAST_TSをリセットして全フォームの全回答を処理し直す。
+// ※ 既にRequestsに書き込み済みの回答は重複する可能性があるため、
+//    Requestsが空の状態で実行することを推奨。
+
+function reprocessAllResponses_() {
+  const props = PropertiesService.getScriptProperties();
+
+  // タイムスタンプを48時間前にリセット（全回答を拾う）
+  const since = new Date(Date.now() - 48 * 60 * 60 * 1000);
+  props.setProperty('POLL_LAST_TS', since.toISOString());
+  Logger.log('POLL_LAST_TS を ' + since.toISOString() + ' にリセット');
+
+  // FormMap の全アクティブフォームを処理
+  const sh = ensureFormMapSheet_();
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const formIdCol = H.indexOf('formId');
+  const typeCol = H.indexOf('type');
+  const deptCol = H.indexOf('dept');
+  const activeCol = H.indexOf('isActive');
+  if (formIdCol < 0) { Logger.log('FormMapに formId 列がありません'); return; }
+
+  let processed = 0;
+  let errors = 0;
+
+  for (let r = 1; r < values.length; r++) {
+    const formId = normalize_(values[r][formIdCol]);
+    if (!formId) continue;
+    if (activeCol >= 0) {
+      const a = values[r][activeCol];
+      if (a === false || String(a).toLowerCase() === 'false') continue;
+    }
+
+    try {
+      const form = FormApp.openById(formId);
+      const responses = form.getResponses(since);
+      const label = values[r][typeCol] + '/' + values[r][deptCol];
+
+      for (const resp of responses) {
+        try {
+          handleFormSubmit_({ response: resp });
+          processed++;
+          Logger.log('  [OK] ' + label + ' — ' + resp.getTimestamp());
+        } catch (e) {
+          errors++;
+          Logger.log('  [ERROR] ' + label + ' — ' + e.message);
+        }
+      }
+    } catch (e) {
+      Logger.log('  [FORM ERROR] ' + values[r][typeCol] + '/' + values[r][deptCol] + ': ' + e.message);
+    }
+  }
+
+  // タイムスタンプを now に更新
+  props.setProperty('POLL_LAST_TS', new Date().toISOString());
+  Logger.log('=== 一括処理完了: 成功=' + processed + ' エラー=' + errors + ' ===');
+}
+
 // ====== Requests/WorkLogs 共通ヘルパー ======
 
 function buildHeaderIndex_(headerRow) {
@@ -408,7 +467,10 @@ function handleFormSubmit_(e) {
     const targetDate = targetDateRaw instanceof Date ? targetDateRaw : new Date(targetDateRaw);
     if (!targetDate || isNaN(targetDate.getTime())) throw new Error(`作業実施日が不正です: ${targetDateRaw}`);
 
-    // 工番（プレフィックス選択＋5桁番号入力 ×最大3件、間接業務は全て空でもOK）
+    // 業務内容（任意）
+    const workContent = normalize_(ans.get(Q.WORK_CONTENT) || '');
+
+    // 工番（テキスト欄 ×最大3件、間接業務は全て空でもOK）
     const { workNo1, workNo2, workNo3, errors: workNoErrors } = parseWorkNosFromForm_(ans);
     // 片方だけ入力されている等の整合性エラーのみチェック（全空はOK）
     if (workNoErrors.length > 0) {
@@ -457,7 +519,7 @@ function handleFormSubmit_(e) {
       approvedMinutes,
       reason,
       reasonDetail,
-      workContent: '', // フォームに業務内容があるならここへ
+      workContent,
       // 明細（最大3件）
       jobId1: '',
       workNo1: workNo1,

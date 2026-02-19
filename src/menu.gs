@@ -19,6 +19,7 @@ function onOpen() {
     .addSeparator()
     .addItem('診断：ポーリング状態確認', 'debugPollStatus_')
     .addItem('診断：最新回答を手動処理', 'debugProcessLatest_')
+    .addItem('全回答を一括処理（初回/リカバリ用）', 'reprocessAllResponses_')
     .addToUi();
 }
 
