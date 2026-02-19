@@ -21,14 +21,15 @@ function pollNewResponses_() {
   try {
     const props = PropertiesService.getScriptProperties();
     const lastTs = props.getProperty('POLL_LAST_TS');
-    const since = lastTs ? new Date(lastTs) : null;
+    let since = lastTs ? new Date(lastTs) : null;
     const now = new Date();
 
-    // 初回実行時はタイムスタンプだけセットして終了（過去分は処理しない）
+    // 初回実行時：24時間前を基準にして既存回答も拾う
     if (!since) {
-      props.setProperty('POLL_LAST_TS', now.toISOString());
-      Logger.log('pollNewResponses_: 初回実行 — 基準タイムスタンプをセット');
-      return;
+      since = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+      props.setProperty('POLL_LAST_TS', since.toISOString());
+      Logger.log('pollNewResponses_: 初回実行 — 24時間前を基準タイムスタンプにセット');
+      // ↓ そのまま処理を続行（return しない）
     }
 
     // FormMap から全アクティブフォームを取得
@@ -41,6 +42,12 @@ function pollNewResponses_() {
 
     let processed = 0;
     let errors = 0;
+    let latestResponseTs = since; // 処理成功した最新の回答タイムスタンプ
+
+    // リトライ時の重複処理防止用：キャッシュから処理済み回答IDを読み込む
+    const cache = CacheService.getScriptCache();
+    const cachedIds = cache.get('POLL_PROCESSED_IDS');
+    const processedIds = new Set(cachedIds ? JSON.parse(cachedIds) : []);
 
     for (let r = 1; r < values.length; r++) {
       const formId = normalize_(values[r][formIdCol]);
@@ -56,12 +63,21 @@ function pollNewResponses_() {
         const responses = form.getResponses(since);
 
         for (const resp of responses) {
+          // 重複処理防止：同じ回答を2回処理しない
+          const respId = resp.getId();
+          if (processedIds.has(respId)) continue;
+
           try {
             handleFormSubmit_({ response: resp });
+            processedIds.add(respId);
             processed++;
+            // 成功した回答のタイムスタンプを追跡
+            const respTs = resp.getTimestamp();
+            if (respTs > latestResponseTs) latestResponseTs = respTs;
           } catch (e) {
             errors++;
             console.error('pollNewResponses_ handler error (form=' + formId + '): ' + e.message);
+            // エラー時はタイムスタンプを進めない → 次回リトライ
           }
         }
       } catch (e) {
@@ -69,8 +85,25 @@ function pollNewResponses_() {
       }
     }
 
-    // タイムスタンプ更新（次回はこの時刻以降のみ処理）
-    props.setProperty('POLL_LAST_TS', now.toISOString());
+    // タイムスタンプ更新：エラーがなければ now まで進める
+    // エラーがあれば、成功した最新の回答まで（失敗分は次回リトライ）
+    if (errors === 0) {
+      props.setProperty('POLL_LAST_TS', now.toISOString());
+    } else if (latestResponseTs > since) {
+      // 部分的に成功 → 最新成功分まで進める（ただし失敗分の前まで）
+      // 安全のため since のまま据え置き（全件リトライ）
+      Logger.log('pollNewResponses_: errors発生のためタイムスタンプ据え置き（次回リトライ）');
+    } else {
+      // 全件失敗 → タイムスタンプ据え置き
+      Logger.log('pollNewResponses_: 全件エラーのためタイムスタンプ据え置き');
+    }
+
+    // 処理済みIDキャッシュを更新（10分間保持、古いIDは自然に失効）
+    if (processedIds.size > 0) {
+      // 最新100件だけ保持（メモリ節約）
+      const idArr = Array.from(processedIds).slice(-100);
+      cache.put('POLL_PROCESSED_IDS', JSON.stringify(idArr), 600);
+    }
 
     if (processed > 0 || errors > 0) {
       Logger.log('pollNewResponses_: processed=' + processed + ' errors=' + errors);
@@ -258,9 +291,9 @@ function plannedMinutesFromHoliday_(label) {
 // 送信した瞬間に Requests に 1 行追加 → トップで即表示
 
 function handleFormSubmit_(e) {
-  const lock = LockService.getScriptLock();
-  lock.waitLock(20000);
-  try {
+  // ※ ロックは呼び出し元（pollNewResponses_）で取得済みのため、ここでは取得しない。
+  //    再取得するとデッドロックになる。
+  {
     // e.response.getItemResponses() を使う（タイトルで拾うのでフォームが増えても堅い）
     const response = e.response;
     const itemResponses = response.getItemResponses();
@@ -370,10 +403,8 @@ function handleFormSubmit_(e) {
 
   } catch (err) {
     // フォーム送信を止めることはできないので、ログに残す
-    console.error(err);
-    // 必要なら管理者にメール通知も可能（V2）
-  } finally {
-    lock.releaseLock();
+    console.error('handleFormSubmit_ error: ' + err.message + '\n' + err.stack);
+    throw err; // pollNewResponses_ の errors カウンタに反映させるため再throw
   }
 }
 
