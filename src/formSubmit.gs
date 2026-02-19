@@ -293,7 +293,7 @@ function plannedMinutesFromHoliday_(label) {
 function handleFormSubmit_(e) {
   // ※ ロックは呼び出し元（pollNewResponses_）で取得済みのため、ここでは取得しない。
   //    再取得するとデッドロックになる。
-  {
+  try {
     // e.response.getItemResponses() を使う（タイトルで拾うのでフォームが増えても堅い）
     const response = e.response;
     const itemResponses = response.getItemResponses();
