@@ -190,6 +190,9 @@
         <div>本日の申請一覧（<span id="todayDate">-</span>）</div>
         <button class="ghost btn-sm" onclick="loadToday()">更新</button>
       </div>
+      <div id="identityWarning" style="display:none;background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px">
+        &#9888; 作業員マスタに「Googleアカウント」列がないため、本人フィルタ無効（全員の申請を表示中）
+      </div>
       <table id="tblToday">
         <thead>
           <tr>
@@ -351,6 +354,12 @@ function renderToday(res){
   document.getElementById('todayDate').innerText = res.today;
   var tb = document.querySelector('#tblToday tbody');
   tb.innerHTML = '';
+
+  // Googleアカウント列未設定の警告
+  var warnEl = document.getElementById('identityWarning');
+  if(warnEl){
+    warnEl.style.display = res.identityWarning ? '' : 'none';
+  }
 
   if(!res.items || res.items.length === 0){
     tb.innerHTML =

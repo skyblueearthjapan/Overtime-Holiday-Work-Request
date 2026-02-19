@@ -233,6 +233,10 @@ function api_getTodayRequestsForWorker() {
   const email = Session.getActiveUser().getEmail();
   const workerInfo = api_getWorkerInfo();
 
+  // workerInfo が null = 作業員マスタに「Googleアカウント」列が無い
+  // → 本人照合が不可能なので、本人フィルタをスキップして全件表示
+  const canIdentify = !!(workerInfo);
+
   const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
   const values = sh.getDataRange().getValues();
   const today = fmtDate_(new Date(), 'yyyy-MM-dd');
@@ -245,15 +249,17 @@ function api_getTodayRequestsForWorker() {
     const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
     if (!status || status === 'canceled') continue;
 
-    // 本人照合（workerEmail または workerCode）
-    let isMe = false;
-    const rowEmail = normalize_(row[idx['workerEmail']]);
-    if (rowEmail && rowEmail === email) isMe = true;
-    if (!isMe && workerInfo) {
-      const rowCode = normalize_(row[idx['workerCode']]);
-      if (rowCode && rowCode === workerInfo.workerCode) isMe = true;
+    // 本人照合（Googleアカウント列がある場合のみ）
+    if (canIdentify) {
+      let isMe = false;
+      const rowEmail = normalize_(row[idx['workerEmail']]);
+      if (rowEmail && rowEmail === email) isMe = true;
+      if (!isMe && workerInfo) {
+        const rowCode = normalize_(row[idx['workerCode']]);
+        if (rowCode && rowCode === workerInfo.workerCode) isMe = true;
+      }
+      if (!isMe) continue;
     }
-    if (!isMe) continue;
 
     const targetDateVal = row[idx['targetDate']];
     const targetDate = targetDateVal instanceof Date
@@ -283,5 +289,5 @@ function api_getTodayRequestsForWorker() {
     });
   }
 
-  return { today, workerInfo, items: out };
+  return { today, workerInfo, items: out, identityWarning: !canIdentify };
 }
