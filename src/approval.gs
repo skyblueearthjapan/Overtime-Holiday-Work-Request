@@ -78,8 +78,9 @@ function canApproveDept_(email, dept) {
 // ====== 承認者画面用：部署別「本日申請」取得 ======
 
 function api_getTodayRequestsForDept(dept) {
+  const normDept = normalize_(dept);
   const email = Session.getActiveUser().getEmail();
-  if (!canApproveDept_(email, dept)) throw new Error('この部署の承認権限がありません。');
+  if (!canApproveDept_(email, normDept)) throw new Error('この部署の承認権限がありません。');
 
   const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
   const values = sh.getDataRange().getValues();
@@ -93,7 +94,7 @@ function api_getTodayRequestsForDept(dept) {
     if (!status || status === 'canceled') continue;
 
     const rowDept = normalize_(row[idx['dept']]);
-    if (rowDept !== dept) continue;
+    if (rowDept !== normDept) continue;
 
     const targetDateVal = row[idx['targetDate']];
     const targetDate = targetDateVal instanceof Date ? fmtDate_(targetDateVal,'yyyy-MM-dd') : fmtDate_(new Date(targetDateVal),'yyyy-MM-dd');
@@ -112,7 +113,114 @@ function api_getTodayRequestsForDept(dept) {
       approvedAt: row[idx['approvedAt']],
     });
   }
-  return { today, dept, items: out };
+  return { today, dept: normDept, items: out };
+}
+
+// ====== 承認者ダッシュボード（全承認対象部署の残業+休日） ======
+
+function api_getApproverDashboard() {
+  const email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('メールアドレスが取得できません。');
+
+  // 承認可能な部署一覧を取得
+  const admin = isAdmin_(email);
+  let allowedDepts;
+  if (admin) {
+    allowedDepts = null; // null = 全部署OK
+  } else {
+    const map = getDeptApproverMap_();
+    const emailLc = email.toLowerCase();
+    allowedDepts = new Set();
+    for (const dept of Object.keys(map)) {
+      if (map[dept].has(emailLc)) allowedDepts.add(dept);
+    }
+    if (allowedDepts.size === 0) {
+      throw new Error('承認者権限がありません。');
+    }
+  }
+
+  const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  const values = sh.getDataRange().getValues();
+
+  const now = new Date();
+  const today = fmtDate_(now, 'yyyy-MM-dd');
+
+  // 今週末の日付範囲
+  const dow = now.getDay();
+  const monday = new Date(now);
+  monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+  monday.setHours(0, 0, 0, 0);
+  const saturday = new Date(monday);
+  saturday.setDate(monday.getDate() + 5);
+  const nextMonday = new Date(monday);
+  nextMonday.setDate(monday.getDate() + 7);
+  const weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
+  const weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
+
+  const dayNames = ['日','月','火','水','木','金','土'];
+  const overtime = [];
+  const holiday = [];
+
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+    if (!status || status === 'canceled') continue;
+
+    const rowDept = normalize_(row[idx['dept']]);
+    // 部署フィルタ（adminは全部署OK）
+    if (allowedDepts && !allowedDepts.has(rowDept)) continue;
+
+    const targetDateVal = row[idx['targetDate']];
+    const targetDate = targetDateVal instanceof Date
+      ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
+      : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+
+    const requestType = normalize_(row[idx['requestType(overtime/holiday)']]);
+    const requestId = normalize_(row[idx['requestId']]);
+
+    const item = {
+      requestId,
+      requestType,
+      status,
+      dept: rowDept,
+      workerName: normalize_(row[idx['workerName']]),
+      targetDate,
+      targetDateLabel: '',
+      approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
+      submittedAt: row[idx['submittedAt']],
+    };
+
+    if (requestType === 'overtime' && targetDate === today) {
+      overtime.push(item);
+    } else if (requestType === 'holiday' && targetDate >= weekendStart && targetDate <= weekendEnd) {
+      const d = new Date(targetDate + 'T00:00:00');
+      item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+      holiday.push(item);
+    }
+  }
+
+  // ソート：未承認を先頭、次に部署→名前
+  const sortFn = function(a, b) {
+    // submitted first
+    if (a.status !== b.status) {
+      if (a.status === 'submitted') return -1;
+      if (b.status === 'submitted') return 1;
+    }
+    if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
+    return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
+  };
+  overtime.sort(sortFn);
+  holiday.sort(function(a, b) {
+    if (a.status !== b.status) {
+      if (a.status === 'submitted') return -1;
+      if (b.status === 'submitted') return 1;
+    }
+    if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
+    if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
+    return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
+  });
+
+  return { today, weekendStart, weekendEnd, overtime, holiday, isAdmin: admin };
 }
 
 // ====== 承認実行（承認ボタン） ======
