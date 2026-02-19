@@ -193,11 +193,7 @@ function addDatePrefill_(formResponse, form, questionTitle, targetDateStr) {
     d = new Date();
   }
 
-  const year = Number(Utilities.formatDate(d, TZ, 'yyyy'));
-  const month = Number(Utilities.formatDate(d, TZ, 'M'));
-  const day = Number(Utilities.formatDate(d, TZ, 'd'));
-
-  const itemResponse = item.asDateItem().createResponse(year, month, day);
+  const itemResponse = item.asDateItem().createResponse(d);
   return formResponse.withItemResponse(itemResponse);
 }
 
