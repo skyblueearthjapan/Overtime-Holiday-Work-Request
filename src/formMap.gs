@@ -121,39 +121,52 @@ function api_getFormUrl(type, dept, workerLabel) {
 
   if (!formId) return null;
 
-  // workerLabel があればプリフィルURLを生成
-  if (workerLabel) {
-    return buildPrefillUrl_(formId, workerLabel);
-  }
-
-  // workerLabel なし → 通常の公開URL
-  return FormApp.openById(formId).getPublishedUrl();
+  // プリフィルURLを生成（申請種別・部署・作業員を事前入力）
+  return buildPrefillUrl_(formId, type, dept, workerLabel);
 }
 
 /**
- * 作業員プリフィル付きURLを生成する。
- * FormApp.createResponse() で事前入力URLを作成。
+ * プリフィル（事前入力）付きURLを生成する。
+ * 申請種別・部署・作業員を自動セットした状態でフォームを開く。
  */
-function buildPrefillUrl_(formId, workerLabel) {
+function buildPrefillUrl_(formId, requestType, dept, workerLabel) {
   const form = FormApp.openById(formId);
-  const workerItem = findItemByTitleOrNull_(form, Q.WORKER);
+  let formResponse = form.createResponse();
 
-  if (!workerItem) {
-    // 作業員質問が見つからなければ通常URLを返す
-    return form.getPublishedUrl();
+  // 申請種別をプリフィル（"残業" or "休日"）
+  const typeLabel = (requestType === 'overtime') ? '残業' : '休日';
+  formResponse = addPrefill_(formResponse, form, Q.TYPE, typeLabel);
+
+  // 部署をプリフィル
+  formResponse = addPrefill_(formResponse, form, Q.DEPT, dept);
+
+  // 作業員をプリフィル
+  if (workerLabel) {
+    formResponse = addPrefill_(formResponse, form, Q.WORKER, workerLabel);
   }
 
-  const type = workerItem.getType();
-  let response;
+  return formResponse.toPrefilledUrl();
+}
+
+/**
+ * フォーム回答オブジェクトにプリフィルを追加するヘルパー。
+ * 質問が見つからない場合やタイプ不一致の場合はスキップ。
+ */
+function addPrefill_(formResponse, form, questionTitle, value) {
+  const item = findItemByTitleOrNull_(form, questionTitle);
+  if (!item || !value) return formResponse;
+
+  const type = item.getType();
+  let itemResponse;
   if (type === FormApp.ItemType.LIST) {
-    response = workerItem.asListItem().createResponse(workerLabel);
+    itemResponse = item.asListItem().createResponse(value);
   } else if (type === FormApp.ItemType.MULTIPLE_CHOICE) {
-    response = workerItem.asMultipleChoiceItem().createResponse(workerLabel);
+    itemResponse = item.asMultipleChoiceItem().createResponse(value);
+  } else if (type === FormApp.ItemType.TEXT) {
+    itemResponse = item.asTextItem().createResponse(value);
   } else {
-    return form.getPublishedUrl();
+    return formResponse; // 未対応タイプはスキップ
   }
 
-  return form.createResponse()
-    .withItemResponse(response)
-    .toPrefilledUrl();
+  return formResponse.withItemResponse(itemResponse);
 }
