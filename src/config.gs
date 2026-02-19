@@ -19,13 +19,17 @@ const Q = {
   WORKER: '作業員',
   DATE: '作業実施日',
   ORDER: '工番',  // 旧テンプレ互換（削除対象の検出用に残す）
-  // 工番：プレフィックス選択＋5桁番号入力（最大3件）
-  ORDER_PREFIX_1: '工番プレフィックス_1',
-  ORDER_NUMBER_1: '工番番号_1',
-  ORDER_PREFIX_2: '工番プレフィックス_2',
-  ORDER_NUMBER_2: '工番番号_2',
-  ORDER_PREFIX_3: '工番プレフィックス_3',
-  ORDER_NUMBER_3: '工番番号_3',
+  // 工番：モーダルで選択した工番コードをそのままプリフィル（最大3件）
+  ORDER_1: '工番1',
+  ORDER_2: '工番2',
+  ORDER_3: '工番3',
+  // 旧形式の検出・削除用（プレフィックス＋番号分離方式）
+  _OLD_ORDER_PREFIX_1: '工番プレフィックス_1',
+  _OLD_ORDER_NUMBER_1: '工番番号_1',
+  _OLD_ORDER_PREFIX_2: '工番プレフィックス_2',
+  _OLD_ORDER_NUMBER_2: '工番番号_2',
+  _OLD_ORDER_PREFIX_3: '工番プレフィックス_3',
+  _OLD_ORDER_NUMBER_3: '工番番号_3',
   REASON: '理由',
   REASON_DETAIL: '補足理由',
   OT_HOURS: '予定時間',

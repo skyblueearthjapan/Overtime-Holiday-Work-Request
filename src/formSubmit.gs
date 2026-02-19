@@ -160,76 +160,20 @@ function lookupOrderInfo_(orderNo) {
   return null;
 }
 
-// ====== 工番番号の正規化（全角→半角、5桁ゼロ埋め） ======
-
-function normalize5Digits_(s) {
-  // 全角数字→半角数字（normalize_ が英数字全般を変換するので流用）
-  let x = normalize_(s);
-  // 数字以外を除去（保険）
-  x = x.replace(/[^0-9]/g, '');
-  // 左ゼロ埋め（5桁未満の場合）
-  if (x.length > 0 && x.length < 5) x = x.padStart(5, '0');
-  return x;
-}
-
-// ====== 工番コード生成（プレフィックス＋5桁番号） ======
-
-function buildWorkNo_(prefix, numberRaw) {
-  const p = normalize_(prefix);
-  const n = normalize5Digits_(numberRaw);
-  if (!p) return { workNo: '', error: '工番プレフィックスが空です' };
-  if (!/^[0-9]{5}$/.test(n)) return { workNo: '', error: '工番番号は5桁数字である必要があります: ' + numberRaw };
-  return { workNo: p + n, error: '' };
-}
-
 // ====== フォーム回答から工番1〜3をパース ======
+// モーダルで選択された工番コードがそのままテキスト欄に入る。
+// 全て任意（間接業務の方は工番なしで申請可能）。
 
 function parseWorkNosFromForm_(ans) {
-  const pairs = [
-    { prefix: ans.get(Q.ORDER_PREFIX_1), number: ans.get(Q.ORDER_NUMBER_1), required: false },
-    { prefix: ans.get(Q.ORDER_PREFIX_2), number: ans.get(Q.ORDER_NUMBER_2), required: false },
-    { prefix: ans.get(Q.ORDER_PREFIX_3), number: ans.get(Q.ORDER_NUMBER_3), required: false },
-  ];
+  const fields = [Q.ORDER_1, Q.ORDER_2, Q.ORDER_3];
+  const workNos = fields.map(q => normalize_(ans.get(q) || ''));
 
-  const workNos = [];
-  const errors = [];
-
-  pairs.forEach((x, i) => {
-    const idx = i + 1;
-    const p = normalize_(x.prefix || '');
-    const n = normalize_(x.number || '');
-    const hasP = p !== '';
-    const hasN = n !== '';
-
-    if (x.required) {
-      // 1件目は必須
-      if (!hasP || !hasN) {
-        errors.push('工番' + idx + ': プレフィックスと番号は両方必須です');
-        workNos.push('');
-        return;
-      }
-      const result = buildWorkNo_(p, n);
-      if (result.error) errors.push('工番' + idx + ': ' + result.error);
-      workNos.push(result.workNo);
-      return;
-    }
-
-    // 2,3件目は任意（ただし片方だけはNG）
-    if (!hasP && !hasN) {
-      workNos.push('');
-      return;
-    }
-    if (!hasP || !hasN) {
-      errors.push('工番' + idx + ': プレフィックスと番号はセットで入力してください');
-      workNos.push('');
-      return;
-    }
-    const result = buildWorkNo_(p, n);
-    if (result.error) errors.push('工番' + idx + ': ' + result.error);
-    workNos.push(result.workNo);
-  });
-
-  return { workNo1: workNos[0] || '', workNo2: workNos[1] || '', workNo3: workNos[2] || '', errors };
+  return {
+    workNo1: workNos[0],
+    workNo2: workNos[1],
+    workNo3: workNos[2],
+    errors: [],
+  };
 }
 
 // ====== 工番1〜3をマスタ突合して補完結果を返す ======

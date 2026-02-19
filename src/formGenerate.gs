@@ -101,7 +101,6 @@ function updateDeptFormChoices_(formOrFormId, type, dept) {
 
   // マスタ読み込み
   const workersByDept = loadWorkersByDept_();
-  const orderPrefixes = loadOrderPrefixes_();
 
   const workerChoices = workersByDept.get(dept) || [];
 
@@ -109,16 +108,12 @@ function updateDeptFormChoices_(formOrFormId, type, dept) {
     Logger.log(`WARN: 作業員候補が空のためスキップ: dept=${dept}`);
     return false;
   }
-  if (orderPrefixes.length === 0) {
-    Logger.log('WARN: 工番プレフィックス候補が空のためスキップ');
-    return false;
-  }
 
   // セット
   setDropdownChoices_(findItemByTitle_(form, Q.WORKER), workerChoices);
 
-  // 工番：旧プルダウンを削除し、プレフィックス選択＋5桁番号入力（×3件）に差し替え
-  ensureOrderPrefixItems_(form, orderPrefixes);
+  // 工番：旧形式を削除し、シンプルなテキスト欄（工番1/2/3）に差し替え
+  ensureOrderItems_(form);
 
   setDropdownChoices_(findItemByTitle_(form, Q.REASON), REASONS);
 
