@@ -229,36 +229,151 @@ function api_getHolidayCandidateDates() {
   });
 
   // Googleカレンダーの日本の祝日を検索
-  try {
-    const calId = 'ja.japanese#holiday@group.v.calendar.google.com';
-    const cal = CalendarApp.getCalendarById(calId);
-    if (cal) {
-      const rangeEnd = new Date(sunday);
-      rangeEnd.setDate(rangeEnd.getDate() + 1);
-      const events = cal.getEvents(monday, rangeEnd);
-      events.forEach(function(ev) {
-        const d = ev.getStartTime();
-        const ds = fmtDate_(d);
-        // 既に候補にある日（土日が祝日の場合）は祝日名を追加
-        const existing = candidates.find(function(c) { return c.date === ds; });
-        if (existing) {
-          existing.holidayName = ev.getTitle();
-          return;
-        }
-        // 平日の祝日を追加
-        candidates.push({
-          date: ds,
-          label: fmtDate_(d, 'M/d') + '(' + dayNames[d.getDay()] + ') ' + ev.getTitle(),
-          type: 'holiday'
-        });
-      });
-    }
-  } catch (_) {
-    // カレンダーアクセス失敗時は土日のみ表示
+  const calId = 'ja.japanese#holiday@group.v.calendar.google.com';
+  let holidays = getHolidaysFromCalendar_(calId, monday, sunday);
+
+  // カレンダーAPIで取得できなければ振替休日ロジックで補完
+  if (holidays.length === 0) {
+    holidays = getKnownJapaneseHolidays_(monday, sunday);
   }
+
+  holidays.forEach(function(h) {
+    const existing = candidates.find(function(c) { return c.date === h.date; });
+    if (existing) {
+      existing.holidayName = h.title;
+      return;
+    }
+    const hd = new Date(h.date + 'T00:00:00');
+    candidates.push({
+      date: h.date,
+      label: fmtDate_(hd, 'M/d') + '(' + dayNames[hd.getDay()] + ') ' + h.title,
+      type: 'holiday'
+    });
+  });
 
   // 日付順でソート
   candidates.sort(function(a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
 
   return candidates;
+}
+
+/**
+ * Googleカレンダーから祝日を取得するヘルパー。
+ * サブスクライブを試みてからイベント取得。
+ */
+function getHolidaysFromCalendar_(calId, startDate, endDate) {
+  const results = [];
+  try {
+    // まずサブスクライブを試みる（既に登録済みならエラーを無視）
+    try { CalendarApp.subscribeToCalendar(calId); } catch (_) {}
+
+    const cal = CalendarApp.getCalendarById(calId);
+    if (!cal) return results;
+
+    const rangeEnd = new Date(endDate);
+    rangeEnd.setDate(rangeEnd.getDate() + 1);
+    const events = cal.getEvents(startDate, rangeEnd);
+    events.forEach(function(ev) {
+      results.push({
+        date: fmtDate_(ev.getStartTime()),
+        title: ev.getTitle()
+      });
+    });
+  } catch (_) {}
+  return results;
+}
+
+/**
+ * カレンダーAPI不可時のフォールバック：日本の祝日（法定）を算出。
+ * 指定期間内に該当する祝日を返す。
+ */
+function getKnownJapaneseHolidays_(startDate, endDate) {
+  const year = Number(Utilities.formatDate(startDate, TZ, 'yyyy'));
+  const years = [year - 1, year, year + 1];
+
+  // 固定祝日リスト
+  const fixed = [
+    [1, 1, '元日'],
+    [1, -2, '成人の日'],       // 1月第2月曜（特殊処理）
+    [2, 11, '建国記念の日'],
+    [2, 23, '天皇誕生日'],
+    [3, 0, '春分の日'],        // 算出（特殊処理）
+    [4, 29, '昭和の日'],
+    [5, 3, '憲法記念日'],
+    [5, 4, 'みどりの日'],
+    [5, 5, 'こどもの日'],
+    [7, -3, '海の日'],         // 7月第3月曜
+    [8, 11, '山の日'],
+    [9, -3, '敬老の日'],       // 9月第3月曜
+    [9, 0, '秋分の日'],        // 算出（特殊処理）
+    [10, -2, 'スポーツの日'],  // 10月第2月曜
+    [11, 3, '文化の日'],
+    [11, 23, '勤労感謝の日'],
+  ];
+
+  const rangeStart = fmtDate_(startDate);
+  const rangeEndD = new Date(endDate);
+  rangeEndD.setDate(rangeEndD.getDate() + 1);
+  const rangeEnd = fmtDate_(rangeEndD);
+
+  const holidays = {}; // date -> title
+
+  years.forEach(function(y) {
+    fixed.forEach(function(f) {
+      const month = f[0], dayOrType = f[1], title = f[2];
+      let d;
+
+      if (dayOrType < 0) {
+        // 第N月曜日（-2 = 第2月曜, -3 = 第3月曜）
+        d = getNthMonday_(y, month, Math.abs(dayOrType));
+      } else if (dayOrType === 0 && month === 3) {
+        d = new Date(y, 2, getVernalEquinox_(y));
+      } else if (dayOrType === 0 && month === 9) {
+        d = new Date(y, 8, getAutumnalEquinox_(y));
+      } else {
+        d = new Date(y, month - 1, dayOrType);
+      }
+
+      const ds = fmtDate_(d);
+      if (ds >= rangeStart && ds < rangeEnd) {
+        holidays[ds] = title;
+      }
+
+      // 振替休日：祝日が日曜なら翌月曜
+      if (d.getDay() === 0) {
+        const sub = new Date(d);
+        sub.setDate(sub.getDate() + 1);
+        // 翌日も祝日ならさらに翌日へ
+        while (holidays[fmtDate_(sub)]) sub.setDate(sub.getDate() + 1);
+        const subDs = fmtDate_(sub);
+        if (subDs >= rangeStart && subDs < rangeEnd) {
+          holidays[subDs] = title + '（振替休日）';
+        }
+      }
+    });
+  });
+
+  return Object.keys(holidays).map(function(ds) {
+    return { date: ds, title: holidays[ds] };
+  });
+}
+
+function getNthMonday_(year, month, n) {
+  var d = new Date(year, month - 1, 1);
+  var count = 0;
+  while (count < n) {
+    if (d.getDay() === 1) count++;
+    if (count < n) d.setDate(d.getDate() + 1);
+  }
+  return d;
+}
+
+function getVernalEquinox_(y) {
+  // 春分日の近似式（1980-2099）
+  return Math.floor(20.8431 + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4));
+}
+
+function getAutumnalEquinox_(y) {
+  // 秋分日の近似式（1980-2099）
+  return Math.floor(23.2488 + 0.242194 * (y - 1980) - Math.floor((y - 1980) / 4));
 }

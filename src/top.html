@@ -215,6 +215,14 @@
       <div style="font-weight:900; font-size:16px; margin-bottom:4px;">休日出勤 - 作業実施日を選択</div>
       <div class="sub" style="margin-bottom:14px;">今週の土日・祝日から選んでください</div>
       <div id="dateButtons" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <!-- フォールバック：カレンダーから日付を直接選択 -->
+      <div style="border-top:1px solid var(--line); margin-top:14px; padding-top:14px;">
+        <div style="font-size:13px; color:var(--muted); margin-bottom:8px;">上記以外の日付：</div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="date" id="manualDateInput" style="flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--line); font-size:14px;" />
+          <button class="ghost" style="white-space:nowrap; padding:10px 14px;" onclick="onManualDateSelect()">この日付で申請</button>
+        </div>
+      </div>
       <div style="text-align:center; margin-top:14px;">
         <button class="ghost btn-sm" onclick="closeDatePicker()">キャンセル</button>
       </div>
@@ -343,17 +351,23 @@ function openForm(type){
 }
 
 // ====== 休日日付選択モーダル ======
+var PICKER_DEPT = '';
+var PICKER_WORKER = '';
+
 function showDatePicker(dept, workerLabel){
+  PICKER_DEPT = dept;
+  PICKER_WORKER = workerLabel;
   var wrap = document.getElementById('datePickerWrap');
   var btns = document.getElementById('dateButtons');
   btns.innerHTML = '<div class="loading">候補日を取得中...</div>';
+  document.getElementById('manualDateInput').value = '';
   wrap.style.display = 'block';
 
   google.script.run
     .withSuccessHandler(function(candidates){
       btns.innerHTML = '';
       if(!candidates || candidates.length === 0){
-        btns.innerHTML = '<div class="muted">候補日がありません</div>';
+        btns.innerHTML = '<div class="muted">候補日が見つかりませんでした</div>';
         return;
       }
       candidates.forEach(function(c){
@@ -367,7 +381,7 @@ function showDatePicker(dept, workerLabel){
         btn.textContent = label;
         btn.onclick = function(){
           closeDatePicker();
-          doOpenForm('holiday', dept, workerLabel, c.date);
+          doOpenForm('holiday', PICKER_DEPT, PICKER_WORKER, c.date);
         };
         btns.appendChild(btn);
       });
@@ -380,6 +394,16 @@ function showDatePicker(dept, workerLabel){
 
 function closeDatePicker(){
   document.getElementById('datePickerWrap').style.display = 'none';
+}
+
+function onManualDateSelect(){
+  var val = document.getElementById('manualDateInput').value;
+  if(!val){
+    alert('日付を選択してください。');
+    return;
+  }
+  closeDatePicker();
+  doOpenForm('holiday', PICKER_DEPT, PICKER_WORKER, val);
 }
 
 // ====== 共通：フォームを開く ======
