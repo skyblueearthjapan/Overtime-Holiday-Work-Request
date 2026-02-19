@@ -100,7 +100,7 @@ function getTemplateFormId_(type) {
 
 // ====== フォームURL取得（TOP画面用：未作成なら自動生成） ======
 
-function api_getFormUrl(type, dept, workerLabel) {
+function api_getFormUrl(type, dept, workerLabel, targetDateStr) {
   let formId = '';
 
   // 既存を探す
@@ -121,15 +121,15 @@ function api_getFormUrl(type, dept, workerLabel) {
 
   if (!formId) return null;
 
-  // プリフィルURLを生成（申請種別・部署・作業員を事前入力）
-  return buildPrefillUrl_(formId, type, dept, workerLabel);
+  // プリフィルURLを生成（申請種別・部署・作業員・作業日を事前入力）
+  return buildPrefillUrl_(formId, type, dept, workerLabel, targetDateStr);
 }
 
 /**
  * プリフィル（事前入力）付きURLを生成する。
  * 申請種別・部署・作業員を自動セットした状態でフォームを開く。
  */
-function buildPrefillUrl_(formId, requestType, dept, workerLabel) {
+function buildPrefillUrl_(formId, requestType, dept, workerLabel, targetDateStr) {
   const form = FormApp.openById(formId);
   let formResponse = form.createResponse();
 
@@ -145,8 +145,8 @@ function buildPrefillUrl_(formId, requestType, dept, workerLabel) {
     formResponse = addPrefill_(formResponse, form, Q.WORKER, workerLabel);
   }
 
-  // 作業実施日を今日でプリフィル
-  formResponse = addDatePrefill_(formResponse, form, Q.DATE);
+  // 作業実施日をプリフィル（指定日 or 今日）
+  formResponse = addDatePrefill_(formResponse, form, Q.DATE, targetDateStr);
 
   return formResponse.toPrefilledUrl();
 }
@@ -175,19 +175,94 @@ function addPrefill_(formResponse, form, questionTitle, value) {
 }
 
 /**
- * 日付フィールドに今日の日付をプリフィルするヘルパー。
+ * 日付フィールドをプリフィルするヘルパー。
+ * targetDateStr が指定されればその日付、なければ今日。
  */
-function addDatePrefill_(formResponse, form, questionTitle) {
+function addDatePrefill_(formResponse, form, questionTitle, targetDateStr) {
   const item = findItemByTitleOrNull_(form, questionTitle);
   if (!item) return formResponse;
 
   if (item.getType() !== FormApp.ItemType.DATE) return formResponse;
 
-  const today = new Date();
-  const year = Number(Utilities.formatDate(today, TZ, 'yyyy'));
-  const month = Number(Utilities.formatDate(today, TZ, 'M'));
-  const day = Number(Utilities.formatDate(today, TZ, 'd'));
+  let d;
+  if (targetDateStr) {
+    // 'yyyy-MM-dd' 形式を想定
+    const parts = String(targetDateStr).split('-');
+    d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+  } else {
+    d = new Date();
+  }
+
+  const year = Number(Utilities.formatDate(d, TZ, 'yyyy'));
+  const month = Number(Utilities.formatDate(d, TZ, 'M'));
+  const day = Number(Utilities.formatDate(d, TZ, 'd'));
 
   const itemResponse = item.asDateItem().createResponse(year, month, day);
   return formResponse.withItemResponse(itemResponse);
+}
+
+// ====== 休日出勤：今週の候補日（土日＋祝日）を取得 ======
+
+function api_getHolidayCandidateDates() {
+  const today = new Date();
+  const dow = today.getDay(); // 0=Sun..6=Sat
+
+  // 今週の月曜日を算出
+  const monday = new Date(today);
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
+  monday.setHours(0, 0, 0, 0);
+
+  // 今週の土曜・日曜
+  const saturday = new Date(monday);
+  saturday.setDate(monday.getDate() + 5);
+  const sunday = new Date(monday);
+  sunday.setDate(monday.getDate() + 6);
+
+  const dayNames = ['日','月','火','水','木','金','土'];
+  const candidates = [];
+
+  candidates.push({
+    date: fmtDate_(saturday),
+    label: fmtDate_(saturday, 'M/d') + '(土)',
+    type: 'weekend'
+  });
+  candidates.push({
+    date: fmtDate_(sunday),
+    label: fmtDate_(sunday, 'M/d') + '(日)',
+    type: 'weekend'
+  });
+
+  // Googleカレンダーの日本の祝日を検索
+  try {
+    const calId = 'ja.japanese#holiday@group.v.calendar.google.com';
+    const cal = CalendarApp.getCalendarById(calId);
+    if (cal) {
+      const rangeEnd = new Date(sunday);
+      rangeEnd.setDate(rangeEnd.getDate() + 1);
+      const events = cal.getEvents(monday, rangeEnd);
+      events.forEach(function(ev) {
+        const d = ev.getStartTime();
+        const ds = fmtDate_(d);
+        // 既に候補にある日（土日が祝日の場合）は祝日名を追加
+        const existing = candidates.find(function(c) { return c.date === ds; });
+        if (existing) {
+          existing.holidayName = ev.getTitle();
+          return;
+        }
+        // 平日の祝日を追加
+        candidates.push({
+          date: ds,
+          label: fmtDate_(d, 'M/d') + '(' + dayNames[d.getDay()] + ') ' + ev.getTitle(),
+          type: 'holiday'
+        });
+      });
+    }
+  } catch (_) {
+    // カレンダーアクセス失敗時は土日のみ表示
+  }
+
+  // 日付順でソート
+  candidates.sort(function(a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+
+  return candidates;
 }

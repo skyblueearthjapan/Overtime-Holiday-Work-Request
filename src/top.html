@@ -208,6 +208,19 @@
 
   </div>
 
+  <!-- 休日出勤：日付選択モーダル -->
+  <div id="datePickerWrap" style="display:none;">
+    <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:100;" onclick="closeDatePicker()"></div>
+    <div class="card" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:101; max-width:360px; width:90%; padding:24px;">
+      <div style="font-weight:900; font-size:16px; margin-bottom:4px;">休日出勤 - 作業実施日を選択</div>
+      <div class="sub" style="margin-bottom:14px;">今週の土日・祝日から選んでください</div>
+      <div id="dateButtons" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <div style="text-align:center; margin-top:14px;">
+        <button class="ghost btn-sm" onclick="closeDatePicker()">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 var SELECTED_DEPT = '';
 var SELECTED_WORKER_CODE = '';
@@ -319,7 +332,58 @@ function openForm(type){
     return;
   }
 
-  // プリフィル付きURLをサーバーから取得して開く
+  // 休日出勤 → 日付選択モーダルを表示
+  if(type === 'holiday'){
+    showDatePicker(dept, workerLabel);
+    return;
+  }
+
+  // 残業 → そのまま開く（今日がデフォルト）
+  doOpenForm(type, dept, workerLabel, '');
+}
+
+// ====== 休日日付選択モーダル ======
+function showDatePicker(dept, workerLabel){
+  var wrap = document.getElementById('datePickerWrap');
+  var btns = document.getElementById('dateButtons');
+  btns.innerHTML = '<div class="loading">候補日を取得中...</div>';
+  wrap.style.display = 'block';
+
+  google.script.run
+    .withSuccessHandler(function(candidates){
+      btns.innerHTML = '';
+      if(!candidates || candidates.length === 0){
+        btns.innerHTML = '<div class="muted">候補日がありません</div>';
+        return;
+      }
+      candidates.forEach(function(c){
+        var btn = document.createElement('button');
+        if(c.type === 'holiday'){
+          btn.className = 'btn-warn';
+        }
+        btn.style.cssText = 'width:100%; padding:14px; font-size:15px; border-radius:12px;';
+        var label = c.label;
+        if(c.holidayName) label += ' (' + c.holidayName + ')';
+        btn.textContent = label;
+        btn.onclick = function(){
+          closeDatePicker();
+          doOpenForm('holiday', dept, workerLabel, c.date);
+        };
+        btns.appendChild(btn);
+      });
+    })
+    .withFailureHandler(function(err){
+      btns.innerHTML = '<div class="muted">取得エラー: ' + (err.message || err) + '</div>';
+    })
+    .api_getHolidayCandidateDates();
+}
+
+function closeDatePicker(){
+  document.getElementById('datePickerWrap').style.display = 'none';
+}
+
+// ====== 共通：フォームを開く ======
+function doOpenForm(type, dept, workerLabel, targetDateStr){
   var label = (type === 'overtime') ? '残業' : '休日出勤';
   var cards = document.getElementById('formCards');
   cards.style.opacity = '0.5';
@@ -339,7 +403,7 @@ function openForm(type){
       cards.style.pointerEvents = '';
       alert(label + 'フォーム取得エラー: ' + (err.message || err));
     })
-    .api_getFormUrl(type, dept, workerLabel);
+    .api_getFormUrl(type, dept, workerLabel, targetDateStr);
 }
 
 // ====== 本日の申請 更新 ======
