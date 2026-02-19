@@ -40,9 +40,9 @@ function ensureOrderPrefixItems_(form, prefixes) {
     form.deleteItem(oldItem);
   }
 
-  // 3件分の定義（1件目は必須、2,3件目は任意）
+  // 3件分の定義（間接業務の方は工番不要のため全て任意）
   const pairs = [
-    { prefix: Q.ORDER_PREFIX_1, number: Q.ORDER_NUMBER_1, required: true },
+    { prefix: Q.ORDER_PREFIX_1, number: Q.ORDER_NUMBER_1, required: false },
     { prefix: Q.ORDER_PREFIX_2, number: Q.ORDER_NUMBER_2, required: false },
     { prefix: Q.ORDER_PREFIX_3, number: Q.ORDER_NUMBER_3, required: false },
   ];

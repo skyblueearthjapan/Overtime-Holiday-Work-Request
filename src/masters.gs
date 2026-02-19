@@ -75,6 +75,42 @@ function loadOrderChoices_() {
   return uniq;
 }
 
+// ====== 工番一覧取得（WEBアプリの工番選択モーダル用） ======
+
+function api_getOrderList() {
+  const sh = requireSheet_(SHEET.ORDERS);
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const idx = {
+    order: H.indexOf('工番'),
+    customer: H.indexOf('受注先'),
+    dest: H.indexOf('納入先'),
+    product: H.indexOf('品名'),
+  };
+  if (idx.order < 0) throw new Error('工番マスタに「工番」列がありません。');
+
+  const out = [];
+  const seen = new Set();
+  for (let r = 1; r < values.length; r++) {
+    const row = values[r];
+    const code = normalize_(row[idx.order]);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+
+    const dest = idx.dest >= 0 ? normalize_(row[idx.dest]) : '';
+    const product = idx.product >= 0 ? normalize_(row[idx.product]) : '';
+
+    out.push({
+      code: code,
+      product: product,
+      dest: dest,
+    });
+  }
+
+  out.sort(function(a, b) { return a.code < b.code ? -1 : a.code > b.code ? 1 : 0; });
+  return out;
+}
+
 // ====== 工番プレフィックス一覧を工番マスタから抽出 ======
 
 function loadOrderPrefixes_() {

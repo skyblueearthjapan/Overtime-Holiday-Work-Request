@@ -132,6 +132,17 @@
     }
     .nav-link:hover{ background:var(--bg1); text-decoration:none; }
     .loading{ text-align:center; padding:30px; color:var(--muted); }
+    .order-slot{ display:flex; align-items:center; }
+    .order-item{
+      padding:10px 14px;
+      border-bottom:1px solid var(--line);
+      cursor:pointer;
+      font-size:13px;
+      transition: background .1s;
+    }
+    .order-item:hover{ background:var(--bg1); }
+    .order-item .order-code{ font-weight:700; }
+    .order-item .order-detail{ color:var(--muted); font-size:12px; margin-top:2px; }
 
     @media (max-width:640px){
       header{ flex-direction:column; align-items:flex-start; gap:8px; }
@@ -206,6 +217,54 @@
       </table>
     </div>
 
+  </div>
+
+  <!-- 工番選択モーダル -->
+  <div id="orderPickerWrap" style="display:none;">
+    <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:200;" onclick="closeOrderPicker()"></div>
+    <div class="card" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:201; max-width:480px; width:94%; padding:24px; max-height:85vh; display:flex; flex-direction:column;">
+      <div style="font-weight:900; font-size:16px; margin-bottom:2px;">工番選択（任意）</div>
+      <div class="sub" style="margin-bottom:12px;">間接業務の方は「工番なしで申請」をお選びください</div>
+
+      <!-- 選択済み工番スロット -->
+      <div id="orderSlots" style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+        <div class="order-slot" id="orderSlot1" style="display:none;">
+          <span class="pill info" style="flex:1; text-align:left;">
+            <b>工番1:</b> <span class="slot-label"></span>
+          </span>
+          <button class="ghost btn-sm" onclick="clearOrderSlot(0)" style="margin-left:6px; color:var(--danger);">×</button>
+        </div>
+        <div class="order-slot" id="orderSlot2" style="display:none;">
+          <span class="pill info" style="flex:1; text-align:left;">
+            <b>工番2:</b> <span class="slot-label"></span>
+          </span>
+          <button class="ghost btn-sm" onclick="clearOrderSlot(1)" style="margin-left:6px; color:var(--danger);">×</button>
+        </div>
+        <div class="order-slot" id="orderSlot3" style="display:none;">
+          <span class="pill info" style="flex:1; text-align:left;">
+            <b>工番3:</b> <span class="slot-label"></span>
+          </span>
+          <button class="ghost btn-sm" onclick="clearOrderSlot(2)" style="margin-left:6px; color:var(--danger);">×</button>
+        </div>
+      </div>
+
+      <!-- 検索入力 -->
+      <input type="text" id="orderSearchInput" placeholder="工番・品名・納入先で検索..."
+        style="width:100%; padding:10px 14px; border-radius:10px; border:1px solid var(--line); font-size:14px; box-sizing:border-box; margin-bottom:8px;"
+        oninput="filterOrders()" />
+
+      <!-- 検索結果 -->
+      <div id="orderResults" style="flex:1; overflow-y:auto; max-height:240px; border:1px solid var(--line); border-radius:10px; background:#fff;">
+        <div class="loading" id="orderLoading">工番マスタを読込中...</div>
+      </div>
+
+      <!-- ボタン -->
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
+        <button class="ghost" onclick="closeOrderPicker()">キャンセル</button>
+        <button class="ghost" onclick="submitOrderPicker(true)" style="color:var(--muted);">工番なしで申請</button>
+        <button class="btn-blue" onclick="submitOrderPicker(false)">この工番で申請</button>
+      </div>
+    </div>
   </div>
 
   <!-- 休日出勤：日付選択モーダル -->
@@ -340,14 +399,14 @@ function openForm(type){
     return;
   }
 
-  // 休日出勤 → 日付選択モーダルを表示
+  // 休日出勤 → 日付選択モーダルを表示（→ 日付選択後に工番モーダルへ）
   if(type === 'holiday'){
     showDatePicker(dept, workerLabel);
     return;
   }
 
-  // 残業 → そのまま開く（今日がデフォルト）
-  doOpenForm(type, dept, workerLabel, '');
+  // 残業 → 工番選択モーダルを表示（→ 選択/スキップ後にフォームを開く）
+  showOrderPicker(type, dept, workerLabel, '');
 }
 
 // ====== 休日日付選択モーダル ======
@@ -381,7 +440,7 @@ function showDatePicker(dept, workerLabel){
         btn.textContent = label;
         btn.onclick = function(){
           closeDatePicker();
-          doOpenForm('holiday', PICKER_DEPT, PICKER_WORKER, c.date);
+          showOrderPicker('holiday', PICKER_DEPT, PICKER_WORKER, c.date);
         };
         btns.appendChild(btn);
       });
@@ -403,11 +462,148 @@ function onManualDateSelect(){
     return;
   }
   closeDatePicker();
-  doOpenForm('holiday', PICKER_DEPT, PICKER_WORKER, val);
+  showOrderPicker('holiday', PICKER_DEPT, PICKER_WORKER, val);
+}
+
+// ====== 工番選択モーダル ======
+var ORDER_CACHE = [];       // 工番マスタ全件キャッシュ
+var ORDER_SELECTED = ['','',''];  // 選択済み工番コード（最大3）
+var ORDER_CONTEXT = {};     // { type, dept, workerLabel, targetDateStr }
+
+function showOrderPicker(type, dept, workerLabel, targetDateStr){
+  ORDER_CONTEXT = { type: type, dept: dept, workerLabel: workerLabel, targetDateStr: targetDateStr };
+  ORDER_SELECTED = ['','',''];
+  updateOrderSlots();
+  document.getElementById('orderSearchInput').value = '';
+  document.getElementById('orderPickerWrap').style.display = 'block';
+
+  if(ORDER_CACHE.length > 0){
+    // 既にキャッシュ済み
+    filterOrders();
+    return;
+  }
+
+  // 初回：工番マスタを読込
+  document.getElementById('orderResults').innerHTML =
+    '<div class="loading" id="orderLoading">工番マスタを読込中...</div>';
+  google.script.run
+    .withSuccessHandler(function(list){
+      ORDER_CACHE = list || [];
+      filterOrders();
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('orderResults').innerHTML =
+        '<div class="muted" style="padding:16px;">読込エラー: ' + (err.message || err) + '</div>';
+    })
+    .api_getOrderList();
+}
+
+function closeOrderPicker(){
+  document.getElementById('orderPickerWrap').style.display = 'none';
+}
+
+function filterOrders(){
+  var q = (document.getElementById('orderSearchInput').value || '').toLowerCase().trim();
+  var container = document.getElementById('orderResults');
+
+  if(!q){
+    container.innerHTML =
+      '<div class="muted" style="padding:16px; text-align:center;">工番・品名・納入先を入力して検索</div>';
+    return;
+  }
+
+  // スペース区切りでAND検索
+  var terms = q.split(/\s+/).filter(function(t){ return t.length > 0; });
+
+  var matched = ORDER_CACHE.filter(function(o){
+    var haystack = (o.code + ' ' + o.product + ' ' + o.dest).toLowerCase();
+    return terms.every(function(t){ return haystack.indexOf(t) >= 0; });
+  });
+
+  if(matched.length === 0){
+    container.innerHTML =
+      '<div class="muted" style="padding:16px; text-align:center;">該当する工番がありません</div>';
+    return;
+  }
+
+  // 最大100件表示
+  var html = '';
+  var limit = Math.min(matched.length, 100);
+  for(var i = 0; i < limit; i++){
+    var o = matched[i];
+    var detail = '';
+    if(o.product) detail += o.product;
+    if(o.product && o.dest) detail += ' ／ ';
+    if(o.dest) detail += o.dest;
+    html += '<div class="order-item" onclick="selectOrder(\'' + o.code.replace(/'/g, "\\'") + '\')">' +
+      '<div class="order-code">' + escHtml(o.code) + '</div>' +
+      (detail ? '<div class="order-detail">' + escHtml(detail) + '</div>' : '') +
+      '</div>';
+  }
+  if(matched.length > 100){
+    html += '<div class="muted" style="padding:10px; text-align:center;">他 ' + (matched.length - 100) + ' 件…検索を絞り込んでください</div>';
+  }
+  container.innerHTML = html;
+}
+
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function selectOrder(code){
+  // 次の空きスロットに入れる
+  for(var i = 0; i < 3; i++){
+    if(!ORDER_SELECTED[i]){
+      ORDER_SELECTED[i] = code;
+      updateOrderSlots();
+      return;
+    }
+  }
+  alert('工番は最大3件まで選択できます。\n不要な工番を×で削除してください。');
+}
+
+function clearOrderSlot(idx){
+  ORDER_SELECTED[idx] = '';
+  // 詰める（1が空なら2→1, 3→2）
+  var compact = ORDER_SELECTED.filter(function(c){ return c !== ''; });
+  while(compact.length < 3) compact.push('');
+  ORDER_SELECTED = compact;
+  updateOrderSlots();
+}
+
+function updateOrderSlots(){
+  for(var i = 0; i < 3; i++){
+    var el = document.getElementById('orderSlot' + (i+1));
+    if(ORDER_SELECTED[i]){
+      el.style.display = 'flex';
+      // 工番マスタから詳細を探す
+      var info = ORDER_CACHE.find(function(o){ return o.code === ORDER_SELECTED[i]; });
+      var label = ORDER_SELECTED[i];
+      if(info){
+        if(info.product) label += ' ｜ ' + info.product;
+        if(info.dest) label += ' ／ ' + info.dest;
+      }
+      el.querySelector('.slot-label').textContent = label;
+    } else {
+      el.style.display = 'none';
+    }
+  }
+}
+
+function submitOrderPicker(skipAll){
+  closeOrderPicker();
+  var codes = skipAll ? [] : ORDER_SELECTED.filter(function(c){ return c !== ''; });
+  doOpenForm(
+    ORDER_CONTEXT.type,
+    ORDER_CONTEXT.dept,
+    ORDER_CONTEXT.workerLabel,
+    ORDER_CONTEXT.targetDateStr,
+    codes
+  );
 }
 
 // ====== 共通：フォームを開く ======
-function doOpenForm(type, dept, workerLabel, targetDateStr){
+function doOpenForm(type, dept, workerLabel, targetDateStr, orderCodes){
   var label = (type === 'overtime') ? '残業' : '休日出勤';
   var cards = document.getElementById('formCards');
   cards.style.opacity = '0.5';
@@ -427,7 +623,7 @@ function doOpenForm(type, dept, workerLabel, targetDateStr){
       cards.style.pointerEvents = '';
       alert(label + 'フォーム取得エラー: ' + (err.message || err));
     })
-    .api_getFormUrl(type, dept, workerLabel, targetDateStr);
+    .api_getFormUrl(type, dept, workerLabel, targetDateStr, orderCodes || []);
 }
 
 // ====== 本日の申請 更新 ======

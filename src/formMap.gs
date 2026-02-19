@@ -100,7 +100,7 @@ function getTemplateFormId_(type) {
 
 // ====== フォームURL取得（TOP画面用：未作成なら自動生成） ======
 
-function api_getFormUrl(type, dept, workerLabel, targetDateStr) {
+function api_getFormUrl(type, dept, workerLabel, targetDateStr, orderCodes) {
   let formId = '';
 
   // 既存を探す
@@ -121,15 +121,15 @@ function api_getFormUrl(type, dept, workerLabel, targetDateStr) {
 
   if (!formId) return null;
 
-  // プリフィルURLを生成（申請種別・部署・作業員・作業日を事前入力）
-  return buildPrefillUrl_(formId, type, dept, workerLabel, targetDateStr);
+  // プリフィルURLを生成（申請種別・部署・作業員・作業日・工番を事前入力）
+  return buildPrefillUrl_(formId, type, dept, workerLabel, targetDateStr, orderCodes || []);
 }
 
 /**
  * プリフィル（事前入力）付きURLを生成する。
  * 申請種別・部署・作業員を自動セットした状態でフォームを開く。
  */
-function buildPrefillUrl_(formId, requestType, dept, workerLabel, targetDateStr) {
+function buildPrefillUrl_(formId, requestType, dept, workerLabel, targetDateStr, orderCodes) {
   const form = FormApp.openById(formId);
   let formResponse = form.createResponse();
 
@@ -148,7 +148,34 @@ function buildPrefillUrl_(formId, requestType, dept, workerLabel, targetDateStr)
   // 作業実施日をプリフィル（指定日 or 今日）
   formResponse = addDatePrefill_(formResponse, form, Q.DATE, targetDateStr);
 
+  // 工番をプリフィル（最大3件、各コードをプレフィックス＋番号に分解）
+  if (orderCodes && orderCodes.length > 0) {
+    const prefixQs = [Q.ORDER_PREFIX_1, Q.ORDER_PREFIX_2, Q.ORDER_PREFIX_3];
+    const numberQs = [Q.ORDER_NUMBER_1, Q.ORDER_NUMBER_2, Q.ORDER_NUMBER_3];
+    for (let i = 0; i < Math.min(orderCodes.length, 3); i++) {
+      const code = normalize_(orderCodes[i] || '');
+      if (!code) continue;
+      const split = splitOrderCode_(code);
+      if (!split) continue;
+      formResponse = addPrefill_(formResponse, form, prefixQs[i], split.prefix);
+      formResponse = addPrefill_(formResponse, form, numberQs[i], split.number);
+    }
+  }
+
   return formResponse.toPrefilledUrl();
+}
+
+/**
+ * 工番コードをプレフィックス（英字部分）と番号（数字部分）に分解する。
+ * 例: "LWTS01234" → { prefix: "LWTS", number: "01234" }
+ */
+function splitOrderCode_(code) {
+  const match = String(code).match(/^([A-Za-z]+)(.+)$/);
+  if (!match) return null;
+  return {
+    prefix: match[1].toUpperCase(),
+    number: normalize5Digits_(match[2]),
+  };
 }
 
 /**

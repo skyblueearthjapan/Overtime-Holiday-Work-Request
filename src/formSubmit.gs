@@ -186,7 +186,7 @@ function buildWorkNo_(prefix, numberRaw) {
 
 function parseWorkNosFromForm_(ans) {
   const pairs = [
-    { prefix: ans.get(Q.ORDER_PREFIX_1), number: ans.get(Q.ORDER_NUMBER_1), required: true },
+    { prefix: ans.get(Q.ORDER_PREFIX_1), number: ans.get(Q.ORDER_NUMBER_1), required: false },
     { prefix: ans.get(Q.ORDER_PREFIX_2), number: ans.get(Q.ORDER_NUMBER_2), required: false },
     { prefix: ans.get(Q.ORDER_PREFIX_3), number: ans.get(Q.ORDER_NUMBER_3), required: false },
   ];
@@ -327,10 +327,11 @@ function handleFormSubmit_(e) {
     const targetDate = targetDateRaw instanceof Date ? targetDateRaw : new Date(targetDateRaw);
     if (!targetDate || isNaN(targetDate.getTime())) throw new Error(`作業実施日が不正です: ${targetDateRaw}`);
 
-    // 工番（プレフィックス選択＋5桁番号入力 ×最大3件）
+    // 工番（プレフィックス選択＋5桁番号入力 ×最大3件、間接業務は全て空でもOK）
     const { workNo1, workNo2, workNo3, errors: workNoErrors } = parseWorkNosFromForm_(ans);
-    if (!workNo1 && workNoErrors.length > 0) {
-      throw new Error('工番の入力に問題があります: ' + workNoErrors.join('; '));
+    // 片方だけ入力されている等の整合性エラーのみチェック（全空はOK）
+    if (workNoErrors.length > 0) {
+      console.warn('工番入力の注意: ' + workNoErrors.join('; '));
     }
 
     // 理由＋補足
