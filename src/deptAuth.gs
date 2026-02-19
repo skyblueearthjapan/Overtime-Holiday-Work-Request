@@ -86,3 +86,13 @@ function isGeneralAffairs_(email) {
 function api_getDeptList() {
   return loadDeptList_();
 }
+
+/**
+ * 指定部署の作業員一覧を返す API（TOPの作業員選択用）。
+ * 戻り値: ["A001 今泉雄二", "A002 田中太郎", ...]
+ */
+function api_getWorkersByDept(dept) {
+  if (!dept) return [];
+  const workersByDept = loadWorkersByDept_();
+  return workersByDept.get(dept) || [];
+}

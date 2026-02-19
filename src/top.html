@@ -131,12 +131,6 @@
       border:1px solid var(--line); background:#fff; color:var(--text);
     }
     .nav-link:hover{ background:var(--bg1); text-decoration:none; }
-    .worker-badge{
-      display:inline-flex; align-items:center; gap:6px;
-      padding:8px 14px; border-radius:999px;
-      border:1px solid var(--line); background:#fff;
-      font-size:14px; font-weight:700;
-    }
     .loading{ text-align:center; padding:30px; color:var(--muted); }
 
     @media (max-width:640px){
@@ -163,13 +157,16 @@
 
   <div class="wrap">
 
-    <!-- 部署選択 + 作業者情報 -->
+    <!-- 部署選択 + 作業員選択 -->
     <div style="margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
       <label style="font-weight:700; font-size:14px;">部署：</label>
       <select id="deptSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:180px;">
         <option value="">読込中...</option>
       </select>
-      <span class="worker-badge" id="workerBadge" style="display:none"></span>
+      <label style="font-weight:700; font-size:14px;">作業員：</label>
+      <select id="workerSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:200px;">
+        <option value="">-- 部署を先に選択 --</option>
+      </select>
     </div>
 
     <!-- Action cards -->
@@ -189,9 +186,6 @@
       <div class="sectionTitle">
         <div>本日の申請一覧（<span id="todayDate">-</span>）</div>
         <button class="ghost btn-sm" onclick="loadToday()">更新</button>
-      </div>
-      <div id="identityWarning" style="display:none;background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:13px">
-        &#9888; 作業員マスタに「Googleアカウント」列がないため、本人フィルタ無効（全員の申請を表示中）
       </div>
       <table id="tblToday">
         <thead>
@@ -215,9 +209,9 @@
   </div>
 
 <script>
-var WORKER = null;
 var FORM_URLS = {};
 var SELECTED_DEPT = '';
+var SELECTED_WORKER_CODE = '';
 
 function fmtMin(min){
   min = Math.max(0, Math.round(Number(min||0)));
@@ -227,8 +221,7 @@ function fmtMin(min){
   return h+'時間'+r+'分';
 }
 
-// ====== 初期ロード：部署一覧 + 作業者情報（あれば） ======
-// 1) 部署一覧を読み込む
+// ====== 初期ロード：部署一覧 ======
 google.script.run
   .withSuccessHandler(function(depts){
     var sel = document.getElementById('deptSelect');
@@ -239,45 +232,12 @@ google.script.run
       opt.textContent = d;
       sel.appendChild(opt);
     });
-    // 作業者情報があれば自動選択
-    if(WORKER && WORKER.dept){
-      sel.value = WORKER.dept;
-      onDeptChange();
-    }
   })
   .withFailureHandler(function(){})
   .api_getDeptList();
 
-// 2) 作業者情報を取得（あれば表示、なくてもOK）
-google.script.run
-  .withSuccessHandler(function(res){
-    WORKER = res.workerInfo;
-    if(WORKER){
-      var badge = document.getElementById('workerBadge');
-      badge.style.display = '';
-      badge.innerText = WORKER.workerName + '（' + WORKER.workerCode + '）';
-      document.getElementById('workerSub').innerText =
-        WORKER.dept + ' - ' + WORKER.workerName;
-      // 部署セレクタを自動選択
-      var sel = document.getElementById('deptSelect');
-      if(sel.querySelector('option[value="' + WORKER.dept + '"]')){
-        sel.value = WORKER.dept;
-      }
-      onDeptChange();
-    } else {
-      document.getElementById('workerSub').innerText =
-        '部署を選択して申請してください';
-    }
-    renderToday(res);
-  })
-  .withFailureHandler(function(err){
-    document.getElementById('workerSub').innerText =
-      '部署を選択して申請してください';
-    document.querySelector('#tblToday tbody').innerHTML =
-      '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">' +
-      '本日の申請はありません</td></tr>';
-  })
-  .api_getTodayRequestsForWorker();
+// 初回は空表示
+document.getElementById('workerSub').innerText = '部署と作業員を選択してください';
 
 // ====== 部署変更時 ======
 document.getElementById('deptSelect').addEventListener('change', onDeptChange);
@@ -285,11 +245,65 @@ document.getElementById('deptSelect').addEventListener('change', onDeptChange);
 function onDeptChange(){
   var dept = document.getElementById('deptSelect').value;
   SELECTED_DEPT = dept;
-  FORM_URLS = {}; // リセット
-  if(dept){
-    loadFormUrl('overtime', dept);
-    loadFormUrl('holiday', dept);
+  SELECTED_WORKER_CODE = '';
+  FORM_URLS = {};
+
+  // 作業員プルダウンをリセット
+  var wSel = document.getElementById('workerSelect');
+  wSel.innerHTML = '<option value="">読込中...</option>';
+
+  // 申請一覧をクリア
+  document.querySelector('#tblToday tbody').innerHTML =
+    '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">' +
+    '作業員を選択してください</td></tr>';
+
+  if(!dept) {
+    wSel.innerHTML = '<option value="">-- 部署を先に選択 --</option>';
+    return;
   }
+
+  // フォームURL取得
+  loadFormUrl('overtime', dept);
+  loadFormUrl('holiday', dept);
+
+  // 作業員一覧取得
+  google.script.run
+    .withSuccessHandler(function(workers){
+      wSel.innerHTML = '<option value="">-- 作業員を選択 --</option>';
+      (workers || []).forEach(function(w){
+        // w = "A001 今泉雄二"
+        var code = w.split(/\s+/)[0] || '';
+        var opt = document.createElement('option');
+        opt.value = code;
+        opt.textContent = w;
+        wSel.appendChild(opt);
+      });
+    })
+    .withFailureHandler(function(){
+      wSel.innerHTML = '<option value="">取得エラー</option>';
+    })
+    .api_getWorkersByDept(dept);
+}
+
+// ====== 作業員変更時 ======
+document.getElementById('workerSelect').addEventListener('change', onWorkerChange);
+
+function onWorkerChange(){
+  var wSel = document.getElementById('workerSelect');
+  var code = wSel.value;
+  SELECTED_WORKER_CODE = code;
+
+  if(code){
+    var label = wSel.options[wSel.selectedIndex].textContent;
+    document.getElementById('workerSub').innerText =
+      SELECTED_DEPT + ' - ' + label;
+  } else {
+    document.getElementById('workerSub').innerText =
+      '作業員を選択してください';
+  }
+
+  // 申請一覧を再読込
+  loadToday();
 }
 
 // ====== フォームURL取得 ======
@@ -341,12 +355,18 @@ function openForm(type){
 
 // ====== 本日の申請 更新 ======
 function loadToday(){
-  document.querySelector('#tblToday tbody').innerHTML =
-    '<tr><td colspan="8" class="loading">読込中...</td></tr>';
+  var tb = document.querySelector('#tblToday tbody');
+  if(!SELECTED_WORKER_CODE){
+    tb.innerHTML =
+      '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">' +
+      '作業員を選択してください</td></tr>';
+    return;
+  }
+  tb.innerHTML = '<tr><td colspan="8" class="loading">読込中...</td></tr>';
   google.script.run
     .withSuccessHandler(function(res){ renderToday(res); })
     .withFailureHandler(function(err){ alert(err.message || err); })
-    .api_getTodayRequestsForWorker();
+    .api_getTodayRequestsForWorker(SELECTED_WORKER_CODE);
 }
 
 // ====== テーブル描画 ======
@@ -354,12 +374,6 @@ function renderToday(res){
   document.getElementById('todayDate').innerText = res.today;
   var tb = document.querySelector('#tblToday tbody');
   tb.innerHTML = '';
-
-  // Googleアカウント列未設定の警告
-  var warnEl = document.getElementById('identityWarning');
-  if(warnEl){
-    warnEl.style.display = res.identityWarning ? '' : 'none';
-  }
 
   if(!res.items || res.items.length === 0){
     tb.innerHTML =

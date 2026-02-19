@@ -227,15 +227,12 @@ function api_markHolidayDone(requestId) {
   }
 }
 
-// ====== 作業者本人の「本日の申請一覧」取得 ======
+// ====== 作業者の「本日の申請一覧」取得 ======
+// workerCode を指定 → その人の申請だけ返す
+// 未指定（空文字） → 本日の全申請を返す
 
-function api_getTodayRequestsForWorker() {
-  const email = Session.getActiveUser().getEmail();
-  const workerInfo = api_getWorkerInfo();
-
-  // workerInfo が null = 作業員マスタに「Googleアカウント」列が無い
-  // → 本人照合が不可能なので、本人フィルタをスキップして全件表示
-  const canIdentify = !!(workerInfo);
+function api_getTodayRequestsForWorker(workerCode) {
+  const filterCode = normalize_(workerCode || '');
 
   const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
   const values = sh.getDataRange().getValues();
@@ -249,16 +246,10 @@ function api_getTodayRequestsForWorker() {
     const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
     if (!status || status === 'canceled') continue;
 
-    // 本人照合（Googleアカウント列がある場合のみ）
-    if (canIdentify) {
-      let isMe = false;
-      const rowEmail = normalize_(row[idx['workerEmail']]);
-      if (rowEmail && rowEmail === email) isMe = true;
-      if (!isMe && workerInfo) {
-        const rowCode = normalize_(row[idx['workerCode']]);
-        if (rowCode && rowCode === workerInfo.workerCode) isMe = true;
-      }
-      if (!isMe) continue;
+    // 作業員コードでフィルタ（指定時のみ）
+    if (filterCode) {
+      const rowCode = normalize_(row[idx['workerCode']]);
+      if (rowCode !== filterCode) continue;
     }
 
     const targetDateVal = row[idx['targetDate']];
@@ -289,5 +280,5 @@ function api_getTodayRequestsForWorker() {
     });
   }
 
-  return { today, workerInfo, items: out, identityWarning: !canIdentify };
+  return { today, items: out };
 }
