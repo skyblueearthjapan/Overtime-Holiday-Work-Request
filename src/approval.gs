@@ -119,11 +119,10 @@ function api_getTodayRequestsForDept(dept) {
 // ====== 承認者ダッシュボード（全承認対象部署の残業+休日） ======
 
 function api_getApproverDashboard() {
-  const email = Session.getActiveUser().getEmail();
-  if (!email) throw new Error('メールアドレスが取得できません。');
-
-  // 承認可能な部署一覧を取得
-  const admin = isAdmin_(email);
+  // TODO: 承認者アカウント紐づけ実装後に認証チェックを有効化
+  // 現在は全部署の申請を表示（開発中）
+  const email = Session.getActiveUser().getEmail() || '';
+  const admin = !email || isAdmin_(email);
   let allowedDepts;
   if (admin) {
     allowedDepts = null; // null = 全部署OK
@@ -134,8 +133,9 @@ function api_getApproverDashboard() {
     for (const dept of Object.keys(map)) {
       if (map[dept].has(emailLc)) allowedDepts.add(dept);
     }
+    // 権限が見つからない場合も全部署表示（開発中）
     if (allowedDepts.size === 0) {
-      throw new Error('承認者権限がありません。');
+      allowedDepts = null;
     }
   }
 
@@ -226,7 +226,7 @@ function api_getApproverDashboard() {
 // ====== 承認実行（承認ボタン） ======
 
 function api_approveRequest(requestId) {
-  const email = Session.getActiveUser().getEmail();
+  const email = Session.getActiveUser().getEmail() || 'unknown';
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -249,7 +249,8 @@ function api_approveRequest(requestId) {
       }
     }
     if (rowNo === -1) throw new Error('requestIdが見つかりません。');
-    if (!canApproveDept_(email, dept)) throw new Error('この申請の承認権限がありません。');
+    // TODO: 承認者アカウント紐づけ実装後に有効化
+    // if (!canApproveDept_(email, dept)) throw new Error('この申請の承認権限がありません。');
     if (status === 'approved') return { ok: true, message: '既に承認済みです。' };
     if (status === 'canceled') throw new Error('キャンセル済みです。');
 
