@@ -131,6 +131,13 @@ function api_getFormUrl(type, dept, workerLabel, targetDateStr, orderCodes) {
  */
 function buildPrefillUrl_(formId, requestType, dept, workerLabel, targetDateStr, orderCodes) {
   const form = FormApp.openById(formId);
+
+  // 既存フォームの工番欄を新形式に自動マイグレーション
+  // （新形式なら即座にスキップされるため毎回呼んでもコスト低）
+  try { ensureOrderItems_(form); } catch (e) {
+    console.warn('工番欄マイグレーション警告: ' + e.message);
+  }
+
   let formResponse = form.createResponse();
 
   // 申請種別をプリフィル（"残業" or "休日"）
