@@ -37,7 +37,7 @@
     }
     .title{ font-weight:900; letter-spacing:.06em; }
     .sub{ opacity:.8; font-size:12px; color:var(--muted); }
-    .wrap{ padding:18px 22px; max-width:960px; margin:0 auto; }
+    .wrap{ padding:18px 22px; max-width:1060px; margin:0 auto; }
     .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
     .card{
       background:var(--card);
@@ -66,6 +66,10 @@
       letter-spacing:.05em;
       display:flex; align-items:center; justify-content:space-between;
       margin-bottom:8px;
+    }
+    .section-count{
+      font-size:13px; font-weight:700; color:var(--accent2);
+      margin-left:8px;
     }
     table{
       width:100%;
@@ -158,7 +162,7 @@
   <header>
     <div>
       <div class="title">残業・休日出勤 申請TOP</div>
-      <div class="sub" id="workerSub">読込中...</div>
+      <div class="sub" id="headerSub">全社の本日残業 / 今週末休日出勤 一覧</div>
     </div>
     <div class="row">
       <a href="<?= APP_URL ?>?page=approver" target="_top" class="nav-link">承認者画面</a>
@@ -168,51 +172,79 @@
 
   <div class="wrap">
 
-    <!-- 部署選択 + 作業員選択 -->
-    <div style="margin-bottom:12px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-      <label style="font-weight:700; font-size:14px;">部署：</label>
-      <select id="deptSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:180px;">
-        <option value="">読込中...</option>
-      </select>
-      <label style="font-weight:700; font-size:14px;">作業員：</label>
-      <select id="workerSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:200px;">
-        <option value="">-- 部署を先に選択 --</option>
-      </select>
-    </div>
-
-    <!-- Action cards -->
-    <div class="grid2" id="formCards" style="margin-bottom:12px">
-      <div class="card action-card overtime" onclick="openForm('overtime')">
-        <div class="kpi2">残業申請</div>
-        <div class="sub">残業予定をフォームで申請する</div>
-      </div>
-      <div class="card action-card holiday" onclick="openForm('holiday')">
-        <div class="kpi2">休日出勤申請</div>
-        <div class="sub">休日出勤をフォームで申請する</div>
+    <!-- 申請用：部署 + 作業員選択 -->
+    <div class="card" style="margin-bottom:12px; padding:12px 16px;">
+      <div style="font-weight:800; font-size:13px; margin-bottom:8px; color:var(--muted);">申請フォーム</div>
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+        <label style="font-weight:700; font-size:14px;">部署：</label>
+        <select id="deptSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:180px;">
+          <option value="">読込中...</option>
+        </select>
+        <label style="font-weight:700; font-size:14px;">作業員：</label>
+        <select id="workerSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:200px;">
+          <option value="">-- 部署を先に選択 --</option>
+        </select>
+        <div class="grid2" style="gap:8px;">
+          <button class="btn-blue btn-sm" onclick="openForm('overtime')" style="white-space:nowrap;">残業申請</button>
+          <button class="btn-sm" onclick="openForm('holiday')" style="white-space:nowrap;">休日出勤申請</button>
+        </div>
       </div>
     </div>
 
-    <!-- Today's requests -->
-    <div class="card">
+    <!-- 残業セクション（本日） -->
+    <div class="card" style="margin-bottom:12px;">
       <div class="sectionTitle">
-        <div>本日の申請一覧（<span id="todayDate">-</span>）</div>
-        <button class="ghost btn-sm" onclick="loadToday()">更新</button>
+        <div>
+          本日の残業申請（<span id="todayDate">-</span>）
+          <span class="section-count" id="otCount"></span>
+        </div>
+        <button class="ghost btn-sm" onclick="loadDashboard()">更新</button>
       </div>
-      <table id="tblToday">
+      <table id="tblOvertime">
         <thead>
           <tr>
-            <th>種別</th>
+            <th>部署</th>
+            <th>氏名</th>
             <th>承認</th>
             <th>予定</th>
             <th>実績</th>
             <th>休憩</th>
-            <th>実残業/実働</th>
+            <th>実残業</th>
             <th>PDF</th>
             <th>操作</th>
           </tr>
         </thead>
         <tbody>
-          <tr><td colspan="8" class="loading">読込中...</td></tr>
+          <tr><td colspan="9" class="loading">読込中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 休日出勤セクション（今週末） -->
+    <div class="card">
+      <div class="sectionTitle">
+        <div>
+          今週末の休日出勤申請（<span id="weekendRange">-</span>）
+          <span class="section-count" id="hdCount"></span>
+        </div>
+      </div>
+      <table id="tblHoliday">
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>部署</th>
+            <th>氏名</th>
+            <th>承認</th>
+            <th>予定</th>
+            <th>実績</th>
+            <th>休憩</th>
+            <th>実働</th>
+            <th>PDF</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="10" class="loading">読込中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -315,10 +347,10 @@ google.script.run
   .withFailureHandler(function(){})
   .api_getDeptList();
 
-// 初回は空表示
-document.getElementById('workerSub').innerText = '部署と作業員を選択してください';
+// ====== 初期ロード：全社ダッシュボード ======
+loadDashboard();
 
-// ====== 部署変更時 ======
+// ====== 部署変更時（申請フォーム用） ======
 document.getElementById('deptSelect').addEventListener('change', onDeptChange);
 
 function onDeptChange(){
@@ -326,26 +358,18 @@ function onDeptChange(){
   SELECTED_DEPT = dept;
   SELECTED_WORKER_CODE = '';
 
-  // 作業員プルダウンをリセット
   var wSel = document.getElementById('workerSelect');
   wSel.innerHTML = '<option value="">読込中...</option>';
-
-  // 申請一覧をクリア
-  document.querySelector('#tblToday tbody').innerHTML =
-    '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">' +
-    '作業員を選択してください</td></tr>';
 
   if(!dept) {
     wSel.innerHTML = '<option value="">-- 部署を先に選択 --</option>';
     return;
   }
 
-  // 作業員一覧取得
   google.script.run
     .withSuccessHandler(function(workers){
       wSel.innerHTML = '<option value="">-- 作業員を選択 --</option>';
       (workers || []).forEach(function(w){
-        // w = "A001 今泉雄二"
         var code = w.split(/\s+/)[0] || '';
         var opt = document.createElement('option');
         opt.value = code;
@@ -359,26 +383,11 @@ function onDeptChange(){
     .api_getWorkersByDept(dept);
 }
 
-// ====== 作業員変更時 ======
-document.getElementById('workerSelect').addEventListener('change', onWorkerChange);
-
-function onWorkerChange(){
+// ====== 作業員変更時（申請フォーム用） ======
+document.getElementById('workerSelect').addEventListener('change', function(){
   var wSel = document.getElementById('workerSelect');
-  var code = wSel.value;
-  SELECTED_WORKER_CODE = code;
-
-  if(code){
-    var label = wSel.options[wSel.selectedIndex].textContent;
-    document.getElementById('workerSub').innerText =
-      SELECTED_DEPT + ' - ' + label;
-  } else {
-    document.getElementById('workerSub').innerText =
-      '作業員を選択してください';
-  }
-
-  // 申請一覧を再読込
-  loadToday();
-}
+  SELECTED_WORKER_CODE = wSel.value;
+});
 
 // ====== フォームURL取得（プリフィル付き） ======
 function openForm(type){
@@ -388,7 +397,6 @@ function openForm(type){
     return;
   }
 
-  // 作業員が選択されていなければ警告
   var wSel = document.getElementById('workerSelect');
   var workerLabel = '';
   if(wSel.selectedIndex > 0){
@@ -399,13 +407,13 @@ function openForm(type){
     return;
   }
 
-  // 休日出勤 → 日付選択モーダルを表示（→ 日付選択後に工番モーダルへ）
+  // 休日出勤 → 日付選択モーダル
   if(type === 'holiday'){
     showDatePicker(dept, workerLabel);
     return;
   }
 
-  // 残業 → 工番選択モーダルを表示（→ 選択/スキップ後にフォームを開く）
+  // 残業 → 工番選択モーダル
   showOrderPicker(type, dept, workerLabel, '');
 }
 
@@ -466,9 +474,9 @@ function onManualDateSelect(){
 }
 
 // ====== 工番選択モーダル ======
-var ORDER_CACHE = [];       // 工番マスタ全件キャッシュ
-var ORDER_SELECTED = ['','',''];  // 選択済み工番コード（最大3）
-var ORDER_CONTEXT = {};     // { type, dept, workerLabel, targetDateStr }
+var ORDER_CACHE = [];
+var ORDER_SELECTED = ['','',''];
+var ORDER_CONTEXT = {};
 
 function showOrderPicker(type, dept, workerLabel, targetDateStr){
   ORDER_CONTEXT = { type: type, dept: dept, workerLabel: workerLabel, targetDateStr: targetDateStr };
@@ -478,12 +486,10 @@ function showOrderPicker(type, dept, workerLabel, targetDateStr){
   document.getElementById('orderPickerWrap').style.display = 'block';
 
   if(ORDER_CACHE.length > 0){
-    // 既にキャッシュ済み
     filterOrders();
     return;
   }
 
-  // 初回：工番マスタを読込
   document.getElementById('orderResults').innerHTML =
     '<div class="loading" id="orderLoading">工番マスタを読込中...</div>';
   google.script.run
@@ -512,7 +518,6 @@ function filterOrders(){
     return;
   }
 
-  // スペース区切りでAND検索
   var terms = q.split(/\s+/).filter(function(t){ return t.length > 0; });
 
   var matched = ORDER_CACHE.filter(function(o){
@@ -526,7 +531,6 @@ function filterOrders(){
     return;
   }
 
-  // 最大100件表示
   var html = '';
   var limit = Math.min(matched.length, 100);
   for(var i = 0; i < limit; i++){
@@ -551,7 +555,6 @@ function escHtml(s){
 }
 
 function selectOrder(code){
-  // 次の空きスロットに入れる
   for(var i = 0; i < 3; i++){
     if(!ORDER_SELECTED[i]){
       ORDER_SELECTED[i] = code;
@@ -564,7 +567,6 @@ function selectOrder(code){
 
 function clearOrderSlot(idx){
   ORDER_SELECTED[idx] = '';
-  // 詰める（1が空なら2→1, 3→2）
   var compact = ORDER_SELECTED.filter(function(c){ return c !== ''; });
   while(compact.length < 3) compact.push('');
   ORDER_SELECTED = compact;
@@ -576,7 +578,6 @@ function updateOrderSlots(){
     var el = document.getElementById('orderSlot' + (i+1));
     if(ORDER_SELECTED[i]){
       el.style.display = 'flex';
-      // 工番マスタから詳細を探す
       var info = ORDER_CACHE.find(function(o){ return o.code === ORDER_SELECTED[i]; });
       var label = ORDER_SELECTED[i];
       if(info){
@@ -605,11 +606,8 @@ function submitOrderPicker(skipAll){
 // ====== 共通：フォームを開く ======
 function doOpenForm(type, dept, workerLabel, targetDateStr, orderCodes){
   var label = (type === 'overtime') ? '残業' : '休日出勤';
-  var cards = document.getElementById('formCards');
-  cards.style.opacity = '0.5';
-  cards.style.pointerEvents = 'none';
 
-  // ポップアップブロッカー対策：ユーザー操作の同期コンテキスト内でwindowを先に開く
+  // ポップアップブロッカー対策
   var newWin = window.open('about:blank', '_blank');
   if(newWin){
     newWin.document.write(
@@ -623,12 +621,9 @@ function doOpenForm(type, dept, workerLabel, targetDateStr, orderCodes){
 
   google.script.run
     .withSuccessHandler(function(url){
-      cards.style.opacity = '1';
-      cards.style.pointerEvents = '';
       if(url && newWin){
         newWin.location.href = url;
       } else if(url && !newWin){
-        // ポップアップがブロックされた場合：リンクを表示
         showFormLink(url, label);
       } else {
         if(newWin) newWin.close();
@@ -636,15 +631,12 @@ function doOpenForm(type, dept, workerLabel, targetDateStr, orderCodes){
       }
     })
     .withFailureHandler(function(err){
-      cards.style.opacity = '1';
-      cards.style.pointerEvents = '';
       if(newWin) newWin.close();
       alert(label + 'フォーム取得エラー: ' + (err.message || err));
     })
     .api_getFormUrl(type, dept, workerLabel, targetDateStr, orderCodes || []);
 }
 
-// ポップアップブロック時のフォールバック：リンクを表示
 function showFormLink(url, label){
   var div = document.createElement('div');
   div.style.cssText = 'position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);' +
@@ -660,87 +652,125 @@ function showFormLink(url, label){
   document.body.appendChild(div);
 }
 
-// ====== 本日の申請 更新 ======
-function loadToday(){
-  var tb = document.querySelector('#tblToday tbody');
-  if(!SELECTED_WORKER_CODE){
-    tb.innerHTML =
-      '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">' +
-      '作業員を選択してください</td></tr>';
-    return;
-  }
-  tb.innerHTML = '<tr><td colspan="8" class="loading">読込中...</td></tr>';
+// ====== 全社ダッシュボード読込 ======
+function loadDashboard(){
+  var otTb = document.querySelector('#tblOvertime tbody');
+  var hdTb = document.querySelector('#tblHoliday tbody');
+  otTb.innerHTML = '<tr><td colspan="9" class="loading">読込中...</td></tr>';
+  hdTb.innerHTML = '<tr><td colspan="10" class="loading">読込中...</td></tr>';
+
   google.script.run
-    .withSuccessHandler(function(res){ renderToday(res); })
-    .withFailureHandler(function(err){ alert(err.message || err); })
-    .api_getTodayRequestsForWorker(SELECTED_WORKER_CODE);
+    .withSuccessHandler(function(res){
+      if(!res){
+        otTb.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">データを取得できませんでした</td></tr>';
+        hdTb.innerHTML = '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">データを取得できませんでした</td></tr>';
+        return;
+      }
+      renderDashboard(res);
+    })
+    .withFailureHandler(function(err){
+      otTb.innerHTML = '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">エラー: ' + escHtml(err.message || err) + '</td></tr>';
+      hdTb.innerHTML = '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">エラー: ' + escHtml(err.message || err) + '</td></tr>';
+    })
+    .api_getDashboard();
 }
 
-// ====== テーブル描画 ======
-function renderToday(res){
+// ====== ダッシュボード描画 ======
+function renderDashboard(res){
   document.getElementById('todayDate').innerText = res.today;
-  var tb = document.querySelector('#tblToday tbody');
-  tb.innerHTML = '';
+  document.getElementById('weekendRange').innerText = res.weekendStart + ' ～ ' + res.weekendEnd;
 
-  if(!res.items || res.items.length === 0){
-    tb.innerHTML =
-      '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px">' +
-      '本日の申請はありません</td></tr>';
-    return;
+  // 残業テーブル
+  var otTb = document.querySelector('#tblOvertime tbody');
+  otTb.innerHTML = '';
+  document.getElementById('otCount').innerText = res.overtime.length + '名';
+
+  if(!res.overtime || res.overtime.length === 0){
+    otTb.innerHTML =
+      '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">' +
+      '本日の残業申請はありません</td></tr>';
+  } else {
+    res.overtime.forEach(function(it){ otTb.appendChild(buildOvertimeRow(it)); });
   }
 
-  res.items.forEach(function(it){
-    var typePill = it.requestType === 'overtime'
-      ? '<span class="pill info">残業</span>'
-      : '<span class="pill ok">休日</span>';
+  // 休日テーブル
+  var hdTb = document.querySelector('#tblHoliday tbody');
+  hdTb.innerHTML = '';
+  document.getElementById('hdCount').innerText = res.holiday.length + '名';
 
-    // 承認状況
-    var statusPill = '';
-    if(it.status === 'submitted'){
-      statusPill = '<span class="pill warn">承認待ち</span>';
-    } else if(it.status === 'approved'){
-      statusPill = '<span class="pill ok">承認済</span>';
-    }
+  if(!res.holiday || res.holiday.length === 0){
+    hdTb.innerHTML =
+      '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">' +
+      '今週末の休日出勤申請はありません</td></tr>';
+  } else {
+    res.holiday.forEach(function(it){ hdTb.appendChild(buildHolidayRow(it)); });
+  }
+}
 
-    // PDF
-    var pdfCell = '';
-    if(it.pdfFileId){
-      pdfCell = '<a href="https://drive.google.com/file/d/' +
-        it.pdfFileId + '/view" target="_blank" class="pill ok">PDF</a>';
-    } else if(it.netMinutes > 0 && it.status === 'approved'){
-      pdfCell = '<span class="pill warn">未作成</span>';
-    } else {
-      pdfCell = '<span class="muted">-</span>';
-    }
+// ====== 残業行 ======
+function buildOvertimeRow(it){
+  var statusPill = it.status === 'submitted'
+    ? '<span class="pill warn">承認待ち</span>'
+    : '<span class="pill ok">承認済</span>';
 
-    // 操作ボタン
-    var actionCell = buildActionCell(it);
+  var pdfCell = buildPdfCell(it);
+  var actionCell = buildActionCell(it);
 
-    var tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td>' + typePill + '</td>' +
-      '<td>' + statusPill + '</td>' +
-      '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
-      '<td>' + (it.actualMinutes > 0 ? fmtMin(it.actualMinutes)
-        : '<span class="muted">-</span>') + '</td>' +
-      '<td>' + (it.breakMinutes > 0 ? fmtMin(it.breakMinutes)
-        : '<span class="muted">-</span>') + '</td>' +
-      '<td>' + (it.netMinutes > 0 ? '<b>' + fmtMin(it.netMinutes) + '</b>'
-        : '<span class="muted">-</span>') + '</td>' +
-      '<td>' + pdfCell + '</td>' +
-      '<td>' + actionCell + '</td>';
-    tb.appendChild(tr);
-  });
+  var tr = document.createElement('tr');
+  tr.innerHTML =
+    '<td>' + escHtml(it.dept) + '</td>' +
+    '<td><b>' + escHtml(it.workerName) + '</b></td>' +
+    '<td>' + statusPill + '</td>' +
+    '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
+    '<td>' + (it.actualMinutes > 0 ? fmtMin(it.actualMinutes) : '<span class="muted">-</span>') + '</td>' +
+    '<td>' + (it.breakMinutes > 0 ? fmtMin(it.breakMinutes) : '<span class="muted">-</span>') + '</td>' +
+    '<td>' + (it.netMinutes > 0 ? '<b>' + fmtMin(it.netMinutes) + '</b>' : '<span class="muted">-</span>') + '</td>' +
+    '<td>' + pdfCell + '</td>' +
+    '<td>' + actionCell + '</td>';
+  return tr;
+}
+
+// ====== 休日行 ======
+function buildHolidayRow(it){
+  var statusPill = it.status === 'submitted'
+    ? '<span class="pill warn">承認待ち</span>'
+    : '<span class="pill ok">承認済</span>';
+
+  var pdfCell = buildPdfCell(it);
+  var actionCell = buildActionCell(it);
+
+  var tr = document.createElement('tr');
+  tr.innerHTML =
+    '<td>' + escHtml(it.targetDateLabel || it.targetDate) + '</td>' +
+    '<td>' + escHtml(it.dept) + '</td>' +
+    '<td><b>' + escHtml(it.workerName) + '</b></td>' +
+    '<td>' + statusPill + '</td>' +
+    '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
+    '<td>' + (it.actualMinutes > 0 ? fmtMin(it.actualMinutes) : '<span class="muted">-</span>') + '</td>' +
+    '<td>' + (it.breakMinutes > 0 ? fmtMin(it.breakMinutes) : '<span class="muted">-</span>') + '</td>' +
+    '<td>' + (it.netMinutes > 0 ? '<b>' + fmtMin(it.netMinutes) + '</b>' : '<span class="muted">-</span>') + '</td>' +
+    '<td>' + pdfCell + '</td>' +
+    '<td>' + actionCell + '</td>';
+  return tr;
+}
+
+// ====== PDF列 ======
+function buildPdfCell(it){
+  if(it.pdfFileId){
+    return '<a href="https://drive.google.com/file/d/' +
+      it.pdfFileId + '/view" target="_blank" class="pill ok">PDF</a>';
+  } else if(it.netMinutes > 0 && it.status === 'approved'){
+    return '<span class="pill warn">未作成</span>';
+  }
+  return '<span class="muted">-</span>';
 }
 
 // ====== 操作ボタン構築 ======
 function buildActionCell(it){
-  // 未承認
   if(it.status === 'submitted'){
     return '<span class="muted">承認待ち</span>';
   }
 
-  // 残業
   if(it.requestType === 'overtime'){
     if(it.actualEndAt){
       return '<span class="pill ok">完了済</span>';
@@ -749,7 +779,6 @@ function buildActionCell(it){
       'onclick="doOvertimeDone(\'' + it.requestId + '\',this)">残業完了</button>';
   }
 
-  // 休日
   if(it.requestType === 'holiday'){
     if(it.actualEndAt){
       return '<span class="pill ok">完了済</span>';
@@ -776,7 +805,7 @@ function doOvertimeDone(requestId, btn){
         '実働: ' + fmtMin(res.actualMinutes) + '\n' +
         '休憩控除: ' + fmtMin(res.breakMinutes) + '\n' +
         '実残業: ' + fmtMin(res.netMinutes));
-      loadToday();
+      loadDashboard();
     })
     .withFailureHandler(function(err){
       alert('エラー: ' + (err.message || err));
@@ -794,7 +823,7 @@ function doHolidayStart(requestId, btn){
   google.script.run
     .withSuccessHandler(function(res){
       alert('休日出勤を開始しました。');
-      loadToday();
+      loadDashboard();
     })
     .withFailureHandler(function(err){
       alert('エラー: ' + (err.message || err));
@@ -815,7 +844,7 @@ function doHolidayDone(requestId, btn){
         '実働: ' + fmtMin(res.actualMinutes) + '\n' +
         '休憩控除: ' + fmtMin(res.breakMinutes) + '\n' +
         '実残業/実働: ' + fmtMin(res.netMinutes));
-      loadToday();
+      loadDashboard();
     })
     .withFailureHandler(function(err){
       alert('エラー: ' + (err.message || err));
