@@ -164,16 +164,6 @@ function enrichWorkNos_(workNo1, workNo2, workNo3) {
   return result;
 }
 
-// ====== 業務ID ラベル解析 ======
-
-function parseJobChoice_(label) {
-  // 例： "J01 001:設計"
-  const s = normalize_(label);
-  if (!s) return { jobId: '', jobLabel: '' };
-  const parts = s.split(/\s+/);
-  return { jobId: parts[0], jobLabel: s };
-}
-
 // ====== 作業員ラベル解析 ======
 
 function parseWorkerChoice_(label) {
@@ -247,11 +237,6 @@ function handleFormSubmit_(e) {
       throw new Error('工番の入力に問題があります: ' + workNoErrors.join('; '));
     }
 
-    // 業務ID（部署で絞っている想定）
-    const jobLabel = normalize_(ans.get(Q.JOB));
-    const { jobId, jobLabel: jobLabelFull } = parseJobChoice_(jobLabel);
-    if (!jobId) throw new Error(`業務IDが取得できません: ${Q.JOB}`);
-
     // 理由＋補足
     const reason = normalize_(ans.get(Q.REASON));
     const reasonDetail = normalize_(ans.get(Q.REASON_DETAIL));
@@ -296,7 +281,7 @@ function handleFormSubmit_(e) {
       reasonDetail,
       workContent: '', // フォームに業務内容があるならここへ
       // 明細（最大3件）
-      jobId1: jobId,
+      jobId1: '',
       workNo1: workNo1,
       orderNo1: enriched.orderNo1,
       customer1: enriched.customer1,

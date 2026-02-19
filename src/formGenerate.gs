@@ -85,25 +85,19 @@ function getOrCreateDeptForm_(type, dept) {
   }
 }
 
-// ====== フォームの選択肢更新（作業員・業務ID・工番・理由・予定時間） ======
+// ====== フォームの選択肢更新（作業員・工番・理由・予定時間） ======
 
 function updateDeptFormChoices_(formOrFormId, type, dept) {
   const form = (typeof formOrFormId === 'string') ? FormApp.openById(formOrFormId) : formOrFormId;
 
   // マスタ読み込み
   const workersByDept = loadWorkersByDept_();
-  const jobsByDept = loadJobsByDept_();
   const orderPrefixes = loadOrderPrefixes_();
 
   const workerChoices = workersByDept.get(dept) || [];
-  const jobChoices = jobsByDept.get(dept) || [];
 
   if (workerChoices.length === 0) {
     Logger.log(`WARN: 作業員候補が空のためスキップ: dept=${dept}`);
-    return false;
-  }
-  if (jobChoices.length === 0) {
-    Logger.log(`WARN: 業務ID候補が空のためスキップ: dept=${dept}`);
     return false;
   }
   if (orderPrefixes.length === 0) {
@@ -113,7 +107,6 @@ function updateDeptFormChoices_(formOrFormId, type, dept) {
 
   // セット
   setDropdownChoices_(findItemByTitle_(form, Q.WORKER), workerChoices);
-  setDropdownChoices_(findItemByTitle_(form, Q.JOB), jobChoices);
 
   // 工番：旧プルダウンを削除し、プレフィックス選択＋5桁番号入力（×3件）に差し替え
   ensureOrderPrefixItems_(form, orderPrefixes);

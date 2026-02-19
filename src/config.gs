@@ -26,7 +26,6 @@ const Q = {
   ORDER_NUMBER_2: '工番番号_2',
   ORDER_PREFIX_3: '工番プレフィックス_3',
   ORDER_NUMBER_3: '工番番号_3',
-  JOB: '業務ID',
   REASON: '理由',
   REASON_DETAIL: '補足理由',
   OT_HOURS: '予定時間',

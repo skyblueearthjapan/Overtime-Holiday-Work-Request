@@ -45,37 +45,6 @@ function loadWorkersByDept_() {
   return map;
 }
 
-function loadJobsByDept_() {
-  const sh = requireSheet_(SHEET.JOBS);
-  const values = sh.getDataRange().getValues();
-  // 想定ヘッダ：業務ID, 業務NO, 業務名, 部署, 説明
-  const H = values[0].map(h => normalize_(h));
-  const idx = {
-    id: H.indexOf('業務ID'),
-    no: H.indexOf('業務NO'),
-    name: H.indexOf('業務名'),
-    dept: H.indexOf('部署'),
-  };
-  if (idx.id < 0 || idx.no < 0 || idx.name < 0 || idx.dept < 0) {
-    throw new Error('業務NOマスタのヘッダが想定と違います（業務ID/業務NO/業務名/部署）。');
-  }
-
-  const map = new Map(); // dept -> ["J01 001:設計", ...]
-  for (let r = 1; r < values.length; r++) {
-    const row = values[r];
-    const dept = normalize_(row[idx.dept]);
-    const id = normalize_(row[idx.id]);
-    const no = normalize_(row[idx.no]);
-    const name = normalize_(row[idx.name]);
-    if (!dept || !id) continue;
-    const label = `${id} ${no}:${name}`; // 表示は自由に変更OK
-    if (!map.has(dept)) map.set(dept, []);
-    map.get(dept).push(label);
-  }
-  for (const [k, arr] of map.entries()) arr.sort();
-  return map;
-}
-
 function loadOrderChoices_() {
   const sh = requireSheet_(SHEET.ORDERS);
   const values = sh.getDataRange().getValues();
