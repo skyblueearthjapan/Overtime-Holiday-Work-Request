@@ -48,7 +48,6 @@ function ensureOrderItems_(form) {
   // 新形式のタイトル（TEXT型でなければ削除対象）
   const newTitleSet = new Set([Q.ORDER_1, Q.ORDER_2, Q.ORDER_3]);
 
-  let insertIndex = -1;
   let needsMigration = false;
 
   // まず旧項目が存在するか確認（存在しなければスキップ→高速化）
@@ -71,7 +70,11 @@ function ensureOrderItems_(form) {
     const existing = [Q.ORDER_1, Q.ORDER_2, Q.ORDER_3].filter(
       q => findItemByTitleOrNull_(form, q) !== null
     );
-    if (existing.length === 3) return; // 完全に移行済み → 何もしない
+    if (existing.length === 3) {
+      // 3つ揃っていても位置がおかしい場合がある → 位置補正を実行
+      ensureOrderItemPosition_(form);
+      return;
+    }
   }
 
   // ---- 旧項目を逆順で削除（インデックスずれ防止） ----
@@ -96,16 +99,12 @@ function ensureOrderItems_(form) {
     const isWrongType = newTitleSet.has(title) && itemType !== FormApp.ItemType.TEXT;
 
     if (isOldExact || isPattern || isSectionHeader || isWrongType) {
-      if (insertIndex < 0 || allItems[i].getIndex() < insertIndex) {
-        insertIndex = allItems[i].getIndex();
-      }
       form.deleteItem(allItems[i]);
     }
   }
 
   // ---- 新形式のテキスト欄を作成（既存TEXTなら何もしない） ----
   const newQs = [Q.ORDER_1, Q.ORDER_2, Q.ORDER_3];
-  const newItems = [];
 
   for (const qTitle of newQs) {
     const existing = findItemByTitleOrNull_(form, qTitle);
@@ -115,13 +114,36 @@ function ensureOrderItems_(form) {
     item.setTitle(qTitle);
     item.setRequired(false);
     item.setHelpText('WEBアプリのモーダルから選択するか、工番コードを直接入力してください（任意）');
-    newItems.push(item);
   }
 
-  // 挿入位置が分かっていれば移動
-  if (insertIndex >= 0 && newItems.length > 0) {
-    for (let i = 0; i < newItems.length; i++) {
-      form.moveItem(newItems[i], insertIndex + i);
+  // ---- 作業実施日の直後に工番1/2/3を配置 ----
+  ensureOrderItemPosition_(form);
+}
+
+/**
+ * 工番1/2/3 の位置を「作業実施日」の直後に補正する。
+ * addTextItem() は末尾に追加されるため、作成後にこの関数で正しい位置へ移動する。
+ * Google Forms の moveItem(item, toIndex) は「移動後にそのインデックスになる位置」に
+ * 挿入するため、1つずつ順番に移動する。
+ */
+function ensureOrderItemPosition_(form) {
+  // アンカー: 作業実施日
+  const dateItem = findItemByTitleOrNull_(form, Q.DATE);
+  if (!dateItem) return; // アンカーが無ければ位置補正不可（テンプレ異常）
+
+  const orderQs = [Q.ORDER_1, Q.ORDER_2, Q.ORDER_3];
+
+  for (let i = 0; i < orderQs.length; i++) {
+    const orderItem = findItemByTitleOrNull_(form, orderQs[i]);
+    if (!orderItem) continue;
+
+    // 作業実施日の現在位置を毎回取得（移動で変わるため）
+    const anchorIndex = findItemByTitleOrNull_(form, Q.DATE).getIndex();
+    const targetIndex = anchorIndex + 1 + i; // DATE の次 +0, +1, +2
+    const currentIndex = orderItem.getIndex();
+
+    if (currentIndex !== targetIndex) {
+      form.moveItem(orderItem, targetIndex);
     }
   }
 }
