@@ -119,108 +119,116 @@ function api_getTodayRequestsForDept(dept) {
 // ====== 承認者ダッシュボード（全承認対象部署の残業+休日） ======
 
 function api_getApproverDashboard() {
-  // TODO: 承認者アカウント紐づけ実装後に認証チェックを有効化
-  // 現在は全部署の申請を表示（開発中）
-  const email = Session.getActiveUser().getEmail() || '';
-  const admin = !email || isAdmin_(email);
-  let allowedDepts;
-  if (admin) {
-    allowedDepts = null; // null = 全部署OK
-  } else {
-    const map = getDeptApproverMap_();
-    const emailLc = email.toLowerCase();
-    allowedDepts = new Set();
-    for (const dept of Object.keys(map)) {
-      if (map[dept].has(emailLc)) allowedDepts.add(dept);
+  try {
+    // TODO: 承認者アカウント紐づけ実装後に認証チェックを有効化
+    // 現在は全部署の申請を表示（開発中）
+    const email = Session.getActiveUser().getEmail() || '';
+    const admin = !email || isAdmin_(email);
+    let allowedDepts = null; // null = 全部署OK（開発中）
+
+    const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    const values = sh.getDataRange().getValues();
+
+    const now = new Date();
+    const today = fmtDate_(now, 'yyyy-MM-dd');
+
+    // 今週末の日付範囲
+    const dow = now.getDay();
+    const monday = new Date(now);
+    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+    monday.setHours(0, 0, 0, 0);
+    const saturday = new Date(monday);
+    saturday.setDate(monday.getDate() + 5);
+    const nextMonday = new Date(monday);
+    nextMonday.setDate(monday.getDate() + 7);
+    const weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
+    const weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
+
+    const dayNames = ['日','月','火','水','木','金','土'];
+    const overtime = [];
+    const holiday = [];
+
+    for (let r = 1; r < values.length; r++) {
+      const row = values[r];
+      const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+      if (!status || status === 'canceled') continue;
+
+      const rowDept = normalize_(row[idx['dept']]);
+      if (allowedDepts && !allowedDepts.has(rowDept)) continue;
+
+      // targetDate のパース（不正な日付はスキップ）
+      const targetDateVal = row[idx['targetDate']];
+      let targetDate;
+      try {
+        targetDate = targetDateVal instanceof Date
+          ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
+          : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+      } catch (e) {
+        continue; // 不正な日付はスキップ
+      }
+
+      const requestType = normalize_(row[idx['requestType(overtime/holiday)']]);
+      const requestId = normalize_(row[idx['requestId']]);
+
+      // submittedAt を文字列に変換（シリアライズ問題回避）
+      const submittedAtRaw = row[idx['submittedAt']];
+      let submittedAt = '';
+      if (submittedAtRaw instanceof Date) {
+        submittedAt = fmtDate_(submittedAtRaw, 'yyyy-MM-dd HH:mm:ss');
+      } else if (submittedAtRaw) {
+        submittedAt = String(submittedAtRaw);
+      }
+
+      const item = {
+        requestId: requestId || '',
+        requestType: requestType || '',
+        status: status || '',
+        dept: rowDept || '',
+        workerName: normalize_(row[idx['workerName']]) || '',
+        targetDate: targetDate || '',
+        targetDateLabel: '',
+        approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
+        submittedAt: submittedAt,
+      };
+
+      if (requestType === 'overtime' && targetDate === today) {
+        overtime.push(item);
+      } else if (requestType === 'holiday' && targetDate >= weekendStart && targetDate <= weekendEnd) {
+        const d = new Date(targetDate + 'T00:00:00');
+        item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+        holiday.push(item);
+      }
     }
-    // 権限が見つからない場合も全部署表示（開発中）
-    if (allowedDepts.size === 0) {
-      allowedDepts = null;
-    }
-  }
 
-  const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
-  const values = sh.getDataRange().getValues();
-
-  const now = new Date();
-  const today = fmtDate_(now, 'yyyy-MM-dd');
-
-  // 今週末の日付範囲
-  const dow = now.getDay();
-  const monday = new Date(now);
-  monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
-  monday.setHours(0, 0, 0, 0);
-  const saturday = new Date(monday);
-  saturday.setDate(monday.getDate() + 5);
-  const nextMonday = new Date(monday);
-  nextMonday.setDate(monday.getDate() + 7);
-  const weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
-  const weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
-
-  const dayNames = ['日','月','火','水','木','金','土'];
-  const overtime = [];
-  const holiday = [];
-
-  for (let r = 1; r < values.length; r++) {
-    const row = values[r];
-    const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
-    if (!status || status === 'canceled') continue;
-
-    const rowDept = normalize_(row[idx['dept']]);
-    // 部署フィルタ（adminは全部署OK）
-    if (allowedDepts && !allowedDepts.has(rowDept)) continue;
-
-    const targetDateVal = row[idx['targetDate']];
-    const targetDate = targetDateVal instanceof Date
-      ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
-      : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
-
-    const requestType = normalize_(row[idx['requestType(overtime/holiday)']]);
-    const requestId = normalize_(row[idx['requestId']]);
-
-    const item = {
-      requestId,
-      requestType,
-      status,
-      dept: rowDept,
-      workerName: normalize_(row[idx['workerName']]),
-      targetDate,
-      targetDateLabel: '',
-      approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
-      submittedAt: row[idx['submittedAt']],
+    // ソート：未承認を先頭、次に部署→名前
+    const sortFn = function(a, b) {
+      if (a.status !== b.status) {
+        if (a.status === 'submitted') return -1;
+        if (b.status === 'submitted') return 1;
+      }
+      if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
+      return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
     };
+    overtime.sort(sortFn);
+    holiday.sort(function(a, b) {
+      if (a.status !== b.status) {
+        if (a.status === 'submitted') return -1;
+        if (b.status === 'submitted') return 1;
+      }
+      if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
+      if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
+      return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
+    });
 
-    if (requestType === 'overtime' && targetDate === today) {
-      overtime.push(item);
-    } else if (requestType === 'holiday' && targetDate >= weekendStart && targetDate <= weekendEnd) {
-      const d = new Date(targetDate + 'T00:00:00');
-      item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
-      holiday.push(item);
-    }
+    return { today: today, weekendStart: weekendStart, weekendEnd: weekendEnd,
+             overtime: overtime, holiday: holiday, isAdmin: admin };
+  } catch (err) {
+    // エラーをクライアントに伝えるため、エラー情報を含むオブジェクトを返す
+    console.error('api_getApproverDashboard エラー: ' + err.message + '\n' + err.stack);
+    return { today: '', weekendStart: '', weekendEnd: '',
+             overtime: [], holiday: [], isAdmin: true,
+             error: err.message };
   }
-
-  // ソート：未承認を先頭、次に部署→名前
-  const sortFn = function(a, b) {
-    // submitted first
-    if (a.status !== b.status) {
-      if (a.status === 'submitted') return -1;
-      if (b.status === 'submitted') return 1;
-    }
-    if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
-    return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
-  };
-  overtime.sort(sortFn);
-  holiday.sort(function(a, b) {
-    if (a.status !== b.status) {
-      if (a.status === 'submitted') return -1;
-      if (b.status === 'submitted') return 1;
-    }
-    if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
-    if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
-    return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
-  });
-
-  return { today, weekendStart, weekendEnd, overtime, holiday, isAdmin: admin };
 }
 
 // ====== 承認実行（承認ボタン） ======

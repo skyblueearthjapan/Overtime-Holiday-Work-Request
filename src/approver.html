@@ -241,9 +241,19 @@ function loadDashboard(){
 
   google.script.run
     .withSuccessHandler(function(res){
+      console.log('api_getApproverDashboard 結果:', JSON.stringify(res));
       if(!res){
-        otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">データを取得できませんでした</td></tr>';
-        hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">データを取得できませんでした</td></tr>';
+        document.getElementById('approverSub').innerText = 'サーバーからnullが返されました';
+        otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">データを取得できませんでした（res=null）。デプロイ済みか確認してください。</td></tr>';
+        hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">デプロイの「新しいデプロイ」ではなく既存デプロイの更新が必要です</td></tr>';
+        return;
+      }
+
+      // サーバー側でキャッチしたエラーを表示
+      if(res.error){
+        document.getElementById('approverSub').innerText = 'サーバーエラー';
+        otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">サーバーエラー: ' + escHtml(res.error) + '</td></tr>';
+        hdTb.innerHTML = '<tr><td colspan="7"></td></tr>';
         return;
       }
 
@@ -254,9 +264,10 @@ function loadDashboard(){
       renderDashboard(res);
     })
     .withFailureHandler(function(err){
-      document.getElementById('approverSub').innerText = 'エラー';
-      otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">エラー: ' + escHtml(err.message || err) + '</td></tr>';
-      hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">エラー: ' + escHtml(err.message || err) + '</td></tr>';
+      console.error('api_getApproverDashboard 失敗:', err);
+      document.getElementById('approverSub').innerText = 'API呼出失敗';
+      otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">API失敗: ' + escHtml(err.message || err) + '</td></tr>';
+      hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">GASエディタのログ（実行数）も確認してください</td></tr>';
     })
     .api_getApproverDashboard();
 }
