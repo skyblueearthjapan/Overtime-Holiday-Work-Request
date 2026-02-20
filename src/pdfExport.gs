@@ -38,22 +38,30 @@ function getStampBlob_(fileId) {
 }
 
 /**
- * メールアドレスから作業員マスタの stampFileId を引く
+ * メールアドレスから StampMap シートの stampFileId を引く
+ * StampMap ヘッダ想定: メール, stampFileId, 備考
  */
 function lookupStampFileIdByEmail_(email) {
   if (!email) return '';
-  const sh = requireSheet_(SHEET.WORKERS);
-  const values = sh.getDataRange().getValues();
-  const H = values[0].map(h => normalize_(h));
-  const emailIdx = H.findIndex(h => h.startsWith('googleアカウント') || h.startsWith('Googleアカウント'));
-  const stampIdx = H.indexOf('stampfileid');
-  if (emailIdx < 0 || stampIdx < 0) return '';
-
-  const target = email.toLowerCase();
-  for (let r = 1; r < values.length; r++) {
-    if (normalize_(values[r][emailIdx]).toLowerCase() === target) {
-      return normalize_(values[r][stampIdx]);
+  try {
+    const sh = requireSheet_(SHEET.STAMP_MAP);
+    const values = sh.getDataRange().getValues();
+    const H = values[0].map(h => normalize_(h));
+    const emailIdx = H.indexOf('メール');
+    const stampIdx = H.indexOf('stampfileid');
+    if (emailIdx < 0 || stampIdx < 0) {
+      Logger.log('StampMap: ヘッダに「メール」または「stampFileId」列がありません');
+      return '';
     }
+
+    const target = email.toLowerCase();
+    for (let r = 1; r < values.length; r++) {
+      if (normalize_(values[r][emailIdx]).toLowerCase() === target) {
+        return normalize_(values[r][stampIdx]);
+      }
+    }
+  } catch (e) {
+    Logger.log('StampMap 参照エラー: ' + e.message);
   }
   return '';
 }

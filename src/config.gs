@@ -10,6 +10,7 @@ const SHEET = {
   JOBS: '業務NOマスタ',
   ORDERS: '工番マスタ',
   BATCH_LOGS: 'BatchLogs',
+  STAMP_MAP: 'StampMap',        // メール→印鑑画像FileIDマッピング
 };
 
 // フォーム内の質問タイトル（両テンプレフォームで統一すること）
