@@ -129,7 +129,16 @@ function api_adminDailyDetail(dateYmd, deptFilter) {
 
 function api_adminMonthlySummary(yearMonth, deptFilter) {
   assertAdmin_();
+  return buildMonthlySummary_(yearMonth, deptFilter);
+}
 
+/**
+ * 月次サマリー共通ロジック（admin / approver 両方から利用）
+ * @param {string} yearMonth - 'yyyy-mm'
+ * @param {string} deptFilter - 部署名 or 'ALL'
+ * @return {Object} KPI, people, watch, charts
+ */
+function buildMonthlySummary_(yearMonth, deptFilter) {
   const [yStr, mStr] = String(yearMonth).split('-');
   const y = Number(yStr), m = Number(mStr);
   if (!y || !m || m < 1 || m > 12) throw new Error('yearMonthは yyyy-mm で指定してください');

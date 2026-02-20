@@ -344,6 +344,18 @@ function api_approveRequestsBatch(requestIds) {
   } finally { lock.releaseLock(); }
 }
 
+// ====== 承認者向け月次サマリーAPI ======
+
+function api_approverMonthlySummary(yearMonth, dept) {
+  const email = Session.getActiveUser().getEmail();
+  if (!email) throw new Error('メールアドレスが取得できません。');
+  const normDept = normalize_(dept);
+  if (!normDept) throw new Error('部署が指定されていません。');
+  if (!canApproveDept_(email, normDept))
+    throw new Error('この部署の月次サマリーを閲覧する権限がありません。');
+  return buildMonthlySummary_(yearMonth, normDept);
+}
+
 // ====== 承認者の担当部署一覧取得 ======
 
 function api_getApproverDepts() {

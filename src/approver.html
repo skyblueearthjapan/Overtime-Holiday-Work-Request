@@ -115,6 +115,64 @@
     .nav-link:hover{ background:var(--bg1); text-decoration:none; }
     .loading{ text-align:center; padding:30px; color:var(--muted); }
 
+    /* ---- 月次セクション（折りたたみ） ---- */
+    .section-toggle{
+      cursor:pointer;
+      user-select:none;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px;
+    }
+    .section-toggle .arrow{
+      transition: transform .2s;
+      font-size:14px; color:var(--muted);
+    }
+    .section-toggle .arrow.open{ transform: rotate(90deg); }
+    .monthly-body{
+      display:none;
+      padding:0 14px 14px;
+    }
+    .monthly-body.open{ display:block; }
+    .approver-chart{ width:100%; height:260px; }
+    .chip{
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:999px;
+      padding:6px 10px;
+      display:inline-flex; gap:6px; align-items:center;
+      font-size:12px;
+      cursor:pointer;
+      user-select:none;
+    }
+    .chip input{ transform: scale(1.1); }
+    .monthly-filters{
+      display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+      margin-bottom:10px;
+    }
+    .monthly-filters input[type="text"],
+    .monthly-filters input[type="month"]{
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      background:#fff;
+      font-size:13px;
+    }
+    .mini-kpi-row{
+      display:grid; gap:10px; grid-template-columns: 1fr 1fr 1fr;
+      margin-bottom:10px;
+    }
+    .mini-kpi{
+      background:#f8fbff;
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px 12px;
+      text-align:center;
+    }
+    .mini-kpi .val{ font-size:20px; font-weight:900; }
+    #tblApproverMonthly th,
+    #tblApproverWatch th{
+      cursor:pointer;
+    }
+
     @media (max-width:640px){
       header{ flex-direction:column; align-items:flex-start; gap:8px; }
       .wrap{ padding:12px 10px; }
@@ -122,6 +180,8 @@
       .row{ flex-direction:column; align-items:stretch; }
       table{ font-size:12px; }
       th, td{ padding:8px 4px; }
+      .monthly-filters{ flex-direction:column; align-items:stretch; }
+      .mini-kpi-row{ grid-template-columns:1fr; }
     }
   </style>
 </head>
@@ -212,6 +272,96 @@
       </table>
     </div>
 
+    <!-- 月次サマリー（折りたたみ） -->
+    <div class="card" style="margin-top:12px;">
+      <div class="section-toggle" onclick="toggleMonthly()">
+        <div style="font-weight:900; letter-spacing:.05em;">
+          月次：個人別サマリー
+          <span class="sub" style="margin-left:8px;">実績・予測・40h/60h監視</span>
+        </div>
+        <span class="arrow" id="monthlyArrow">&#9654;</span>
+      </div>
+
+      <div class="monthly-body" id="monthlyBody">
+        <!-- フィルタ行 -->
+        <div class="monthly-filters">
+          <input type="month" id="approverYm" />
+          <input type="text" id="approverQ" placeholder="氏名検索" style="min-width:120px;" oninput="onApproverFilterChange()">
+          <label class="chip"><input type="checkbox" id="afOver40" onchange="onApproverFilterChange()"> 40h超</label>
+          <label class="chip"><input type="checkbox" id="afOver60" onchange="onApproverFilterChange()"> 60h超</label>
+          <label class="chip"><input type="checkbox" id="afProj40" onchange="onApproverFilterChange()"> 予測40h超</label>
+          <label class="chip"><input type="checkbox" id="afPdfMiss" onchange="onApproverFilterChange()"> PDF未作成</label>
+          <button class="ghost btn-sm" onclick="loadApproverMonthly()">更新</button>
+        </div>
+
+        <!-- ミニKPI -->
+        <div class="mini-kpi-row">
+          <div class="mini-kpi">
+            <div class="sub">対象人数</div>
+            <div class="val" id="mkpiPeople">-</div>
+          </div>
+          <div class="mini-kpi">
+            <div class="sub">40h超（実績/予測）</div>
+            <div class="val" id="mkpi40">-</div>
+          </div>
+          <div class="mini-kpi">
+            <div class="sub">PDF未作成</div>
+            <div class="val" id="mkpiPdf" style="color:var(--warn);">-</div>
+          </div>
+        </div>
+
+        <!-- バーチャート -->
+        <div style="margin-bottom:10px;">
+          <canvas id="cApproverPeople" class="approver-chart"></canvas>
+          <div class="sub" id="approverChartInfo"></div>
+        </div>
+
+        <!-- 月次テーブル -->
+        <div style="margin-bottom:10px;">
+          <div class="sectionTitle">
+            <div>個人別一覧</div>
+            <div class="sub">列見出しクリックで並び替え</div>
+          </div>
+          <table id="tblApproverMonthly">
+            <thead>
+              <tr>
+                <th data-k="workerName">氏名</th>
+                <th data-k="totalNet">合算(分)</th>
+                <th data-k="totalNetH">合算</th>
+                <th data-k="overtimeNet">残業</th>
+                <th data-k="holidayNet">休日</th>
+                <th data-k="remain40">40残</th>
+                <th data-k="projectedTotal">予測</th>
+                <th data-k="pdfMissing">PDF</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- 注意対象テーブル -->
+        <div>
+          <div class="sectionTitle">
+            <div>注意対象</div>
+            <div class="sub">30h超 or 予測40h超</div>
+          </div>
+          <table id="tblApproverWatch">
+            <thead>
+              <tr>
+                <th>氏名</th>
+                <th>実績</th>
+                <th>予測</th>
+                <th>40残</th>
+                <th>60残</th>
+                <th>PDF</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
   </div>
 
 <!-- 部署選択モーダル -->
@@ -296,6 +446,13 @@ function initApprover(){
 
 function selectDept(dept){
   SELECTED_DEPT = dept;
+  // 月次セクションのステートをリセット（部署変更時）
+  MONTHLY_STATE.data = null;
+  MONTHLY_STATE.loaded = false;
+  var body = document.getElementById('monthlyBody');
+  if(body) body.classList.remove('open');
+  var arrow = document.getElementById('monthlyArrow');
+  if(arrow) arrow.classList.remove('open');
   closeDeptModal();
   loadDashboard(dept);
 }
@@ -535,6 +692,281 @@ function approveAllInTable(type){
     })
     .api_approveRequestsBatch(requestIds);
 }
+
+// ====== 月次サマリー ======
+var MONTHLY_STATE = {
+  data: null,
+  loaded: false,
+  sortKey: 'totalNet',
+  sortDir: 'desc',
+  visiblePeople: []
+};
+
+// 月選択の初期値
+(function(){
+  var d = new Date();
+  var ym = d.getFullYear() + '-' + z(d.getMonth()+1);
+  var el = document.getElementById('approverYm');
+  if(el) el.value = ym;
+})();
+
+function toggleMonthly(){
+  var body = document.getElementById('monthlyBody');
+  var arrow = document.getElementById('monthlyArrow');
+  var isOpen = body.classList.contains('open');
+
+  if(isOpen){
+    body.classList.remove('open');
+    arrow.classList.remove('open');
+  } else {
+    body.classList.add('open');
+    arrow.classList.add('open');
+    // 初回展開時に自動ロード
+    if(!MONTHLY_STATE.loaded && SELECTED_DEPT){
+      loadApproverMonthly();
+    }
+  }
+}
+
+function loadApproverMonthly(){
+  if(!SELECTED_DEPT) return;
+  var ym = document.getElementById('approverYm').value;
+  if(!ym) return;
+
+  // ローディング表示
+  var tb = document.querySelector('#tblApproverMonthly tbody');
+  tb.innerHTML = '<tr><td colspan="8" class="loading">読込中...</td></tr>';
+  var wb = document.querySelector('#tblApproverWatch tbody');
+  wb.innerHTML = '<tr><td colspan="6" class="loading">読込中...</td></tr>';
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      MONTHLY_STATE.data = res;
+      MONTHLY_STATE.loaded = true;
+      renderApproverMonthly();
+    })
+    .withFailureHandler(function(err){
+      alert('月次サマリー取得エラー: ' + (err.message || err));
+      tb.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px;">エラー: ' + escHtml(err.message || err) + '</td></tr>';
+      wb.innerHTML = '';
+    })
+    .api_approverMonthlySummary(ym, SELECTED_DEPT);
+}
+
+function applyApproverFilters(people){
+  var q = (document.getElementById('approverQ').value || '').trim();
+  var fOver40 = document.getElementById('afOver40').checked;
+  var fOver60 = document.getElementById('afOver60').checked;
+  var fProj40 = document.getElementById('afProj40').checked;
+  var fPdfMiss = document.getElementById('afPdfMiss').checked;
+
+  var out = people.slice();
+  if(q) out = out.filter(function(p){ return (p.workerName||'').indexOf(q) >= 0; });
+  if(fOver40) out = out.filter(function(p){ return p.totalNet >= 2400; });
+  if(fOver60) out = out.filter(function(p){ return p.totalNet >= 3600; });
+  if(fProj40) out = out.filter(function(p){ return p.projectedTotal >= 2400; });
+  if(fPdfMiss) out = out.filter(function(p){ return (p.pdfMissing||0) > 0; });
+
+  // sort
+  var k = MONTHLY_STATE.sortKey;
+  var dir = MONTHLY_STATE.sortDir;
+  out.sort(function(a,b){
+    var av = (k==='totalNetH') ? a.totalNet : (a[k] != null ? a[k] : '');
+    var bv = (k==='totalNetH') ? b.totalNet : (b[k] != null ? b[k] : '');
+    if(typeof av === 'number' && typeof bv === 'number'){
+      return dir==='asc' ? av-bv : bv-av;
+    }
+    return dir==='asc'
+      ? String(av).localeCompare(String(bv),'ja')
+      : String(bv).localeCompare(String(av),'ja');
+  });
+
+  return out;
+}
+
+function onApproverFilterChange(){
+  if(MONTHLY_STATE.data) renderApproverMonthly();
+}
+
+function renderApproverMonthly(){
+  var res = MONTHLY_STATE.data;
+  if(!res) return;
+
+  // ミニKPI
+  document.getElementById('mkpiPeople').innerText = res.kpi.totalPeople;
+  document.getElementById('mkpi40').innerText = res.kpi.over40 + ' / ' + res.kpi.projectedOver40;
+  document.getElementById('mkpiPdf').innerText = res.kpi.pdfMissingTotal;
+
+  // フィルタ＆ソート
+  var visible = applyApproverFilters(res.people);
+  MONTHLY_STATE.visiblePeople = visible;
+
+  // テーブル描画
+  var tb = document.querySelector('#tblApproverMonthly tbody');
+  tb.innerHTML = '';
+  if(visible.length === 0){
+    tb.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px;">該当データなし</td></tr>';
+  } else {
+    visible.forEach(function(p){
+      var remain40 = Math.max(0, 2400 - p.totalNet);
+      var badge40 = remain40===0 ? '<span class="pill danger">超過</span>' :
+        (remain40<=300 ? '<span class="pill warn">'+fmtMin(remain40)+'残</span>' : '<span class="pill">'+fmtMin(remain40)+'残</span>');
+      var proj = p.projectedTotal >= 3600 ? '<span class="pill danger">60超予測</span>' :
+                   p.projectedTotal >= 2400 ? '<span class="pill warn">40超予測</span>' :
+                   '<span class="pill ok">範囲内</span>';
+      var pdf = (p.pdfMissing||0) > 0 ? '<span class="pill warn">'+p.pdfMissing+'件</span>' : '<span class="pill ok">0</span>';
+
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><b>'+escHtml(p.workerName)+'</b></td>'+
+        '<td>'+p.totalNet+'</td>'+
+        '<td><b>'+fmtMin(p.totalNet)+'</b></td>'+
+        '<td>'+fmtMin(p.overtimeNet)+'</td>'+
+        '<td>'+fmtMin(p.holidayNet)+'</td>'+
+        '<td>'+badge40+'</td>'+
+        '<td>'+fmtMin(p.projectedTotal)+' '+proj+'</td>'+
+        '<td>'+pdf+'</td>';
+      tb.appendChild(tr);
+    });
+  }
+
+  // 注意対象テーブル
+  var wb = document.querySelector('#tblApproverWatch tbody');
+  wb.innerHTML = '';
+  var watchList = (res.watch || []);
+  if(watchList.length === 0){
+    wb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px;">注意対象なし</td></tr>';
+  } else {
+    watchList.forEach(function(w){
+      var pdf = (w.pdfMissing||0) > 0 ? '<span class="pill warn">'+w.pdfMissing+'件</span>' : '<span class="pill ok">0</span>';
+      var projBadge = w.projectedOver60 ? '<span class="pill danger">60超</span>' :
+                      (w.projectedOver40 ? '<span class="pill warn">40超</span>' : '<span class="pill ok">範囲内</span>');
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><b>'+escHtml(w.workerName)+'</b></td>'+
+        '<td><b>'+fmtMin(w.totalNet)+'</b></td>'+
+        '<td>'+fmtMin(w.projectedTotal)+' '+projBadge+'</td>'+
+        '<td>'+fmtMin(w.remain40)+'</td>'+
+        '<td>'+fmtMin(w.remain60)+'</td>'+
+        '<td>'+pdf+'</td>';
+      wb.appendChild(tr);
+    });
+  }
+
+  // チャート描画
+  drawApproverPeopleBar('cApproverPeople', visible, res.charts.people.limit40, res.charts.people.limit60);
+  document.getElementById('approverChartInfo').innerText =
+    '棒：表示中 '+visible.length+'名（実績=濃、予測=薄）。40h/60hラインは固定。';
+}
+
+// ====== Canvas描画 ======
+function clearApproverCanvas(id){
+  var c = document.getElementById(id);
+  if(!c) return null;
+  var ctx = c.getContext('2d');
+  var rect = c.getBoundingClientRect();
+  c.width = Math.floor(rect.width * devicePixelRatio);
+  c.height = Math.floor(rect.height * devicePixelRatio);
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0,0,rect.width,rect.height);
+  return {c:c,ctx:ctx,w:rect.width,h:rect.height};
+}
+
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+function drawApproverPeopleBar(canvasId, people, limit40, limit60){
+  var o = clearApproverCanvas(canvasId);
+  if(!o) return;
+  var ctx=o.ctx, w=o.w, h=o.h;
+  var padL=44, padR=14, padT=14, padB=46;
+  var innerW = w - padL - padR;
+  var innerH = h - padT - padB;
+
+  var maxVal = Math.max(limit60, 4000);
+  for(var i=0;i<people.length;i++){
+    if(people[i].totalNet > maxVal) maxVal = people[i].totalNet;
+    if((people[i].projectedTotal||0) > maxVal) maxVal = people[i].projectedTotal;
+  }
+  var n = Math.max(1, people.length);
+  var gap = 6;
+  var barW = clamp((innerW - gap*(n-1)) / n, 6, 20);
+
+  // grid lines
+  ctx.font = '12px system-ui';
+  ctx.fillStyle = '#5c6b7a';
+  ctx.strokeStyle = '#d7e7f5';
+
+  var ticks = [0, limit40, limit60, maxVal];
+  ticks.forEach(function(t){
+    var y = padT + innerH - (t/maxVal)*innerH;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+innerW,y); ctx.stroke();
+    ctx.fillText(Math.round(t/60)+'h', 8, y+4);
+  });
+
+  // limit lines
+  function drawLimitLine(yVal, label){
+    ctx.save();
+    var y = padT + innerH - (yVal/maxVal)*innerH;
+    ctx.strokeStyle = '#1f9d55';
+    ctx.setLineDash([6,4]);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+innerW,y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#1f9d55';
+    ctx.fillText(label, padL+6, y-6);
+    ctx.restore();
+  }
+  drawLimitLine(limit40, '40h');
+  drawLimitLine(limit60, '60h');
+
+  // bars
+  people.forEach(function(p,i){
+    var x = padL + i*(barW+gap);
+    var v = p.totalNet;
+    var pv = p.projectedTotal || 0;
+
+    // projected (light)
+    var ph = (pv/maxVal)*innerH;
+    ctx.fillStyle = 'rgba(14,165,233,0.18)';
+    ctx.fillRect(x, padT + innerH - ph, barW, ph);
+
+    // actual (solid)
+    var ah = (v/maxVal)*innerH;
+    var over60 = v>=3600;
+    var over40 = v>=2400;
+    ctx.fillStyle = over60 ? 'rgba(255,90,95,0.68)' : (over40 ? 'rgba(255,176,32,0.68)' : 'rgba(31,157,85,0.62)');
+    ctx.fillRect(x, padT + innerH - ah, barW, ah);
+
+    // x label
+    if(n<=40){
+      var name = (p.workerName||'').slice(0,6);
+      ctx.save();
+      ctx.translate(x+barW/2, padT+innerH+22);
+      ctx.rotate(-0.7);
+      ctx.fillStyle='#5c6b7a';
+      ctx.fillText(name, -10, 0);
+      ctx.restore();
+    }
+  });
+
+  // axis frame
+  ctx.strokeStyle = '#d7e7f5';
+  ctx.strokeRect(padL, padT, innerW, innerH);
+}
+
+// ====== テーブルソート ======
+document.querySelectorAll('#tblApproverMonthly thead th').forEach(function(th){
+  th.addEventListener('click', function(){
+    var k = th.dataset.k;
+    if(!k) return;
+    if(MONTHLY_STATE.sortKey === k){
+      MONTHLY_STATE.sortDir = (MONTHLY_STATE.sortDir === 'asc') ? 'desc' : 'asc';
+    } else {
+      MONTHLY_STATE.sortKey = k;
+      MONTHLY_STATE.sortDir = 'desc';
+    }
+    renderApproverMonthly();
+  });
+});
 </script>
 </body>
 </html>
