@@ -418,6 +418,9 @@ function fmtMin(min){
   return h+'時間'+r+'分';
 }
 function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
 
 document.getElementById('ym').value = todayYM();
 document.getElementById('day').value = todayYMD();
@@ -502,8 +505,8 @@ function renderMonthly(){
 
     var tr=document.createElement('tr');
     tr.innerHTML =
-      '<td>'+p.dept+'</td>'+
-      '<td><b>'+p.workerName+'</b></td>'+
+      '<td>'+escHtml(p.dept)+'</td>'+
+      '<td><b>'+escHtml(p.workerName)+'</b></td>'+
       '<td>'+p.totalNet+'</td>'+
       '<td><b>'+fmtMin(p.totalNet)+'</b></td>'+
       '<td>'+fmtMin(p.overtimeNet)+'</td>'+
@@ -523,8 +526,8 @@ function renderMonthly(){
                     (w.projectedOver40 ? '<span class="pill warn">40超</span>' : '<span class="pill ok">範囲内</span>');
     var tr=document.createElement('tr');
     tr.innerHTML =
-      '<td>'+w.dept+'</td>'+
-      '<td><b>'+w.workerName+'</b></td>'+
+      '<td>'+escHtml(w.dept)+'</td>'+
+      '<td><b>'+escHtml(w.workerName)+'</b></td>'+
       '<td><b>'+fmtMin(w.totalNet)+'</b></td>'+
       '<td>'+fmtMin(w.projectedTotal)+' '+projBadge+'</td>'+
       '<td>'+fmtMin(w.remain40)+'</td>'+
@@ -563,12 +566,12 @@ function loadDaily(){
     res.items.forEach(function(it){
       var typeJa = it.requestType==='overtime'?'残業':'休日出勤';
       var pdf = it.pdfFileId
-        ? '<a href="https://drive.google.com/file/d/'+it.pdfFileId+'/view" target="_blank" class="pill ok">開く</a>'
+        ? '<a href="https://drive.google.com/file/d/'+escHtml(it.pdfFileId)+'/view" target="_blank" class="pill ok">開く</a>'
         : '<span class="pill warn">未作成</span>';
       var tr=document.createElement('tr');
       tr.innerHTML=
-        '<td>'+it.dept+'</td>'+
-        '<td><b>'+it.workerName+'</b></td>'+
+        '<td>'+escHtml(it.dept)+'</td>'+
+        '<td><b>'+escHtml(it.workerName)+'</b></td>'+
         '<td>'+typeJa+'</td>'+
         '<td>'+fmtMin(it.approvedMinutes)+'</td>'+
         '<td>'+fmtMin(it.actualMinutes)+'</td>'+
@@ -856,8 +859,8 @@ function loadSpecial(){
                    : '<span class="pill ok">'+r.count60+'回</span>';
       var tr=document.createElement('tr');
       tr.innerHTML=
-        '<td>'+r.dept+'</td>'+
-        '<td><b>'+r.workerName+'</b></td>'+
+        '<td>'+escHtml(r.dept)+'</td>'+
+        '<td><b>'+escHtml(r.workerName)+'</b></td>'+
         '<td>'+r.count60+'</td>'+
         '<td>'+status+'</td>';
       tb.appendChild(tr);
@@ -882,8 +885,8 @@ function loadPending(){
         : '<span class="pill warn">滞留中</span>';
       var tr=document.createElement('tr');
       tr.innerHTML=
-        '<td>'+r.dept+'</td>'+
-        '<td><b>'+r.workerName+'</b></td>'+
+        '<td>'+escHtml(r.dept)+'</td>'+
+        '<td><b>'+escHtml(r.workerName)+'</b></td>'+
         '<td>'+r.hoursPending+'時間</td>'+
         '<td>'+status+'</td>';
       tb.appendChild(tr);

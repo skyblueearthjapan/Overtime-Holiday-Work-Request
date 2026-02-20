@@ -139,10 +139,14 @@ function api_markOvertimeDone(requestId) {
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
 
-    // 承認済みならPDF生成
+    // 承認済みならPDF生成（失敗してもWorkLogs更新は成功扱い）
     let pdf = null;
     if (req.status === 'approved') {
-      pdf = generatePdfForRequest_(requestId);
+      try {
+        pdf = generatePdfForRequest_(requestId);
+      } catch (pdfErr) {
+        console.warn('PDF生成警告（残業）: ' + pdfErr.message);
+      }
     }
 
     return { ok:true, requestId, actualMinutes, breakMinutes, netMinutes, pdf };
@@ -225,10 +229,14 @@ function api_markHolidayDone(requestId) {
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
 
-    // 承認済みならPDF生成
+    // 承認済みならPDF生成（失敗してもWorkLogs更新は成功扱い）
     let pdf = null;
     if (req.status === 'approved') {
-      pdf = generatePdfForRequest_(requestId);
+      try {
+        pdf = generatePdfForRequest_(requestId);
+      } catch (pdfErr) {
+        console.warn('PDF生成警告（休日）: ' + pdfErr.message);
+      }
     }
 
     return { ok:true, requestId, actualMinutes, breakMinutes, netMinutes, pdf };

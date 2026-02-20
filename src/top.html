@@ -155,6 +155,7 @@
       table{ font-size:12px; }
       th, td{ padding:8px 4px; }
       .row{ flex-direction:column; align-items:stretch; }
+      .card div[style*="grid-template-columns:1fr 1fr"]{ grid-template-columns:1fr !important; }
     }
   </style>
 </head>
@@ -173,9 +174,8 @@
   <div class="wrap">
 
     <!-- 申請用：部署 + 作業員選択 -->
-    <div class="card" style="margin-bottom:12px; padding:12px 16px;">
-      <div style="font-weight:800; font-size:13px; margin-bottom:8px; color:var(--muted);">申請フォーム</div>
-      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+    <div class="card" style="margin-bottom:12px; padding:16px 16px;">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
         <label style="font-weight:700; font-size:14px;">部署：</label>
         <select id="deptSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:180px;">
           <option value="">読込中...</option>
@@ -184,10 +184,17 @@
         <select id="workerSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:200px;">
           <option value="">-- 部署を先に選択 --</option>
         </select>
-        <div class="grid2" style="gap:8px;">
-          <button class="btn-blue btn-sm" onclick="openForm('overtime')" style="white-space:nowrap;">残業申請</button>
-          <button class="btn-sm" onclick="openForm('holiday')" style="white-space:nowrap;">休日出勤申請</button>
-        </div>
+      </div>
+      <!-- 大型2分割ボタン -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px;">
+        <button class="btn-blue" onclick="openForm('overtime')" style="padding:22px 16px; font-size:18px; border-radius:14px; display:flex; flex-direction:column; align-items:center; gap:6px;">
+          <span style="font-size:28px;">&#128336;</span>
+          <span>残業申請</span>
+        </button>
+        <button onclick="openForm('holiday')" style="padding:22px 16px; font-size:18px; border-radius:14px; display:flex; flex-direction:column; align-items:center; gap:6px;">
+          <span style="font-size:28px;">&#128197;</span>
+          <span>休日出勤申請</span>
+        </button>
       </div>
     </div>
 
@@ -343,6 +350,29 @@ google.script.run
       opt.textContent = d;
       sel.appendChild(opt);
     });
+    // 部署一覧ロード後にユーザー自動判定
+    google.script.run
+      .withSuccessHandler(function(worker){
+        if(worker && worker.dept){
+          sel.value = worker.dept;
+          onDeptChange();
+          // 作業員一覧ロード完了後に本人を自動選択
+          var checkWorker = setInterval(function(){
+            var wSel = document.getElementById('workerSelect');
+            if(wSel.options.length > 1 && wSel.options[0].value !== ''){
+              clearInterval(checkWorker);
+              if(worker.workerCode){
+                wSel.value = worker.workerCode;
+                SELECTED_WORKER_CODE = worker.workerCode;
+              }
+            }
+          }, 200);
+          // 5秒でタイムアウト
+          setTimeout(function(){ clearInterval(checkWorker); }, 5000);
+        }
+      })
+      .withFailureHandler(function(){})
+      .api_getWorkerInfo();
   })
   .withFailureHandler(function(){})
   .api_getDeptList();
@@ -454,7 +484,7 @@ function showDatePicker(dept, workerLabel){
       });
     })
     .withFailureHandler(function(err){
-      btns.innerHTML = '<div class="muted">取得エラー: ' + (err.message || err) + '</div>';
+      btns.innerHTML = '<div class="muted">取得エラー: ' + escHtml(err.message || err) + '</div>';
     })
     .api_getHolidayCandidateDates();
 }
@@ -499,7 +529,7 @@ function showOrderPicker(type, dept, workerLabel, targetDateStr){
     })
     .withFailureHandler(function(err){
       document.getElementById('orderResults').innerHTML =
-        '<div class="muted" style="padding:16px;">読込エラー: ' + (err.message || err) + '</div>';
+        '<div class="muted" style="padding:16px;">読込エラー: ' + escHtml(err.message || err) + '</div>';
     })
     .api_getOrderList();
 }

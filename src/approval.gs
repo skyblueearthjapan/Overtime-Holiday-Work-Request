@@ -299,16 +299,20 @@ function api_approveRequestsBatch(requestIds) {
     const lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: true, results: [] };
 
-    const values = sh.getRange(2, 1, lastRow-1, sh.getLastColumn()).getValues();
+    const numCols = sh.getLastColumn();
+    const values = sh.getRange(2, 1, lastRow-1, numCols).getValues();
     const now = new Date();
     const results = [];
     const targetSet = {};
     for (var k = 0; k < requestIds.length; k++) targetSet[requestIds[k]] = true;
 
+    // 一括書き込み用：{ rowNo → { colIdx → value } }
+    const pendingWrites = [];
+
     for (var i = 0; i < values.length; i++) {
       var row = values[i];
       var rid = normalize_(row[idx['requestId']]);
-      if (!targetSet[rid]) continue;
+      if (!rid || !targetSet[rid]) continue;
 
       var rowNo = i + 2;
       var dept = normalize_(row[idx['dept']]);
@@ -318,12 +322,23 @@ function api_approveRequestsBatch(requestIds) {
       if (status === 'canceled') { results.push({requestId:rid,ok:false,error:'キャンセル済み'}); delete targetSet[rid]; continue; }
       if (!canApproveDept_(email, dept)) { results.push({requestId:rid,ok:false,error:'承認権限なし'}); delete targetSet[rid]; continue; }
 
-      sh.getRange(rowNo, idx['status(submitted/approved/canceled)']+1).setValue('approved');
-      if (idx['approvedAt'] !== undefined) sh.getRange(rowNo, idx['approvedAt']+1).setValue(now);
-      if (idx['approvedBy'] !== undefined) sh.getRange(rowNo, idx['approvedBy']+1).setValue(email);
+      pendingWrites.push({ rowNo: rowNo });
       results.push({requestId:rid,ok:true,approvedBy:email,approvedAt:fmtDate_(now,'yyyy-MM-dd HH:mm:ss')});
       delete targetSet[rid];
     }
+
+    // setValues一括書き込み（行ごとにまとめて1回のsetValueで処理）
+    var statusCol = idx['status(submitted/approved/canceled)'] + 1;
+    var atCol = idx['approvedAt'] !== undefined ? idx['approvedAt'] + 1 : -1;
+    var byCol = idx['approvedBy'] !== undefined ? idx['approvedBy'] + 1 : -1;
+    for (var w = 0; w < pendingWrites.length; w++) {
+      var rn = pendingWrites[w].rowNo;
+      sh.getRange(rn, statusCol).setValue('approved');
+      if (atCol > 0) sh.getRange(rn, atCol).setValue(now);
+      if (byCol > 0) sh.getRange(rn, byCol).setValue(email);
+    }
+    if (pendingWrites.length > 0) SpreadsheetApp.flush();
+
     for (var missing in targetSet) results.push({requestId:missing,ok:false,error:'見つかりません'});
     return { ok: true, results: results };
   } finally { lock.releaseLock(); }
