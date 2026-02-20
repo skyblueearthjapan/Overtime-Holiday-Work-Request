@@ -5,7 +5,10 @@
  * DeptApprovers シートから { dept → Set<email> } を構築する。
  * DeptApprovers が無い場合は既存 ApproverMap にフォールバック。
  */
+var _deptApproverMapCache = null;
+
 function getDeptApproverMap_() {
+  if (_deptApproverMapCache) return _deptApproverMapCache;
   const ss = getDb_();
 
   // 1) DeptApprovers シート（新方式）
@@ -21,12 +24,13 @@ function getDeptApproverMap_() {
       if (!map[dept]) map[dept] = new Set();
       for (const em of emails) map[dept].add(em);
     }
+    _deptApproverMapCache = map;
     return map;
   }
 
   // 2) ApproverMap にフォールバック（従来方式）
   const amSh = ss.getSheetByName('ApproverMap');
-  if (!amSh) return {};
+  if (!amSh) { _deptApproverMapCache = {}; return {}; }
   const values = amSh.getDataRange().getValues();
   const H = values[0].map(h => normalize_(h));
   const idx = {
@@ -34,7 +38,7 @@ function getDeptApproverMap_() {
     mail: H.indexOf('承認者メール'),
     enabled: H.indexOf('有効フラグ'),
   };
-  if (idx.dept < 0 || idx.mail < 0) return {};
+  if (idx.dept < 0 || idx.mail < 0) { _deptApproverMapCache = {}; return {}; }
 
   const map = {};
   for (let r = 1; r < values.length; r++) {
@@ -47,6 +51,7 @@ function getDeptApproverMap_() {
     if (!map[dept]) map[dept] = new Set();
     map[dept].add(mail);
   }
+  _deptApproverMapCache = map;
   return map;
 }
 

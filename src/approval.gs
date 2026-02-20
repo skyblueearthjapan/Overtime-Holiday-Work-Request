@@ -285,6 +285,50 @@ function api_approveRequest(requestId) {
   }
 }
 
+// ====== 一括承認API ======
+
+function api_approveRequestsBatch(requestIds) {
+  if (!requestIds || requestIds.length === 0) return { ok: true, results: [] };
+  if (requestIds.length > 50) throw new Error('一括承認は50件までです。');
+
+  const email = Session.getActiveUser().getEmail() || 'unknown';
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, results: [] };
+
+    const values = sh.getRange(2, 1, lastRow-1, sh.getLastColumn()).getValues();
+    const now = new Date();
+    const results = [];
+    const targetSet = {};
+    for (var k = 0; k < requestIds.length; k++) targetSet[requestIds[k]] = true;
+
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i];
+      var rid = normalize_(row[idx['requestId']]);
+      if (!targetSet[rid]) continue;
+
+      var rowNo = i + 2;
+      var dept = normalize_(row[idx['dept']]);
+      var status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+
+      if (status === 'approved') { results.push({requestId:rid,ok:true,message:'既に承認済み'}); delete targetSet[rid]; continue; }
+      if (status === 'canceled') { results.push({requestId:rid,ok:false,error:'キャンセル済み'}); delete targetSet[rid]; continue; }
+      if (!canApproveDept_(email, dept)) { results.push({requestId:rid,ok:false,error:'承認権限なし'}); delete targetSet[rid]; continue; }
+
+      sh.getRange(rowNo, idx['status(submitted/approved/canceled)']+1).setValue('approved');
+      if (idx['approvedAt'] !== undefined) sh.getRange(rowNo, idx['approvedAt']+1).setValue(now);
+      if (idx['approvedBy'] !== undefined) sh.getRange(rowNo, idx['approvedBy']+1).setValue(email);
+      results.push({requestId:rid,ok:true,approvedBy:email,approvedAt:fmtDate_(now,'yyyy-MM-dd HH:mm:ss')});
+      delete targetSet[rid];
+    }
+    for (var missing in targetSet) results.push({requestId:missing,ok:false,error:'見つかりません'});
+    return { ok: true, results: results };
+  } finally { lock.releaseLock(); }
+}
+
 // ====== 承認者の担当部署一覧取得 ======
 
 function api_getApproverDepts() {

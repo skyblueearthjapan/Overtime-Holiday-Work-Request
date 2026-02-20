@@ -399,6 +399,7 @@ function buildOvertimeRow(it){
   var actionCell = buildActionCell(it);
 
   var tr = document.createElement('tr');
+  tr.setAttribute('data-request-id', it.requestId);
   tr.innerHTML =
     '<td>' + escHtml(it.dept) + '</td>' +
     '<td><b>' + escHtml(it.workerName) + '</b></td>' +
@@ -418,6 +419,7 @@ function buildHolidayRow(it){
   var actionCell = buildActionCell(it);
 
   var tr = document.createElement('tr');
+  tr.setAttribute('data-request-id', it.requestId);
   tr.innerHTML =
     '<td>' + escHtml(it.targetDateLabel || it.targetDate) + '</td>' +
     '<td>' + escHtml(it.dept) + '</td>' +
@@ -445,20 +447,54 @@ function buildActionCell(it){
   return '<span class="muted">承認済</span>';
 }
 
+function updateRowToApproved(requestId) {
+  var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
+  if (!row) return;
+  var cells = row.querySelectorAll('td');
+  var isHoliday = row.closest('table').id === 'tblHoliday';
+  var statusIdx = isHoliday ? 3 : 2;
+  var actionIdx = isHoliday ? 6 : 5;
+
+  cells[statusIdx].innerHTML = '<span class="pill ok">承認済</span>';
+  cells[actionIdx].innerHTML = '<span class="muted">承認済</span>';
+
+  // 視覚フィードバック（緑フラッシュ）
+  row.style.transition = 'background 0.4s';
+  row.style.background = 'rgba(31,157,85,0.08)';
+  setTimeout(function(){ row.style.background = ''; }, 1200);
+
+  // ALL_ITEMS の状態も更新
+  for (var i = 0; i < ALL_ITEMS.length; i++) {
+    if (ALL_ITEMS[i].requestId === requestId) {
+      ALL_ITEMS[i].status = 'approved';
+      break;
+    }
+  }
+  updateKpiCounters();
+}
+
+function updateKpiCounters() {
+  var submitted = 0, approved = 0;
+  ALL_ITEMS.forEach(function(it) {
+    if (it.status === 'submitted') submitted++;
+    if (it.status === 'approved') approved++;
+  });
+  document.getElementById('kpiTotal').innerText = ALL_ITEMS.length;
+  document.getElementById('kpiPending').innerText = submitted;
+  document.getElementById('kpiApproved').innerText = approved;
+}
+
 // ====== 承認実行 ======
 function doApprove(requestId, btn){
   if(!confirm('この申請を承認しますか？')) return;
   btn.disabled = true;
-  btn.innerText = '処理中...';
+  updateRowToApproved(requestId);  // 即時反映
 
   google.script.run
-    .withSuccessHandler(function(){
-      loadDashboard();
-    })
+    .withSuccessHandler(function(){})  // 成功時: 何もしない（既に反映済み）
     .withFailureHandler(function(err){
       alert('エラー: ' + (err.message || err));
-      btn.disabled = false;
-      btn.innerText = '承認';
+      loadDashboard();  // 失敗時のみ全件リロードで復元
     })
     .api_approveRequest(requestId);
 }
@@ -468,37 +504,36 @@ function approveAllInTable(type){
   var pending = ALL_ITEMS.filter(function(it){
     return it.status === 'submitted' && it.requestType === type;
   });
-  if(pending.length === 0){
-    alert('未承認の申請はありません。');
-    return;
-  }
+  if(pending.length === 0){ alert('未承認の申請はありません。'); return; }
   var label = type === 'overtime' ? '残業' : '休日出勤';
-  if(!confirm(label + ' ' + pending.length + '件の申請を一括承認しますか？')) return;
+  if(!confirm(label + ' ' + pending.length + '件を一括承認しますか？')) return;
 
-  var done = 0;
-  var errors = [];
-
+  // 即時: 全行を承認済みに更新
+  var requestIds = [];
   pending.forEach(function(it){
-    google.script.run
-      .withSuccessHandler(function(){
-        done++;
-        if(done === pending.length){
-          if(errors.length > 0){
-            alert('一括承認完了（エラー' + errors.length + '件）\n' + errors.join('\n'));
-          }
-          loadDashboard();
-        }
-      })
-      .withFailureHandler(function(err){
-        done++;
-        errors.push(it.workerName + ': ' + (err.message || err));
-        if(done === pending.length){
-          alert('一括承認完了（エラー' + errors.length + '件）\n' + errors.join('\n'));
-          loadDashboard();
-        }
-      })
-      .api_approveRequest(it.requestId);
+    requestIds.push(it.requestId);
+    updateRowToApproved(it.requestId);
   });
+
+  // 1回のAPI呼出しで一括承認
+  google.script.run
+    .withSuccessHandler(function(res){
+      var errors = [];
+      if(res && res.results){
+        res.results.forEach(function(r){
+          if(!r.ok) errors.push(r.requestId + ': ' + (r.error || '不明'));
+        });
+      }
+      if(errors.length > 0){
+        alert('一括承認完了（エラー' + errors.length + '件）\n' + errors.join('\n'));
+        loadDashboard();
+      }
+    })
+    .withFailureHandler(function(err){
+      alert('一括承認エラー: ' + (err.message || err));
+      loadDashboard();
+    })
+    .api_approveRequestsBatch(requestIds);
 }
 </script>
 </body>

@@ -59,7 +59,10 @@ function getDb_() {
   return SpreadsheetApp.getActive();
 }
 
+var _settingsCache = null;
+
 function getSettings_() {
+  if (_settingsCache) return _settingsCache;
   const ss = getDb_();
   const sh = ss.getSheetByName(SHEET.SETTINGS);
   const values = sh.getDataRange().getValues();
@@ -70,6 +73,7 @@ function getSettings_() {
     const val = values[r][1];
     if (key) map[key] = val;
   }
+  _settingsCache = map;
   return map;
 }
 
@@ -86,8 +90,16 @@ function normalize_(s) {
       String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
 }
 
+var _headerCache = {};
+
 function getSheetHeaderIndex_(sheetName, headerRowNo=1) {
   const sh = requireSheet_(sheetName);
+  const cacheKey = sheetName + '_' + headerRowNo;
+  if (_headerCache[cacheKey]) {
+    return { sh, header: _headerCache[cacheKey].header, idx: _headerCache[cacheKey].idx };
+  }
   const header = sh.getRange(headerRowNo, 1, 1, sh.getLastColumn()).getValues()[0].map(h => normalize_(h));
-  return { sh, header, idx: buildHeaderIndex_(header) };
+  const idx = buildHeaderIndex_(header);
+  _headerCache[cacheKey] = { header, idx };
+  return { sh, header, idx };
 }
