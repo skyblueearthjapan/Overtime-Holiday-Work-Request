@@ -132,6 +132,7 @@
       <div class="sub" id="approverSub">読込中...</div>
     </div>
     <div class="row">
+      <button class="ghost btn-sm" id="btnChangeDept" onclick="initApprover()" style="display:none;">部署変更</button>
       <a href="<?= APP_URL ?>?page=top" target="_top" class="nav-link">トップへ</a>
       <a href="<?= APP_URL ?>?page=admin" target="_top" class="nav-link">総務部画面</a>
     </div>
@@ -213,8 +214,21 @@
 
   </div>
 
+<!-- 部署選択モーダル -->
+<div id="deptModalWrap" style="display:none;">
+  <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:100;"></div>
+  <div class="card" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:101; max-width:400px; width:90%; padding:24px; text-align:center;">
+    <div style="font-weight:900; font-size:18px; margin-bottom:4px;">部署を選択</div>
+    <div class="sub" style="margin-bottom:18px;">承認対象の部署を選んでください</div>
+    <div id="deptModalBody">
+      <div class="loading">承認者情報を確認中...</div>
+    </div>
+  </div>
+</div>
+
 <script>
 var ALL_ITEMS = [];
+var SELECTED_DEPT = '';
 
 function fmtMin(min){
   min = Math.max(0, Math.round(Number(min||0)));
@@ -231,9 +245,74 @@ function escHtml(s){
 }
 
 // ====== 初期ロード ======
-loadDashboard();
+initApprover();
 
-function loadDashboard(){
+function initApprover(){
+  SELECTED_DEPT = '';
+  document.getElementById('btnChangeDept').style.display = 'none';
+  document.getElementById('deptModalWrap').style.display = 'block';
+  document.getElementById('deptModalBody').innerHTML = '<div class="loading">承認者情報を確認中...</div>';
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      var body = document.getElementById('deptModalBody');
+      body.innerHTML = '';
+
+      if(!res || !res.depts || res.depts.length === 0){
+        body.innerHTML = '<div class="muted" style="padding:16px;">承認可能な部署がありません。</div>';
+        return;
+      }
+
+      // 部署が1つだけ（非管理者）の場合はモーダルをスキップ
+      if(!res.isAdmin && res.depts.length === 1){
+        selectDept(res.depts[0]);
+        return;
+      }
+
+      // 部署ボタンを動的生成
+      res.depts.forEach(function(dept){
+        var btn = document.createElement('button');
+        btn.className = 'ghost';
+        btn.style.cssText = 'width:100%; margin-bottom:8px; text-align:left; padding:12px 16px; font-size:14px;';
+        btn.innerText = dept;
+        btn.onclick = function(){ selectDept(dept); };
+        body.appendChild(btn);
+      });
+
+      if(res.isAdmin){
+        var note = document.createElement('div');
+        note.className = 'sub';
+        note.style.marginTop = '8px';
+        note.innerText = '管理者: 全部署の承認が可能です';
+        body.appendChild(note);
+      }
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('deptModalBody').innerHTML =
+        '<div class="muted" style="padding:16px;">エラー: ' + escHtml(err.message || err) + '</div>';
+    })
+    .api_getApproverDepts();
+}
+
+function selectDept(dept){
+  SELECTED_DEPT = dept;
+  closeDeptModal();
+  loadDashboard(dept);
+}
+
+function closeDeptModal(){
+  document.getElementById('deptModalWrap').style.display = 'none';
+  document.getElementById('btnChangeDept').style.display = '';
+}
+
+function loadDashboard(dept){
+  dept = dept || SELECTED_DEPT;
+  if(!dept){
+    initApprover();
+    return;
+  }
+  SELECTED_DEPT = dept;
+
   var otTb = document.querySelector('#tblOvertime tbody');
   var hdTb = document.querySelector('#tblHoliday tbody');
   otTb.innerHTML = '<tr><td colspan="6" class="loading">読込中...</td></tr>';
@@ -258,7 +337,8 @@ function loadDashboard(){
       }
 
       document.getElementById('approverSub').innerText =
-        res.isAdmin ? '管理者（全部署承認可）' : '担当部署の申請';
+        (res.selectedDept || SELECTED_DEPT) + ' の申請' +
+        (res.isAdmin ? '（管理者）' : '');
 
       ALL_ITEMS = (res.overtime || []).concat(res.holiday || []);
       renderDashboard(res);
@@ -269,7 +349,7 @@ function loadDashboard(){
       otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">API失敗: ' + escHtml(err.message || err) + '</td></tr>';
       hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">GASエディタのログ（実行数）も確認してください</td></tr>';
     })
-    .api_getApproverDashboard();
+    .api_getApproverDashboard(dept);
 }
 
 function renderDashboard(res){

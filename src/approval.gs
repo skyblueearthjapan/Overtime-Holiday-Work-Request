@@ -118,13 +118,25 @@ function api_getTodayRequestsForDept(dept) {
 
 // ====== 承認者ダッシュボード（全承認対象部署の残業+休日） ======
 
-function api_getApproverDashboard() {
+function api_getApproverDashboard(dept) {
   try {
-    // TODO: 承認者アカウント紐づけ実装後に認証チェックを有効化
-    // 現在は全部署の申請を表示（開発中）
     const email = Session.getActiveUser().getEmail() || '';
     const admin = !email || isAdmin_(email);
-    let allowedDepts = null; // null = 全部署OK（開発中）
+
+    if (!dept) {
+      return { today: '', weekendStart: '', weekendEnd: '',
+               overtime: [], holiday: [], isAdmin: admin,
+               error: '部署が指定されていません。' };
+    }
+    const normDept = normalize_(dept);
+
+    if (!admin && !canApproveDept_(email, normDept)) {
+      return { today: '', weekendStart: '', weekendEnd: '',
+               overtime: [], holiday: [], isAdmin: false,
+               error: 'この部署の承認権限がありません。' };
+    }
+
+    let allowedDepts = new Set([normDept]);
 
     const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
     const values = sh.getDataRange().getValues();
@@ -221,7 +233,8 @@ function api_getApproverDashboard() {
     });
 
     return { today: today, weekendStart: weekendStart, weekendEnd: weekendEnd,
-             overtime: overtime, holiday: holiday, isAdmin: admin };
+             overtime: overtime, holiday: holiday, isAdmin: admin,
+             selectedDept: normDept };
   } catch (err) {
     // エラーをクライアントに伝えるため、エラー情報を含むオブジェクトを返す
     console.error('api_getApproverDashboard エラー: ' + err.message + '\n' + err.stack);
@@ -257,8 +270,7 @@ function api_approveRequest(requestId) {
       }
     }
     if (rowNo === -1) throw new Error('requestIdが見つかりません。');
-    // TODO: 承認者アカウント紐づけ実装後に有効化
-    // if (!canApproveDept_(email, dept)) throw new Error('この申請の承認権限がありません。');
+    if (!canApproveDept_(email, dept)) throw new Error('この申請の承認権限がありません。');
     if (status === 'approved') return { ok: true, message: '既に承認済みです。' };
     if (status === 'canceled') throw new Error('キャンセル済みです。');
 

@@ -447,6 +447,26 @@ function doGet(e) {
     }
   }
 
+  // approver ページの権限チェック（管理者 or いずれかの部署の承認者）
+  if (safePage === 'approver') {
+    const email = Session.getActiveUser().getEmail();
+    if (email) {
+      const admin = isAdmin_(email);
+      if (!admin) {
+        const map = getDeptApproverMap_();
+        const emailLc = email.toLowerCase();
+        const hasDept = Object.keys(map).some(d => map[d].has(emailLc));
+        if (!hasDept) {
+          const t = HtmlService.createTemplateFromFile('no_auth');
+          t.APP_URL = appUrl;
+          t.message = '承認者権限がありません。\nDeptApprovers または ApproverMap に登録されているか確認してください。\n（現在のアカウント: ' + email + '）';
+          return t.evaluate().setTitle('権限エラー')
+            .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+        }
+      }
+    }
+  }
+
   const t = HtmlService.createTemplateFromFile(safePage);
   t.APP_URL = appUrl;
 
