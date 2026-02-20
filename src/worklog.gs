@@ -143,7 +143,10 @@ function api_markOvertimeDone(requestId) {
     let pdf = null;
     if (req.status === 'approved') {
       try {
-        pdf = generatePdfForRequest_(requestId);
+        const useDirect = normalize_(getSettings_()['PDF_MODE']) === 'direct';
+        pdf = useDirect
+          ? generatePdfDirect_(requestId)
+          : generatePdfForRequest_(requestId);
       } catch (pdfErr) {
         console.warn('PDF生成警告（残業）: ' + pdfErr.message);
       }
@@ -233,7 +236,10 @@ function api_markHolidayDone(requestId) {
     let pdf = null;
     if (req.status === 'approved') {
       try {
-        pdf = generatePdfForRequest_(requestId);
+        const useDirect = normalize_(getSettings_()['PDF_MODE']) === 'direct';
+        pdf = useDirect
+          ? generatePdfDirect_(requestId)
+          : generatePdfForRequest_(requestId);
       } catch (pdfErr) {
         console.warn('PDF生成警告（休日）: ' + pdfErr.message);
       }
