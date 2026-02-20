@@ -19,7 +19,44 @@ const PDF_MAP = {
   workContent: 'A23',      // 業務内容
   reason: 'A29',           // 理由
   approverBox: 'F34',      // 承認者
+  approverBox2: 'G34',     // 2次承認者
 };
+
+// ====== 印鑑画像ヘルパー ======
+
+/**
+ * Drive上の画像ファイルIDからBlobを取得（存在しなければnull）
+ */
+function getStampBlob_(fileId) {
+  if (!fileId) return null;
+  try {
+    return DriveApp.getFileById(fileId).getBlob();
+  } catch (e) {
+    Logger.log('印鑑画像取得エラー (fileId=' + fileId + '): ' + e.message);
+    return null;
+  }
+}
+
+/**
+ * メールアドレスから作業員マスタの stampFileId を引く
+ */
+function lookupStampFileIdByEmail_(email) {
+  if (!email) return '';
+  const sh = requireSheet_(SHEET.WORKERS);
+  const values = sh.getDataRange().getValues();
+  const H = values[0].map(h => normalize_(h));
+  const emailIdx = H.findIndex(h => h.startsWith('googleアカウント') || h.startsWith('Googleアカウント'));
+  const stampIdx = H.indexOf('stampfileid');
+  if (emailIdx < 0 || stampIdx < 0) return '';
+
+  const target = email.toLowerCase();
+  for (let r = 1; r < values.length; r++) {
+    if (normalize_(values[r][emailIdx]).toLowerCase() === target) {
+      return normalize_(values[r][stampIdx]);
+    }
+  }
+  return '';
+}
 
 // ====== Drive フォルダ作成（YYYY.MM.DD） ======
 
@@ -245,11 +282,25 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   const wlMap = buildWorkLogsMapByRequestId_();
   const wl = wlMap.get(requestId) || {};
 
+  const settings = getSettings_();
+
   // 基本情報
   sheet.getRange(PDF_MAP.createdDate).setValue(fmtDate_(now, 'yyyy/MM/dd'));
   sheet.getRange(PDF_MAP.dept).setValue(normalize_(reqData['dept']));
+  sheet.getRange(PDF_MAP.dept).setHorizontalAlignment('center');  // 部署名を中央揃え
   sheet.getRange(PDF_MAP.name).setValue(normalize_(reqData['workerName']));
+
+  // F4: 区分印鑑（残業/休日出勤のPNG画像を挿入）
   sheet.getRange(PDF_MAP.typeLabelBig).setValue(typeLabel);
+  const stampTypeKey = requestType === 'overtime' ? 'STAMP_OVERTIME_FILE_ID' : 'STAMP_HOLIDAY_FILE_ID';
+  const stampTypeId = normalize_(settings[stampTypeKey]);
+  if (stampTypeId) {
+    const stampBlob = getStampBlob_(stampTypeId);
+    if (stampBlob) {
+      const img = sheet.insertImage(stampBlob, 6, 4); // F4
+      img.setWidth(60).setHeight(60);
+    }
+  }
 
   // 区分
   if (requestType === 'overtime') {
@@ -288,13 +339,42 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   const workContent = normalize_(reqData['workContent']);
   if (workContent) sheet.getRange(PDF_MAP.workContent).setValue(workContent);
 
-  // 理由
+  // 理由（定型理由 or 「その他: 補足理由」）
   const reason = normalize_(reqData['reason']);
-  if (reason) sheet.getRange(PDF_MAP.reason).setValue(reason);
+  const reasonDetail = normalize_(reqData['reasonDetail']);
+  let reasonText = reason;
+  if (reason && reason.indexOf('その他') >= 0 && reasonDetail) {
+    reasonText = 'その他: ' + reasonDetail;
+  }
+  if (reasonText) sheet.getRange(PDF_MAP.reason).setValue(reasonText);
 
-  // 承認者
+  // F34: 承認者（名前＋印鑑画像）
   const approvedBy = normalize_(reqData['approvedBy']);
-  if (approvedBy) sheet.getRange(PDF_MAP.approverBox).setValue(approvedBy);
+  if (approvedBy) {
+    sheet.getRange(PDF_MAP.approverBox).setValue(approvedBy);
+    const approverStampId = lookupStampFileIdByEmail_(approvedBy);
+    if (approverStampId) {
+      const blob = getStampBlob_(approverStampId);
+      if (blob) {
+        const img = sheet.insertImage(blob, 6, 34); // F34
+        img.setWidth(50).setHeight(50);
+      }
+    }
+  }
+
+  // G34: 2次承認者（印鑑画像）※将来の2次承認フロー実装時に有効化
+  const approvedBy2 = normalize_(reqData['approvedBy2'] || '');
+  if (approvedBy2) {
+    sheet.getRange(PDF_MAP.approverBox2).setValue(approvedBy2);
+    const approver2StampId = lookupStampFileIdByEmail_(approvedBy2);
+    if (approver2StampId) {
+      const blob = getStampBlob_(approver2StampId);
+      if (blob) {
+        const img = sheet.insertImage(blob, 7, 34); // G34
+        img.setWidth(50).setHeight(50);
+      }
+    }
+  }
 }
 
 // ====== PDF一括生成（本日の承認済み＆PDF未生成を処理） ======
