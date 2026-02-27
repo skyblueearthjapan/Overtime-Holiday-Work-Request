@@ -53,9 +53,7 @@ function buildWorkLogsMapByRequestId_() {
   if (ridCol === undefined) throw new Error('WorkLogsに requestId 列がありません。');
 
   // TZバグ回避: DateオブジェクトはスプレッドシートTZでフォーマットして元のJST文字列を復元
-  var ssTz;
-  try { ssTz = sh.getParent().getSpreadsheetTimeZone(); } catch (_) {}
-  if (!ssTz) ssTz = TZ; // フォールバック: Asia/Tokyo
+  var ssTz = getSafeTimeZone_(sh);
 
   const values = sh.getRange(3,1,lastRow-2,sh.getLastColumn()).getValues();
   const map = new Map();
@@ -81,10 +79,32 @@ function buildWorkLogsMapByRequestId_() {
 function toJstString_(val, ssTz) {
   if (!val) return '';
   if (val instanceof Date) {
-    var tz = ssTz || TZ;
-    return Utilities.formatDate(val, tz, 'yyyy-MM-dd HH:mm:ss');
+    return Utilities.formatDate(val, ssTz, 'yyyy-MM-dd HH:mm:ss');
   }
   return String(val);
+}
+
+/**
+ * スプレッドシートのタイムゾーンを安全に取得するヘルパー。
+ * getSpreadsheetTimeZone() が null/エラーの場合は
+ * Session.getScriptTimeZone() → TZ定数 の順にフォールバック。
+ */
+function getSafeTimeZone_(sheetOrNull) {
+  // 1) スプレッドシートTZ
+  try {
+    var ss = sheetOrNull
+      ? (sheetOrNull.getParent ? sheetOrNull.getParent() : sheetOrNull)
+      : getDb_();
+    var tz = ss.getSpreadsheetTimeZone();
+    if (tz && typeof tz === 'string') return tz;
+  } catch (_) {}
+  // 2) スクリプトTZ（appsscript.json の timeZone）
+  try {
+    var sTz = Session.getScriptTimeZone();
+    if (sTz && typeof sTz === 'string') return sTz;
+  } catch (_) {}
+  // 3) フォールバック
+  return TZ;
 }
 
 // ====== 共通：分→「X時間Y分」表記 ======

@@ -32,9 +32,16 @@ function updateWorkLog_(requestId, patch) {
     rowNo = sh.getLastRow();
   }
 
+  // 日時フィールドはGASのDate自動変換を防ぐためテキスト書式を強制
+  const dateFields = ['actualStartAt', 'actualEndAt', 'updatedAt'];
+
   for (const [key,val] of Object.entries(patch)) {
     if (idx[key] === undefined) continue;
-    sh.getRange(rowNo, idx[key]+1).setValue(val);
+    const cell = sh.getRange(rowNo, idx[key]+1);
+    if (dateFields.indexOf(key) >= 0) {
+      cell.setNumberFormat('@'); // テキスト書式に強制（Date自動変換を防止）
+    }
+    cell.setValue(val);
   }
   return rowNo;
 }
@@ -217,9 +224,7 @@ function api_markHolidayDone(requestId) {
     if (startRaw instanceof Date) {
       // TZバグ回避: GASがJST文字列をスプレッドシートTZで解釈してDate化するため、
       // 同じTZで再フォーマットして元のJST文字列を復元 → JSTとして再パース
-      var ssTz;
-      try { ssTz = sh.getParent().getSpreadsheetTimeZone(); } catch (_) {}
-      if (!ssTz) ssTz = TZ;
+      var ssTz = getSafeTimeZone_(sh);
       var startStr = Utilities.formatDate(startRaw, ssTz, "yyyy-MM-dd'T'HH:mm:ss");
       start = new Date(startStr + '+09:00');
     } else if (startRaw) {
