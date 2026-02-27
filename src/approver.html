@@ -192,7 +192,7 @@
       <div class="sub" id="approverSub">読込中...</div>
     </div>
     <div class="row">
-      <button class="ghost btn-sm" id="btnChangeDept" onclick="initApprover()" style="display:none;">部署変更</button>
+      <button class="ghost btn-sm" id="btnChangeDept" onclick="showApproverModal()" style="display:none;">承認者変更</button>
       <a href="<?= APP_URL ?>?page=top" target="_top" class="nav-link">トップへ</a>
       <a href="<?= APP_URL ?>?page=admin" target="_top" class="nav-link">総務部画面</a>
     </div>
@@ -364,12 +364,12 @@
 
   </div>
 
-<!-- 部署選択モーダル -->
+<!-- 承認者選択モーダル（管理者用） -->
 <div id="deptModalWrap" style="display:none;">
   <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:100;"></div>
   <div class="card" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:101; max-width:400px; width:90%; padding:24px; text-align:center;">
-    <div style="font-weight:900; font-size:18px; margin-bottom:4px;">部署を選択</div>
-    <div class="sub" style="margin-bottom:18px;">承認対象の部署を選んでください</div>
+    <div style="font-weight:900; font-size:18px; margin-bottom:4px;" id="modalTitle">承認者を選択</div>
+    <div class="sub" style="margin-bottom:18px;" id="modalSub">表示する承認者を選んでください</div>
     <div id="deptModalBody">
       <div class="loading">承認者情報を確認中...</div>
     </div>
@@ -378,7 +378,9 @@
 
 <script>
 var ALL_ITEMS = [];
-var SELECTED_DEPT = '';
+var SELECTED_DEPTS = [];    // 複数部署（配列）
+var SELECTED_APPROVER_NAME = '';  // 表示中の承認者名
+var APPROVER_DATA = null;   // api_getApproverDepts の結果キャッシュ
 
 function fmtMin(min){
   min = Math.max(0, Math.round(Number(min||0)));
@@ -398,44 +400,77 @@ function escHtml(s){
 initApprover();
 
 function initApprover(){
-  SELECTED_DEPT = '';
+  SELECTED_DEPTS = [];
+  SELECTED_APPROVER_NAME = '';
   document.getElementById('btnChangeDept').style.display = 'none';
   document.getElementById('deptModalWrap').style.display = 'block';
   document.getElementById('deptModalBody').innerHTML = '<div class="loading">承認者情報を確認中...</div>';
 
   google.script.run
     .withSuccessHandler(function(res){
+      APPROVER_DATA = res;
       var body = document.getElementById('deptModalBody');
       body.innerHTML = '';
 
-      if(!res || !res.depts || res.depts.length === 0){
+      if(!res || !res.approvers || res.approvers.length === 0){
         body.innerHTML = '<div class="muted" style="padding:16px;">承認可能な部署がありません。</div>';
         return;
       }
 
-      // 部署が1つだけ（非管理者）の場合はモーダルをスキップ
-      if(!res.isAdmin && res.depts.length === 1){
-        selectDept(res.depts[0]);
+      if(!res.isAdmin){
+        // 一般承認者: モーダルスキップ → 自動的に全担当部署を表示
+        var me = null;
+        for(var i=0; i<res.approvers.length; i++){
+          if(res.approvers[i].email === res.currentEmail){
+            me = res.approvers[i]; break;
+          }
+        }
+        if(me){
+          selectApprover(me.name, me.depts);
+          return;
+        }
+        // フォールバック：最初のプロファイル
+        selectApprover(res.approvers[0].name, res.approvers[0].depts);
         return;
       }
 
-      // 部署ボタンを動的生成
-      res.depts.forEach(function(dept){
+      // 管理者: 承認者名ボタン群 + 「全部署」ボタン
+      document.getElementById('modalTitle').innerText = '承認者を選択';
+      document.getElementById('modalSub').innerText = '表示する承認者を選んでください';
+
+      // 「全部署」ボタン
+      var allBtn = document.createElement('button');
+      allBtn.className = 'ghost';
+      allBtn.style.cssText = 'width:100%; margin-bottom:12px; text-align:center; padding:12px 16px; font-size:14px; font-weight:900; border:2px solid var(--accent2); color:var(--accent2);';
+      allBtn.innerText = '全部署（一括表示）';
+      allBtn.onclick = function(){
+        var allDepts = [];
+        var deptSet = {};
+        for(var i=0; i<res.approvers.length; i++){
+          for(var j=0; j<res.approvers[i].depts.length; j++){
+            var d = res.approvers[i].depts[j];
+            if(!deptSet[d]){ allDepts.push(d); deptSet[d] = true; }
+          }
+        }
+        selectApprover('全部署', allDepts);
+      };
+      body.appendChild(allBtn);
+
+      // 承認者ごとのボタン
+      res.approvers.forEach(function(ap){
         var btn = document.createElement('button');
         btn.className = 'ghost';
         btn.style.cssText = 'width:100%; margin-bottom:8px; text-align:left; padding:12px 16px; font-size:14px;';
-        btn.innerText = dept;
-        btn.onclick = function(){ selectDept(dept); };
+        btn.innerHTML = '<b>' + escHtml(ap.name) + '</b> <span class="sub" style="margin-left:8px;">' + escHtml(ap.depts.join(', ')) + '</span>';
+        btn.onclick = function(){ selectApprover(ap.name, ap.depts); };
         body.appendChild(btn);
       });
 
-      if(res.isAdmin){
-        var note = document.createElement('div');
-        note.className = 'sub';
-        note.style.marginTop = '8px';
-        note.innerText = '管理者: 全部署の承認が可能です';
-        body.appendChild(note);
-      }
+      var note = document.createElement('div');
+      note.className = 'sub';
+      note.style.marginTop = '8px';
+      note.innerText = '管理者: 承認者を選択するか、全部署を一括表示できます';
+      body.appendChild(note);
     })
     .withFailureHandler(function(err){
       document.getElementById('deptModalBody').innerHTML =
@@ -444,9 +479,21 @@ function initApprover(){
     .api_getApproverDepts();
 }
 
-function selectDept(dept){
-  SELECTED_DEPT = dept;
-  // 月次セクションのステートをリセット（部署変更時）
+function showApproverModal(){
+  // 管理者用: 承認者選択モーダルを再表示
+  if(APPROVER_DATA && APPROVER_DATA.isAdmin){
+    document.getElementById('deptModalWrap').style.display = 'block';
+    // モーダル内容は既にキャッシュされているので再構築
+    initApprover();
+  } else {
+    initApprover();
+  }
+}
+
+function selectApprover(name, depts){
+  SELECTED_DEPTS = depts;
+  SELECTED_APPROVER_NAME = name;
+  // 月次セクションのステートをリセット
   MONTHLY_STATE.data = null;
   MONTHLY_STATE.loaded = false;
   var body = document.getElementById('monthlyBody');
@@ -454,21 +501,23 @@ function selectDept(dept){
   var arrow = document.getElementById('monthlyArrow');
   if(arrow) arrow.classList.remove('open');
   closeDeptModal();
-  loadDashboard(dept);
+  loadDashboard();
 }
 
 function closeDeptModal(){
   document.getElementById('deptModalWrap').style.display = 'none';
   document.getElementById('btnChangeDept').style.display = '';
+  // 一般承認者は「承認者変更」ボタンを隠す
+  if(APPROVER_DATA && !APPROVER_DATA.isAdmin){
+    document.getElementById('btnChangeDept').style.display = 'none';
+  }
 }
 
-function loadDashboard(dept){
-  dept = dept || SELECTED_DEPT;
-  if(!dept){
+function loadDashboard(){
+  if(!SELECTED_DEPTS || SELECTED_DEPTS.length === 0){
     initApprover();
     return;
   }
-  SELECTED_DEPT = dept;
 
   var otTb = document.querySelector('#tblOvertime tbody');
   var hdTb = document.querySelector('#tblHoliday tbody');
@@ -493,9 +542,11 @@ function loadDashboard(dept){
         return;
       }
 
+      // サブヘッダー: "田中太郎 の担当（製造1課, 品質管理課）"
+      var deptsLabel = (res.selectedDepts || SELECTED_DEPTS).join(', ');
       document.getElementById('approverSub').innerText =
-        (res.selectedDept || SELECTED_DEPT) + ' の申請' +
-        (res.isAdmin ? '（管理者）' : '');
+        SELECTED_APPROVER_NAME + ' の担当（' + deptsLabel + '）' +
+        (res.isAdmin ? '  [管理者]' : '');
 
       ALL_ITEMS = (res.overtime || []).concat(res.holiday || []);
       renderDashboard(res);
@@ -506,7 +557,7 @@ function loadDashboard(dept){
       otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">API失敗: ' + escHtml(err.message || err) + '</td></tr>';
       hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">GASエディタのログ（実行数）も確認してください</td></tr>';
     })
-    .api_getApproverDashboard(dept);
+    .api_getApproverDashboard(SELECTED_DEPTS);
 }
 
 function renderDashboard(res){
@@ -722,14 +773,14 @@ function toggleMonthly(){
     body.classList.add('open');
     arrow.classList.add('open');
     // 初回展開時に自動ロード
-    if(!MONTHLY_STATE.loaded && SELECTED_DEPT){
+    if(!MONTHLY_STATE.loaded && SELECTED_DEPTS.length > 0){
       loadApproverMonthly();
     }
   }
 }
 
 function loadApproverMonthly(){
-  if(!SELECTED_DEPT) return;
+  if(!SELECTED_DEPTS || SELECTED_DEPTS.length === 0) return;
   var ym = document.getElementById('approverYm').value;
   if(!ym) return;
 
@@ -750,7 +801,7 @@ function loadApproverMonthly(){
       tb.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px;">エラー: ' + escHtml(err.message || err) + '</td></tr>';
       wb.innerHTML = '';
     })
-    .api_approverMonthlySummary(ym, SELECTED_DEPT);
+    .api_approverMonthlySummary(ym, SELECTED_DEPTS);
 }
 
 function applyApproverFilters(people){

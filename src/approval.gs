@@ -118,25 +118,34 @@ function api_getTodayRequestsForDept(dept) {
 
 // ====== 承認者ダッシュボード（全承認対象部署の残業+休日） ======
 
-function api_getApproverDashboard(dept) {
+function api_getApproverDashboard(deptsOrDept) {
   try {
     const email = Session.getActiveUser().getEmail() || '';
     const admin = !email || isAdmin_(email);
 
-    if (!dept) {
+    if (!deptsOrDept || (Array.isArray(deptsOrDept) && deptsOrDept.length === 0)) {
       return { today: '', weekendStart: '', weekendEnd: '',
                overtime: [], holiday: [], isAdmin: admin,
                error: '部署が指定されていません。' };
     }
-    const normDept = normalize_(dept);
 
-    if (!admin && !canApproveDept_(email, normDept)) {
-      return { today: '', weekendStart: '', weekendEnd: '',
-               overtime: [], holiday: [], isAdmin: false,
-               error: 'この部署の承認権限がありません。' };
+    // 配列 or 文字列どちらも対応
+    var deptList = Array.isArray(deptsOrDept)
+      ? deptsOrDept.map(function(d){ return normalize_(d); })
+      : [normalize_(deptsOrDept)];
+
+    // 権限チェック（管理者でなければ各部署をチェック）
+    if (!admin) {
+      for (var i = 0; i < deptList.length; i++) {
+        if (!canApproveDept_(email, deptList[i])) {
+          return { today: '', weekendStart: '', weekendEnd: '',
+                   overtime: [], holiday: [], isAdmin: false,
+                   error: '部署「' + deptList[i] + '」の承認権限がありません。' };
+        }
+      }
     }
 
-    let allowedDepts = new Set([normDept]);
+    var allowedDepts = new Set(deptList);
 
     const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
     const values = sh.getDataRange().getValues();
@@ -234,7 +243,7 @@ function api_getApproverDashboard(dept) {
 
     return { today: today, weekendStart: weekendStart, weekendEnd: weekendEnd,
              overtime: overtime, holiday: holiday, isAdmin: admin,
-             selectedDept: normDept };
+             selectedDepts: deptList };
   } catch (err) {
     // エラーをクライアントに伝えるため、エラー情報を含むオブジェクトを返す
     console.error('api_getApproverDashboard エラー: ' + err.message + '\n' + err.stack);
@@ -346,38 +355,75 @@ function api_approveRequestsBatch(requestIds) {
 
 // ====== 承認者向け月次サマリーAPI ======
 
-function api_approverMonthlySummary(yearMonth, dept) {
+function api_approverMonthlySummary(yearMonth, deptsOrDept) {
   const email = Session.getActiveUser().getEmail();
   if (!email) throw new Error('メールアドレスが取得できません。');
-  const normDept = normalize_(dept);
-  if (!normDept) throw new Error('部署が指定されていません。');
-  if (!canApproveDept_(email, normDept))
-    throw new Error('この部署の月次サマリーを閲覧する権限がありません。');
-  return buildMonthlySummary_(yearMonth, normDept);
+
+  // 配列 or 文字列どちらも対応
+  var deptList = Array.isArray(deptsOrDept)
+    ? deptsOrDept.map(function(d){ return normalize_(d); }).filter(Boolean)
+    : [normalize_(deptsOrDept)];
+
+  if (deptList.length === 0 || !deptList[0]) throw new Error('部署が指定されていません。');
+
+  // 権限チェック
+  for (var i = 0; i < deptList.length; i++) {
+    if (!canApproveDept_(email, deptList[i]))
+      throw new Error('部署「' + deptList[i] + '」の月次サマリーを閲覧する権限がありません。');
+  }
+
+  // 複数部署の場合、buildMonthlySummary_を'ALL'で呼んでから部署フィルタする
+  if (deptList.length === 1) {
+    return buildMonthlySummary_(yearMonth, deptList[0]);
+  }
+
+  // 複数部署: ALLで取得してから対象部署のみにフィルタ
+  var allData = buildMonthlySummary_(yearMonth, 'ALL');
+  var deptSet = {};
+  for (var j = 0; j < deptList.length; j++) deptSet[deptList[j]] = true;
+
+  allData.people = allData.people.filter(function(p){ return deptSet[p.dept]; });
+  allData.watch = allData.watch.filter(function(w){ return deptSet[w.dept]; });
+  allData.deptFilter = deptList.join(', ');
+
+  // KPI再計算
+  var LIMIT40 = 2400, LIMIT60 = 3600;
+  allData.kpi.totalPeople = allData.people.length;
+  allData.kpi.over40 = allData.people.filter(function(p){ return p.totalNet >= LIMIT40; }).length;
+  allData.kpi.over60 = allData.people.filter(function(p){ return p.totalNet >= LIMIT60; }).length;
+  allData.kpi.projectedOver40 = allData.people.filter(function(p){ return p.projectedOver40; }).length;
+  allData.kpi.projectedOver60 = allData.people.filter(function(p){ return p.projectedOver60; }).length;
+  allData.kpi.pdfMissingTotal = allData.people.reduce(function(s,p){ return s + p.pdfMissing; }, 0);
+  allData.kpi.totalNetMinutes = allData.people.reduce(function(s,p){ return s + p.totalNet; }, 0);
+
+  // チャート再計算
+  allData.charts.people = {
+    labels: allData.people.map(function(p){ return p.workerName; }),
+    values: allData.people.map(function(p){ return p.totalNet; }),
+    projected: allData.people.map(function(p){ return p.projectedTotal; }),
+    limit40: LIMIT40,
+    limit60: LIMIT60,
+  };
+
+  return allData;
 }
 
-// ====== 承認者の担当部署一覧取得 ======
+// ====== 承認者の担当部署一覧取得（承認者プロファイルベース） ======
 
 function api_getApproverDepts() {
   const email = Session.getActiveUser().getEmail();
   if (!email) throw new Error('メールアドレスが取得できません。');
-
-  // admin なら全部署
-  if (isAdmin_(email)) {
-    return { isAdmin: true, depts: loadDeptList_() };
-  }
-
-  // DeptApprovers / ApproverMap 両対応
-  const map = getDeptApproverMap_();
   const emailLc = email.toLowerCase();
-  const depts = [];
-  for (const dept of Object.keys(map)) {
-    if (map[dept].has(emailLc)) depts.push(dept);
+  const profiles = getApproverProfiles_();
+
+  if (isAdmin_(email)) {
+    return { isAdmin: true, approvers: profiles, currentEmail: emailLc };
   }
 
-  if (depts.length === 0) {
+  // 自分のプロファイルのみ返す
+  const mine = profiles.filter(function(p){ return p.email === emailLc; });
+  if (mine.length === 0) {
     throw new Error('承認者権限がありません。DeptApprovers または ApproverMap に登録してください。');
   }
-
-  return { isAdmin: false, depts };
+  return { isAdmin: false, approvers: mine, currentEmail: emailLc };
 }

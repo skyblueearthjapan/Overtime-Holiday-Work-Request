@@ -56,6 +56,32 @@ function getDeptApproverMap_() {
 }
 
 /**
+ * DeptApproversシートから承認者プロファイル一覧を構築する。
+ * 戻り値: [{ email: 'tanaka@...', name: '田中太郎', depts: ['製造1課','品質管理課'] }]
+ */
+function getApproverProfiles_() {
+  const sh = getDb_().getSheetByName(SHEET.DEPT_APPROVERS);
+  if (!sh || sh.getLastRow() < 2) return [];
+  const values = sh.getDataRange().getValues();
+  var map = {};  // email → { name, depts }
+  for (var r = 1; r < values.length; r++) {
+    var dept = normalize_(values[r][0]);
+    var rawEmails = normalize_(values[r][1]);
+    var name = (values.length > 0 && values[r].length > 2) ? normalize_(values[r][2]) : '';
+    if (!dept || !rawEmails) continue;
+    // カンマ区切りのメール対応（既存形式の後方互換）
+    var emails = rawEmails.split(',').map(function(s){ return s.trim().toLowerCase(); }).filter(Boolean);
+    for (var e = 0; e < emails.length; e++) {
+      var email = emails[e];
+      if (!map[email]) map[email] = { email: email, name: name || email, depts: [] };
+      if (map[email].depts.indexOf(dept) < 0) map[email].depts.push(dept);
+      if (name && name !== email) map[email].name = name;
+    }
+  }
+  return Object.values(map);
+}
+
+/**
  * 総務（管理者）メールリストを取得する。
  * Settings の GENERAL_AFFAIRS_EMAILS → ADMIN_EMAILS の順で探す。
  */
