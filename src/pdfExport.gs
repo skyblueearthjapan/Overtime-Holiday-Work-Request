@@ -161,6 +161,11 @@ function generatePdfForRequest_(requestId) {
     var reasonText = buildReasonText_(reasonVal, reasonDetailVal);
     formSheet.getRange(PDF_MAP.reason).setValue(reasonText);
 
+    // 残業の開始時刻を直接書込（WorkLogsのTZバグ回避）
+    if (req.requestType === 'overtime') {
+      formSheet.getRange(PDF_MAP.startAt).setValue('17:20');
+    }
+
     // 印鑑画像挿入（XLOOKUPでは画像挿入不可のため直接処理）
     const requestType = req.requestType;
     const stampTypeKey = requestType === 'overtime' ? 'STAMP_OVERTIME_FILE_ID' : 'STAMP_HOLIDAY_FILE_ID';
@@ -169,19 +174,15 @@ function generatePdfForRequest_(requestId) {
       const stampBlob = getStampBlob_(stampTypeId);
       if (stampBlob) {
         try {
-          const stampSize = 90; // 区分印鑑を大きく
-          const colW = formSheet.getColumnWidth(6);
-          const rowH = formSheet.getRowHeight(4);
-          const offX = Math.max(0, Math.floor((colW - stampSize) / 2));
-          const offY = Math.max(0, Math.floor((rowH - stampSize) / 2));
-          const img = formSheet.insertImage(stampBlob, 6, 4, offX, offY); // F4: 区分印鑑
+          const stampSize = 270; // 区分印鑑を大きく（3倍）
+          const img = formSheet.insertImage(stampBlob, 6, 4, 0, 0); // F4: 区分印鑑
           img.setWidth(stampSize).setHeight(stampSize);
         } catch (e) { Logger.log('区分印鑑挿入エラー: ' + e.message); }
       }
     } else {
       // 印鑑画像がない場合、テキストのフォントを大きくする
       try {
-        formSheet.getRange('F4').setFontSize(18).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+        formSheet.getRange('F4').setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
       } catch (e) { /* ignore */ }
     }
     // 承認者印鑑（メールアドレスは書き込まない）
@@ -192,11 +193,13 @@ function generatePdfForRequest_(requestId) {
         const blob = getStampBlob_(approverStampId);
         if (blob) {
           try {
-            const aStampSize = 55;
+            const aStampSize = 60;
             const aColW = formSheet.getColumnWidth(6);
-            const aRowH = formSheet.getRowHeight(34);
+            // 承認欄が複数行にまたがる場合を考慮（F34〜F37の合計高さで中央計算）
+            var aTotalH = 0;
+            for (var ar = 34; ar <= 37; ar++) aTotalH += formSheet.getRowHeight(ar);
             const aOffX = Math.max(0, Math.floor((aColW - aStampSize) / 2));
-            const aOffY = Math.max(0, Math.floor((aRowH - aStampSize) / 2));
+            const aOffY = Math.max(0, Math.floor((aTotalH - aStampSize) / 2));
             const img = formSheet.insertImage(blob, 6, 34, aOffX, aOffY); // F34 中央配置
             img.setWidth(aStampSize).setHeight(aStampSize);
           } catch (e) { Logger.log('承認者印鑑挿入エラー: ' + e.message); }
@@ -395,17 +398,13 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   if (stampTypeId) {
     const stampBlob = getStampBlob_(stampTypeId);
     if (stampBlob) {
-      const stampSize = 90; // 区分印鑑を大きく
-      const colW = sheet.getColumnWidth(6);
-      const rowH = sheet.getRowHeight(4);
-      const offX = Math.max(0, Math.floor((colW - stampSize) / 2));
-      const offY = Math.max(0, Math.floor((rowH - stampSize) / 2));
-      const img = sheet.insertImage(stampBlob, 6, 4, offX, offY); // F4 中央配置
+      const stampSize = 270; // 区分印鑑を大きく（3倍）
+      const img = sheet.insertImage(stampBlob, 6, 4, 0, 0); // F4: 区分印鑑
       img.setWidth(stampSize).setHeight(stampSize);
     }
   } else {
     // 印鑑画像がない場合、テキストのフォントを大きくする
-    sheet.getRange(PDF_MAP.typeLabelBig).setFontSize(18).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+    sheet.getRange(PDF_MAP.typeLabelBig).setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
   }
 
   // 区分
@@ -419,11 +418,16 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   // 日付
   sheet.getRange(PDF_MAP.targetDate).setValue(fmtDate_(targetDate, 'yyyy/MM/dd'));
 
-  // 実績時刻（Date or JST文字列 "yyyy-MM-dd HH:mm:ss" どちらにも対応）
-  const startTime = extractHHmm_(wl.actualStartAt);
-  const endTime   = extractHHmm_(wl.actualEndAt);
-  if (startTime) sheet.getRange(PDF_MAP.startAt).setValue(startTime);
-  if (endTime)   sheet.getRange(PDF_MAP.endAt).setValue(endTime);
+  // 実績時刻
+  if (requestType === 'overtime') {
+    // 残業の開始は常に17:20固定（WorkLogsのTZバグ回避）
+    sheet.getRange(PDF_MAP.startAt).setValue('17:20');
+  } else {
+    const startTime = extractHHmm_(wl.actualStartAt);
+    if (startTime) sheet.getRange(PDF_MAP.startAt).setValue(startTime);
+  }
+  const endTime = extractHHmm_(wl.actualEndAt);
+  if (endTime) sheet.getRange(PDF_MAP.endAt).setValue(endTime);
 
   // 休憩・実残業
   sheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
@@ -459,11 +463,13 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
     if (approverStampId) {
       const blob = getStampBlob_(approverStampId);
       if (blob) {
-        const aStampSize = 55;
+        const aStampSize = 60;
         const aColW = sheet.getColumnWidth(6);
-        const aRowH = sheet.getRowHeight(34);
+        // 承認欄が複数行にまたがる場合を考慮（F34〜F37の合計高さで中央計算）
+        var aTotalH = 0;
+        for (var ar = 34; ar <= 37; ar++) aTotalH += sheet.getRowHeight(ar);
         const aOffX = Math.max(0, Math.floor((aColW - aStampSize) / 2));
-        const aOffY = Math.max(0, Math.floor((aRowH - aStampSize) / 2));
+        const aOffY = Math.max(0, Math.floor((aTotalH - aStampSize) / 2));
         const img = sheet.insertImage(blob, 6, 34, aOffX, aOffY); // F34 中央配置
         img.setWidth(aStampSize).setHeight(aStampSize);
       }
@@ -477,11 +483,12 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
     if (approver2StampId) {
       const blob = getStampBlob_(approver2StampId);
       if (blob) {
-        const a2StampSize = 55;
+        const a2StampSize = 60;
         const a2ColW = sheet.getColumnWidth(7);
-        const a2RowH = sheet.getRowHeight(34);
+        var a2TotalH = 0;
+        for (var a2r = 34; a2r <= 37; a2r++) a2TotalH += sheet.getRowHeight(a2r);
         const a2OffX = Math.max(0, Math.floor((a2ColW - a2StampSize) / 2));
-        const a2OffY = Math.max(0, Math.floor((a2RowH - a2StampSize) / 2));
+        const a2OffY = Math.max(0, Math.floor((a2TotalH - a2StampSize) / 2));
         const img = sheet.insertImage(blob, 7, 34, a2OffX, a2OffY); // G34 中央配置
         img.setWidth(a2StampSize).setHeight(a2StampSize);
       }
@@ -703,6 +710,57 @@ function forceRegeneratePdf() {
 
   if (targetRow < 0) { Logger.log('承認済み申請が見つかりません'); return; }
 
+  // WorkLogs の actualStartAt 時刻バグ修復（残業で"02:20"等のJSTずれを修正）
+  var requestType = idx['requestType(overtime/holiday)'] !== undefined
+    ? normalize_(data[targetRow - 2][idx['requestType(overtime/holiday)']]) : '';
+  if (requestType === 'overtime') {
+    try {
+      var wlSh = requireSheet_('WorkLogs');
+      var wlLastRow = wlSh.getLastRow();
+      if (wlLastRow >= 3) {
+        var wlHeader = wlSh.getRange(2, 1, 1, wlSh.getLastColumn()).getValues()[0].map(function(h) { return normalize_(h); });
+        var wlIdx = buildHeaderIndex_(wlHeader);
+        var wlData = wlSh.getRange(3, 1, wlLastRow - 2, wlSh.getLastColumn()).getValues();
+        for (var w = 0; w < wlData.length; w++) {
+          if (normalize_(wlData[w][wlIdx['requestId']]) === requestId) {
+            var wlRow = w + 3;
+            // actualStartAt を正しい17:20 JSTに修正
+            var targetDateVal = data[targetRow - 2][idx['targetDate']];
+            var td = targetDateVal instanceof Date ? targetDateVal : new Date(targetDateVal);
+            var ymdStr = fmtDate_(td, 'yyyy-MM-dd');
+            var correctStart = ymdStr + ' 17:20:00';
+            var currentStart = wlData[w][wlIdx['actualStartAt']];
+            Logger.log('WorkLogs actualStartAt: 現在=[' + currentStart + '] → 修正=[' + correctStart + ']');
+            wlSh.getRange(wlRow, wlIdx['actualStartAt'] + 1).setValue(correctStart);
+            SpreadsheetApp.flush();
+            break;
+          }
+        }
+      }
+    } catch (wlErr) {
+      Logger.log('WorkLogs修正スキップ: ' + wlErr.message);
+    }
+  }
+
+  // reasonDetail が空の場合、フォーム回答から補完を試みる
+  var reasonDetailCol = idx['reasonDetail'];
+  var currentReasonDetail = reasonDetailCol !== undefined ? data[targetRow - 2][reasonDetailCol] : '';
+  var reasonCol = idx['reason'];
+  var currentReason = reasonCol !== undefined ? normalize_(data[targetRow - 2][reasonCol]) : '';
+  if ((!currentReasonDetail || String(currentReasonDetail).trim() === '') && currentReason.indexOf('その他') >= 0) {
+    Logger.log('reasonDetail が空 & 理由が「その他」→ フォーム回答から補完を試みます');
+    try {
+      var supplemented = tryFillReasonDetailFromForm_(requestId, targetRow, reqSh, idx);
+      if (supplemented) {
+        Logger.log('reasonDetail 補完成功: [' + supplemented + ']');
+      } else {
+        Logger.log('reasonDetail 補完失敗 — Requestsシートの reasonDetail 列に手動で入力してください');
+      }
+    } catch (rdErr) {
+      Logger.log('reasonDetail 補完エラー: ' + rdErr.message);
+    }
+  }
+
   // pdfGeneratedAt / pdfFileId / pdfFolderId をクリア（再生成を許可）
   if (pdfAtCol !== undefined) reqSh.getRange(targetRow, pdfAtCol + 1).setValue('');
   if (pdfIdCol !== undefined) reqSh.getRange(targetRow, pdfIdCol + 1).setValue('');
@@ -834,6 +892,70 @@ function extractHHmm_(val) {
   if (val instanceof Date) return fmtDate_(val, 'HH:mm');
   // JST文字列 "yyyy-MM-dd HH:mm:ss" や "HH:mm" 形式
   const s = String(val);
-  const m = s.match(/(\d{2}:\d{2})/);
+  const m = s.match(/(\d{1,2}:\d{2})/);
   return m ? m[1] : '';
+}
+
+// ====== フォーム回答からreasonDetailを補完 ======
+// Requests に reasonDetail が空で reason が「その他」の場合、
+// 元のフォーム回答から補足理由を取得してシートに書き戻す
+
+function tryFillReasonDetailFromForm_(requestId, rowNo, reqSh, idx) {
+  // submittedAt からフォーム回答のタイムスタンプを特定
+  var submittedAtCol = idx['submittedAt'];
+  if (submittedAtCol === undefined) return null;
+
+  var submittedAt = reqSh.getRange(rowNo, submittedAtCol + 1).getValue();
+  if (!submittedAt) return null;
+
+  var ts = submittedAt instanceof Date ? submittedAt : new Date(submittedAt);
+
+  // FormMap から全アクティブフォームを取得して探索
+  var fmSh = requireSheet_('FormMap');
+  var fmValues = fmSh.getDataRange().getValues();
+  var fmH = fmValues[0].map(function(h) { return normalize_(h); });
+  var fmFormIdCol = fmH.indexOf('formId');
+  if (fmFormIdCol < 0) return null;
+
+  // submittedAt の前後2分で検索
+  var since = new Date(ts.getTime() - 120000);
+
+  for (var r = 1; r < fmValues.length; r++) {
+    var formId = normalize_(fmValues[r][fmFormIdCol]);
+    if (!formId) continue;
+
+    try {
+      var form = FormApp.openById(formId);
+      var responses = form.getResponses(since);
+
+      for (var i = 0; i < responses.length; i++) {
+        var resp = responses[i];
+        var respTs = resp.getTimestamp();
+        // タイムスタンプが近い回答を探す（前後60秒以内）
+        if (Math.abs(respTs.getTime() - ts.getTime()) > 60000) continue;
+
+        var irs = resp.getItemResponses();
+        for (var j = 0; j < irs.length; j++) {
+          try {
+            var title = normalize_(irs[j].getItem().getTitle());
+            if (title === normalize_('補足理由')) {
+              var detail = irs[j].getResponse();
+              if (detail && String(detail).trim()) {
+                // Requests シートに書き戻し
+                var rdCol = idx['reasonDetail'];
+                if (rdCol !== undefined) {
+                  reqSh.getRange(rowNo, rdCol + 1).setValue(detail);
+                  SpreadsheetApp.flush();
+                }
+                return detail;
+              }
+            }
+          } catch (e) { /* 削除済みアイテムのスキップ */ }
+        }
+      }
+    } catch (e) {
+      // フォーム読み取りエラーは無視して次へ
+    }
+  }
+  return null;
 }

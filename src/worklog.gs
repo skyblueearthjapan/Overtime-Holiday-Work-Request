@@ -126,8 +126,10 @@ function api_markOvertimeDone(requestId) {
     const now = new Date();
 
     // start = targetDate 17:20（JST）
+    // 注意: new Date(y,m,d,h,m,s) はUTC基準のため、JSTの日付コンポーネントを使う
     const d = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
-    const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 17, 20, 0);
+    const targetYmd = fmtDate_(d, 'yyyy-MM-dd'); // JST基準の日付文字列
+    const start = new Date(targetYmd + 'T17:20:00+09:00'); // 明示的にJST指定
 
     const actualMinutes = Math.max(0, Math.round((now.getTime() - start.getTime()) / 60000));
     const breakMinutes = calcBreakMinutesByMaster_('overtime', actualMinutes);
