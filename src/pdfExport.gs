@@ -175,7 +175,7 @@ function generatePdfForRequest_(requestId) {
       if (stampBlob) {
         try {
           const stampSize = 270; // 区分印鑑を大きく（3倍）
-          const img = formSheet.insertImage(stampBlob, 6, 4, 0, 0); // F4: 区分印鑑
+          const img = formSheet.insertImage(stampBlob, 6, 2, 0, 0); // F2起点（上に2段）
           img.setWidth(stampSize).setHeight(stampSize);
         } catch (e) { Logger.log('区分印鑑挿入エラー: ' + e.message); }
       }
@@ -399,7 +399,7 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
     const stampBlob = getStampBlob_(stampTypeId);
     if (stampBlob) {
       const stampSize = 270; // 区分印鑑を大きく（3倍）
-      const img = sheet.insertImage(stampBlob, 6, 4, 0, 0); // F4: 区分印鑑
+      const img = sheet.insertImage(stampBlob, 6, 2, 0, 0); // F2起点（上に2段）
       img.setWidth(stampSize).setHeight(stampSize);
     }
   } else {
@@ -742,11 +742,24 @@ function forceRegeneratePdf() {
     }
   }
 
-  // reasonDetail が空の場合、フォーム回答から補完を試みる
+  // reasonDetail 列が存在しなければ自動作成
   var reasonDetailCol = idx['reasonDetail'];
-  var currentReasonDetail = reasonDetailCol !== undefined ? data[targetRow - 2][reasonDetailCol] : '';
+  if (reasonDetailCol === undefined) {
+    Logger.log('reasonDetail 列が存在しません → 自動追加');
+    var newCol = normH.length;
+    reqSh.getRange(1, newCol + 1).setValue('reasonDetail');
+    normH.push('reasonDetail');
+    idx['reasonDetail'] = newCol;
+    reasonDetailCol = newCol;
+    SpreadsheetApp.flush();
+    Logger.log('reasonDetail 列を追加: 列' + (newCol + 1));
+  }
+
+  // reasonDetail が空の場合、フォーム回答から補完を試みる
+  var currentReasonDetail = reasonDetailCol !== undefined ? reqSh.getRange(targetRow, reasonDetailCol + 1).getValue() : '';
   var reasonCol = idx['reason'];
   var currentReason = reasonCol !== undefined ? normalize_(data[targetRow - 2][reasonCol]) : '';
+  Logger.log('reasonDetail 現在値=[' + currentReasonDetail + '] reason=[' + currentReason + ']');
   if ((!currentReasonDetail || String(currentReasonDetail).trim() === '') && currentReason.indexOf('その他') >= 0) {
     Logger.log('reasonDetail が空 & 理由が「その他」→ フォーム回答から補完を試みます');
     try {
@@ -903,59 +916,100 @@ function extractHHmm_(val) {
 function tryFillReasonDetailFromForm_(requestId, rowNo, reqSh, idx) {
   // submittedAt からフォーム回答のタイムスタンプを特定
   var submittedAtCol = idx['submittedAt'];
-  if (submittedAtCol === undefined) return null;
+  if (submittedAtCol === undefined) {
+    Logger.log('tryFill: submittedAt 列が見つかりません');
+    return null;
+  }
 
   var submittedAt = reqSh.getRange(rowNo, submittedAtCol + 1).getValue();
-  if (!submittedAt) return null;
+  if (!submittedAt) {
+    Logger.log('tryFill: submittedAt が空です');
+    return null;
+  }
 
   var ts = submittedAt instanceof Date ? submittedAt : new Date(submittedAt);
+  Logger.log('tryFill: submittedAt=[' + ts.toISOString() + ']');
+
+  // 対象リクエストの部署・種別を取得（フォーム絞り込み用）
+  var deptCol = idx['dept'];
+  var typeCol = idx['requestType(overtime/holiday)'];
+  var targetDept = deptCol !== undefined ? normalize_(reqSh.getRange(rowNo, deptCol + 1).getValue()) : '';
+  var targetType = typeCol !== undefined ? normalize_(reqSh.getRange(rowNo, typeCol + 1).getValue()) : '';
+  Logger.log('tryFill: dept=[' + targetDept + '] type=[' + targetType + ']');
 
   // FormMap から全アクティブフォームを取得して探索
   var fmSh = requireSheet_('FormMap');
   var fmValues = fmSh.getDataRange().getValues();
   var fmH = fmValues[0].map(function(h) { return normalize_(h); });
   var fmFormIdCol = fmH.indexOf('formId');
-  if (fmFormIdCol < 0) return null;
+  var fmDeptCol = fmH.indexOf('dept');
+  var fmTypeCol = fmH.indexOf('type');
+  if (fmFormIdCol < 0) {
+    Logger.log('tryFill: FormMap に formId 列がありません');
+    return null;
+  }
 
-  // submittedAt の前後2分で検索
-  var since = new Date(ts.getTime() - 120000);
+  // submittedAt の前後5分で検索（余裕を持たせる）
+  var since = new Date(ts.getTime() - 300000);
 
   for (var r = 1; r < fmValues.length; r++) {
     var formId = normalize_(fmValues[r][fmFormIdCol]);
     if (!formId) continue;
 
+    // 部署・種別が一致するフォームを優先
+    var fmDept = fmDeptCol >= 0 ? normalize_(fmValues[r][fmDeptCol]) : '';
+    var fmType = fmTypeCol >= 0 ? normalize_(fmValues[r][fmTypeCol]) : '';
+    if (targetDept && fmDept && fmDept !== targetDept) continue;
+
+    Logger.log('tryFill: フォーム検索中 formId=' + formId + ' dept=' + fmDept);
+
     try {
       var form = FormApp.openById(formId);
       var responses = form.getResponses(since);
+      Logger.log('tryFill: 回答数=' + responses.length + ' (since以降)');
 
       for (var i = 0; i < responses.length; i++) {
         var resp = responses[i];
         var respTs = resp.getTimestamp();
-        // タイムスタンプが近い回答を探す（前後60秒以内）
-        if (Math.abs(respTs.getTime() - ts.getTime()) > 60000) continue;
+        var diffSec = Math.abs(respTs.getTime() - ts.getTime()) / 1000;
+        // タイムスタンプが近い回答を探す（前後5分以内）
+        if (diffSec > 300) continue;
+
+        Logger.log('tryFill: 回答マッチ候補 diff=' + diffSec + '秒 respTs=' + respTs.toISOString());
 
         var irs = resp.getItemResponses();
+        var foundDetail = null;
         for (var j = 0; j < irs.length; j++) {
           try {
             var title = normalize_(irs[j].getItem().getTitle());
-            if (title === normalize_('補足理由')) {
-              var detail = irs[j].getResponse();
-              if (detail && String(detail).trim()) {
-                // Requests シートに書き戻し
-                var rdCol = idx['reasonDetail'];
-                if (rdCol !== undefined) {
-                  reqSh.getRange(rowNo, rdCol + 1).setValue(detail);
-                  SpreadsheetApp.flush();
-                }
-                return detail;
+            var val = irs[j].getResponse();
+            // 補足理由フィールドを探す
+            if (title === normalize_('補足理由') || title === 'reasonDetail') {
+              if (val && String(val).trim()) {
+                foundDetail = String(val).trim();
+                Logger.log('tryFill: 補足理由発見! title=[' + title + '] value=[' + foundDetail + ']');
               }
             }
           } catch (e) { /* 削除済みアイテムのスキップ */ }
         }
+
+        if (foundDetail) {
+          // Requests シートに書き戻し
+          var rdCol = idx['reasonDetail'];
+          if (rdCol !== undefined) {
+            reqSh.getRange(rowNo, rdCol + 1).setValue(foundDetail);
+            SpreadsheetApp.flush();
+            Logger.log('tryFill: Requestsシートに書き戻し完了 (列' + (rdCol + 1) + ')');
+          } else {
+            Logger.log('tryFill: reasonDetail 列が idx に無いため書き戻し不可');
+          }
+          return foundDetail;
+        }
       }
     } catch (e) {
-      // フォーム読み取りエラーは無視して次へ
+      Logger.log('tryFill: フォーム読み取りエラー (' + formId + '): ' + e.message);
     }
   }
+  Logger.log('tryFill: 該当するフォーム回答が見つかりませんでした');
   return null;
 }
