@@ -176,6 +176,8 @@ function generatePdfForRequest_(requestId) {
       const stampBlob = getStampBlob_(stampTypeId);
       if (stampBlob) {
         try {
+          // 印鑑画像がある場合、背景テキスト「残業」「休日出勤」をクリア
+          formSheet.getRange(PDF_MAP.typeLabelBig).setValue('');
           const stampSize = 270; // 区分印鑑を大きく（3倍）
           const img = formSheet.insertImage(stampBlob, 6, 1, 0, 0); // F1起点（最上段）
           img.setWidth(stampSize).setHeight(stampSize);
@@ -394,17 +396,21 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   sheet.getRange(PDF_MAP.name).setValue(normalize_(reqData['workerName']));
 
   // F4: 区分印鑑（残業/休日出勤のPNG画像を挿入）
-  sheet.getRange(PDF_MAP.typeLabelBig).setValue(typeLabel);
   const stampTypeKey = requestType === 'overtime' ? 'STAMP_OVERTIME_FILE_ID' : 'STAMP_HOLIDAY_FILE_ID';
   const stampTypeId = normalize_(settings[stampTypeKey]);
   if (stampTypeId) {
     const stampBlob = getStampBlob_(stampTypeId);
     if (stampBlob) {
+      // 印鑑画像がある場合、背景テキストをクリア
+      sheet.getRange(PDF_MAP.typeLabelBig).setValue('');
       const stampSize = 270; // 区分印鑑を大きく（3倍）
       const img = sheet.insertImage(stampBlob, 6, 1, 0, 0); // F1起点（最上段）
       img.setWidth(stampSize).setHeight(stampSize);
+    } else {
+      sheet.getRange(PDF_MAP.typeLabelBig).setValue(typeLabel);
     }
   } else {
+    sheet.getRange(PDF_MAP.typeLabelBig).setValue(typeLabel);
     // 印鑑画像がない場合、テキストのフォントを大きくする
     sheet.getRange(PDF_MAP.typeLabelBig).setFontSize(24).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
   }
