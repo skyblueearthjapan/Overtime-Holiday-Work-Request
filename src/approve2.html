@@ -1,0 +1,447 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root{
+      --bg1:#eaf6ff;
+      --bg2:#f7fffb;
+      --accent:#1f9d55;
+      --accent2:#0ea5e9;
+      --text:#0b2545;
+      --muted:#5c6b7a;
+      --card:#ffffffcc;
+      --line:#d7e7f5;
+      --danger:#ff5a5f;
+      --warn:#ffb020;
+    }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(1100px 600px at 18% 0%, var(--bg1), transparent),
+        radial-gradient(1100px 600px at 92% 20%, var(--bg2), transparent),
+        linear-gradient(180deg, #ffffff, #f3fbff);
+    }
+    header{
+      padding:18px 22px;
+      display:flex; align-items:flex-end; justify-content:space-between;
+      border-bottom:1px solid var(--line);
+      backdrop-filter: blur(8px);
+      position:sticky; top:0;
+      background: rgba(255,255,255,.55);
+      z-index: 10;
+    }
+    .title{ font-weight:900; letter-spacing:.06em; }
+    .sub{ opacity:.8; font-size:12px; color:var(--muted); }
+    .wrap{ padding:18px 22px; max-width:1280px; margin:0 auto; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:14px 14px;
+      box-shadow: 0 10px 30px rgba(10,40,80,.06);
+    }
+    .grid{ display:grid; gap:12px; grid-template-columns: 1fr 1fr 1fr 1fr; }
+    .kpi{ font-size:22px; font-weight:900; }
+    select, input[type="date"]{
+      padding:10px 10px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      min-width:160px;
+    }
+    button{
+      padding:10px 12px;
+      border-radius:12px;
+      border:0;
+      background:linear-gradient(135deg, var(--accent), #1bd67f);
+      color:#fff; font-weight:800;
+      cursor:pointer;
+      box-shadow: 0 10px 22px rgba(31,157,85,.20);
+    }
+    button:disabled{
+      opacity:.5; cursor:not-allowed;
+    }
+    .ghost{
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--line);
+      box-shadow:none;
+    }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      display:inline-block;
+      color:var(--text);
+    }
+    .danger{ border-color:#ffb3b3; background:#fff0f0; color:#7a0b0b; }
+    .warn{ border-color:#ffd29e; background:#fff6eb; color:#7a4a0b; }
+    .ok{ border-color:#bfe9d0; background:#f0fff6; color:#0b5a2b; }
+    .info{ border-color:#b3d9ff; background:#edf6ff; color:#0b3d7a; }
+
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:13px;
+    }
+    th, td{
+      border-bottom:1px solid var(--line);
+      padding:10px 8px;
+      text-align:left;
+      white-space:nowrap;
+    }
+    th{
+      font-size:12px;
+      color:var(--muted);
+    }
+    .muted{ color:var(--muted); }
+    a{ color:var(--accent2); text-decoration:none; }
+    a:hover{ text-decoration:underline; }
+    .nav-link{
+      font-size:13px; padding:6px 12px; border-radius:8px;
+      border:1px solid var(--line); background:#fff; color:var(--text);
+    }
+    .nav-link:hover{ background:var(--bg1); text-decoration:none; }
+
+    .bulk-bar{
+      display:flex; align-items:center; gap:12px;
+      padding:10px 14px;
+      background:#f8fcff;
+      border:1px solid var(--line);
+      border-radius:12px;
+      margin-bottom:10px;
+    }
+    .bulk-bar label{ font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px; }
+    .bulk-bar .count{ font-weight:800; font-size:14px; }
+
+    tr.disabled td{ opacity:.5; }
+    tr.done td{ opacity:.6; }
+
+    .btn-sm{
+      padding:6px 10px;
+      border-radius:8px;
+      font-size:12px;
+      border:0;
+      background:linear-gradient(135deg, var(--accent), #1bd67f);
+      color:#fff; font-weight:700;
+      cursor:pointer;
+    }
+    .btn-sm:disabled{ opacity:.4; cursor:not-allowed; }
+
+    @media (max-width:768px){
+      header{ flex-direction:column; align-items:flex-start; gap:8px; }
+      .wrap{ padding:12px 10px; }
+      .grid{ grid-template-columns:1fr 1fr; }
+      .row{ flex-direction:column; align-items:stretch; }
+      select, input[type="date"]{ min-width:auto; width:100%; }
+      table{ font-size:11px; }
+      th, td{ padding:6px 4px; white-space:normal; }
+    }
+    @media (max-width:480px){
+      .grid{ grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <div class="title">二次承認</div>
+      <div class="sub">総務部長による二次承認（一次承認済みの申請を確認・承認）</div>
+    </div>
+    <div class="row">
+      <a href="<?= APP_URL ?>?page=admin" target="_top" class="nav-link">総務部画面</a>
+      <a href="<?= APP_URL ?>?page=approver" target="_top" class="nav-link">承認者画面</a>
+      <a href="<?= APP_URL ?>?page=top" target="_top" class="nav-link">トップへ</a>
+    </div>
+  </header>
+
+  <div class="wrap">
+
+    <!-- Date selector -->
+    <div class="card" style="margin-bottom:12px">
+      <div class="row">
+        <div>
+          <div class="sub">対象日</div>
+          <input type="date" id="targetDate">
+        </div>
+        <button onclick="loadList()">読込</button>
+        <div id="loadingMsg" class="sub" style="display:none">読み込み中...</div>
+      </div>
+    </div>
+
+    <!-- KPIs -->
+    <div class="grid" style="margin-bottom:12px">
+      <div class="card">
+        <div class="sub">申請総数</div>
+        <div class="kpi" id="kpiTotal">-</div>
+      </div>
+      <div class="card">
+        <div class="sub">一次承認済</div>
+        <div class="kpi" id="kpiApproved">-</div>
+      </div>
+      <div class="card">
+        <div class="sub">二次承認済</div>
+        <div class="kpi" id="kpiApproved2">-</div>
+      </div>
+      <div class="card">
+        <div class="sub">未承認（一次）</div>
+        <div class="kpi" id="kpiPending">-</div>
+      </div>
+    </div>
+
+    <!-- Table -->
+    <div class="card">
+      <div class="bulk-bar">
+        <label><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"> 全選択</label>
+        <span class="count"><span id="selectedCount">0</span>件選択中</span>
+        <button id="batchBtn" onclick="batchApprove()" disabled>一括二次承認</button>
+      </div>
+      <table id="tbl">
+        <thead>
+          <tr>
+            <th style="width:30px"></th>
+            <th>部署</th>
+            <th>氏名</th>
+            <th>種別</th>
+            <th>予定時間</th>
+            <th>一次承認</th>
+            <th>二次承認</th>
+            <th>PDF</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+      <div class="sub" style="margin-top:8px">
+        ※二次承認を行うとPDFが再生成されます（翌朝バッチで二次承認印付きPDFが作成されます）。
+      </div>
+    </div>
+
+  </div>
+
+<script>
+var DATA = [];
+
+function z(n){ return String(n).padStart(2,'0'); }
+function todayYMD(){
+  var d = new Date();
+  return d.getFullYear() + '-' + z(d.getMonth()+1) + '-' + z(d.getDate());
+}
+function fmtMin(min){
+  min = Math.max(0, Math.round(Number(min||0)));
+  var h = Math.floor(min/60), r = min % 60;
+  if(h===0) return r+'分';
+  if(r===0) return h+'時間';
+  return h+'時間'+r+'分';
+}
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 初期化: URLパラメータまたは今日の日付
+(function(){
+  var dateInput = document.getElementById('targetDate');
+  var urlDate = '<?= DATE_PARAM ?>';
+  if (urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate)) {
+    dateInput.value = urlDate;
+  } else {
+    dateInput.value = todayYMD();
+  }
+  // 初回ロード
+  loadList();
+})();
+
+function loadList(){
+  var dateVal = document.getElementById('targetDate').value;
+  if (!dateVal) { alert('日付を選択してください'); return; }
+
+  document.getElementById('loadingMsg').style.display = '';
+  google.script.run
+    .withSuccessHandler(function(res){
+      document.getElementById('loadingMsg').style.display = 'none';
+      DATA = res.items || [];
+      renderAll();
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('loadingMsg').style.display = 'none';
+      alert(err.message || err);
+    })
+    .api_getSecondaryApprovalList(dateVal);
+}
+
+function renderAll(){
+  // KPI
+  var total = DATA.length;
+  var approved = DATA.filter(function(d){ return d.status === 'approved'; }).length;
+  var approved2 = DATA.filter(function(d){ return !!d.approvedBy2; }).length;
+  var pending = DATA.filter(function(d){ return d.status === 'submitted'; }).length;
+
+  document.getElementById('kpiTotal').textContent = total;
+  document.getElementById('kpiApproved').textContent = approved;
+  document.getElementById('kpiApproved2').textContent = approved2;
+  document.getElementById('kpiPending').textContent = pending;
+
+  // Table
+  var tbody = document.getElementById('tbody');
+  tbody.innerHTML = '';
+
+  if (total === 0) {
+    tbody.innerHTML = '<tr><td colspan="9" class="muted">申請データがありません</td></tr>';
+    updateSelectedCount();
+    return;
+  }
+
+  DATA.forEach(function(d, i){
+    var isReady = (d.status === 'approved' && !d.approvedBy2);
+    var isDone = !!d.approvedBy2;
+    var isPending = (d.status === 'submitted');
+
+    var tr = document.createElement('tr');
+    if (isPending) tr.className = 'disabled';
+    if (isDone) tr.className = 'done';
+
+    var typeJa = d.requestType === 'overtime' ? '残業' : '休日出勤';
+
+    // チェックボックス
+    var cbHtml = isReady
+      ? '<input type="checkbox" class="row-cb" data-idx="'+i+'" onchange="updateSelectedCount()">'
+      : '';
+
+    // 一次承認
+    var approvedLabel = d.status === 'approved'
+      ? '<span class="pill ok">承認済</span>'
+      : '<span class="pill warn">未承認</span>';
+
+    // 二次承認
+    var approved2Label = isDone
+      ? '<span class="pill ok">承認済</span>'
+      : (isReady ? '<span class="pill info">未承認</span>' : '<span class="pill">-</span>');
+
+    // PDF
+    var pdfLabel = d.pdfFileId
+      ? '<a href="https://drive.google.com/file/d/'+escHtml(d.pdfFileId)+'/view" target="_blank" class="pill ok">開く</a>'
+      : '<span class="pill muted">-</span>';
+
+    // 操作
+    var actionHtml = '';
+    if (isDone) {
+      actionHtml = '<span class="pill ok">承認済</span>';
+    } else if (isReady) {
+      actionHtml = '<button class="btn-sm" onclick="singleApprove(\''+escHtml(d.requestId)+'\', '+i+', this)">二次承認</button>';
+    } else {
+      actionHtml = '<span class="pill muted">一次承認待ち</span>';
+    }
+
+    tr.innerHTML =
+      '<td>'+cbHtml+'</td>'+
+      '<td>'+escHtml(d.dept)+'</td>'+
+      '<td><b>'+escHtml(d.workerName)+'</b></td>'+
+      '<td>'+typeJa+'</td>'+
+      '<td>'+fmtMin(d.approvedMinutes)+'</td>'+
+      '<td>'+approvedLabel+'</td>'+
+      '<td>'+approved2Label+'</td>'+
+      '<td>'+pdfLabel+'</td>'+
+      '<td>'+actionHtml+'</td>';
+
+    tbody.appendChild(tr);
+  });
+
+  document.getElementById('selectAll').checked = false;
+  updateSelectedCount();
+}
+
+function getSelectedIds(){
+  var cbs = document.querySelectorAll('.row-cb:checked');
+  var ids = [];
+  cbs.forEach(function(cb){
+    var idx = Number(cb.dataset.idx);
+    if (DATA[idx]) ids.push(DATA[idx].requestId);
+  });
+  return ids;
+}
+
+function updateSelectedCount(){
+  var ids = getSelectedIds();
+  document.getElementById('selectedCount').textContent = ids.length;
+  document.getElementById('batchBtn').disabled = (ids.length === 0);
+}
+
+function toggleSelectAll(){
+  var checked = document.getElementById('selectAll').checked;
+  document.querySelectorAll('.row-cb').forEach(function(cb){ cb.checked = checked; });
+  updateSelectedCount();
+}
+
+function singleApprove(requestId, idx, btn){
+  btn.disabled = true;
+  btn.textContent = '処理中...';
+
+  // 楽観的UI更新
+  if (DATA[idx]) {
+    DATA[idx].approvedBy2 = '(処理中)';
+  }
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      if (res.ok) {
+        if (DATA[idx]) {
+          DATA[idx].approvedBy2 = res.approvedBy2 || '承認済';
+          DATA[idx].approvedAt2 = res.approvedAt2 || '';
+          DATA[idx].pdfFileId = ''; // PDF再生成中
+        }
+        renderAll();
+      } else {
+        alert(res.message || 'エラーが発生しました');
+        loadList();
+      }
+    })
+    .withFailureHandler(function(err){
+      alert(err.message || err);
+      loadList();
+    })
+    .api_secondaryApprove(requestId);
+}
+
+function batchApprove(){
+  var ids = getSelectedIds();
+  if (ids.length === 0) return;
+  if (!confirm(ids.length + '件を一括二次承認しますか？')) return;
+
+  document.getElementById('batchBtn').disabled = true;
+  document.getElementById('batchBtn').textContent = '処理中...';
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      document.getElementById('batchBtn').textContent = '一括二次承認';
+      if (res.ok) {
+        var failCount = 0;
+        (res.results || []).forEach(function(r){
+          if (!r.ok) failCount++;
+        });
+        if (failCount > 0) {
+          alert('一部エラー: ' + failCount + '件が失敗しました');
+        }
+        loadList(); // リロード
+      } else {
+        alert('エラーが発生しました');
+        loadList();
+      }
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('batchBtn').textContent = '一括二次承認';
+      alert(err.message || err);
+      loadList();
+    })
+    .api_secondaryApproveBatch(ids);
+}
+</script>
+</body>
+</html>

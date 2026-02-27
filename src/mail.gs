@@ -1,3 +1,48 @@
+// ====== 共通：対象日の全申請を取得（canceled以外） ======
+
+function listAllRequestsByDate_(dateObj) {
+  var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  var ymd = fmtDate_(dateObj, 'yyyy-MM-dd');
+  var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+
+  var out = [];
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+    if (!status || status === 'canceled') continue;
+
+    var targetDateVal = row[idx['targetDate']];
+    var targetYmd;
+    try {
+      targetYmd = targetDateVal instanceof Date
+        ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
+        : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+    } catch (e) { continue; }
+    if (targetYmd !== ymd) continue;
+
+    out.push({
+      requestId: normalize_(row[idx['requestId']]),
+      requestType: normalize_(row[idx['requestType(overtime/holiday)']]),
+      status: status,
+      dept: normalize_(row[idx['dept']]),
+      workerName: normalize_(row[idx['workerName']]),
+      workerEmail: normalize_(row[idx['workerEmail']]),
+      approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
+      submittedAt: row[idx['submittedAt']],
+      approvedAt: row[idx['approvedAt']],
+      approvedBy2: idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '',
+      pdfFileId: normalize_(row[idx['pdfFileId']]),
+      pdfGeneratedAt: row[idx['pdfGeneratedAt']],
+    });
+  }
+
+  out.sort(function(a, b) { return (a.dept + a.workerName).localeCompare(b.dept + b.workerName, 'ja'); });
+  return out;
+}
+
 // ====== 共通：対象日の承認済み申請を取得 ======
 
 function listApprovedRequestsByDate_(dateObj) {
@@ -128,14 +173,15 @@ function buildEveningMailBody_(dateObj) {
   const settings = getSettings_();
   const appUrl = normalize_(settings['APP_URL']) || '';
 
-  const items = listApprovedRequestsByDate_(dateObj);
+  const items = listAllRequestsByDate_(dateObj);
   const dateLabel = fmtDate_(dateObj, 'yyyy/MM/dd');
+  const dateParam = fmtDate_(dateObj, 'yyyy-MM-dd');
 
   if (items.length === 0) {
     return [
-      `【残業・休日出勤 承認時間（予定）報告】${dateLabel}`,
+      `【残業・休日出勤 申請状況報告】${dateLabel}`,
       '',
-      '本日分の「承認済み」申請はありません。',
+      '本日分の申請はありません。',
       '',
       appUrl ? `詳細（アプリ）：${appUrl}` : '',
     ].filter(Boolean).join('\n');
@@ -149,22 +195,29 @@ function buildEveningMailBody_(dateObj) {
   }
 
   const lines = [];
-  lines.push(`【残業・休日出勤 承認時間（予定）報告】${dateLabel}`);
+  lines.push(`【残業・休日出勤 申請状況報告】${dateLabel}`);
   lines.push('');
-  lines.push('承認済みの申請について、予定（承認）時間を報告します。');
+  lines.push('本日分の申請状況を報告します。');
   lines.push('');
 
   for (const [dept, arr] of groups.entries()) {
     lines.push(`■ ${dept}`);
     for (const it of arr) {
       const typeJa = it.requestType === 'overtime' ? '残業' : '休日出勤';
-      lines.push(`- ${it.workerName}：${typeJa} ${fmtMinutesJa_(it.approvedMinutes)}（承認済）`);
+      let statusLabel = '未承認';
+      if (it.approvedBy2) {
+        statusLabel = '二次承認済';
+      } else if (it.status === 'approved') {
+        statusLabel = '承認済';
+      }
+      lines.push(`- ${it.workerName}：${typeJa} ${fmtMinutesJa_(it.approvedMinutes)}（${statusLabel}）`);
     }
     lines.push('');
   }
 
   if (appUrl) {
     lines.push(`詳細（アプリ）：${appUrl}`);
+    lines.push(`二次承認ページ：${appUrl}?page=approve2&date=${dateParam}`);
     lines.push('');
   }
 
@@ -182,7 +235,7 @@ function sendEveningMail_() {
   if (!to) throw new Error('Settingsに HR_MAIL_TO が未設定です。');
 
   const now = new Date();
-  const subject = `【残業・休日出勤】承認時間（予定）報告 ${fmtDate_(now,'yyyy/MM/dd')}`;
+  const subject = `【残業・休日出勤】申請状況報告 ${fmtDate_(now,'yyyy/MM/dd')}`;
   const body = buildEveningMailBody_(now);
 
   GmailApp.sendEmail(to, subject, body);

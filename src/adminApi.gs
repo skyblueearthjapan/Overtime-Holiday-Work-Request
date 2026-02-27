@@ -435,11 +435,11 @@ function doGet(e) {
   }
 
   // ページ名のホワイトリスト（ここ以外は top に落とす）
-  const allowed = new Set(['top', 'approver', 'admin']);
+  const allowed = new Set(['top', 'approver', 'admin', 'approve2']);
   const safePage = allowed.has(page) ? page : 'top';
 
-  // admin のみ権限チェック（エラー時はフレンドリーな画面を返す）
-  if (safePage === 'admin') {
+  // admin / approve2 は権限チェック（エラー時はフレンドリーな画面を返す）
+  if (safePage === 'admin' || safePage === 'approve2') {
     const email = Session.getActiveUser().getEmail();
     const adminResult = isAdminWithDebug_(email);
     if (!adminResult.ok) {
@@ -478,6 +478,7 @@ function doGet(e) {
 
   const t = HtmlService.createTemplateFromFile(safePage);
   t.APP_URL = appUrl;
+  t.DATE_PARAM = (e && e.parameter && e.parameter.date) ? e.parameter.date : '';
 
   return t.evaluate()
     .setTitle('残業・休日出勤申請')

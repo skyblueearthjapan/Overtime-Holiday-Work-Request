@@ -534,6 +534,9 @@ function handleFormSubmit_(e) {
       orderNo3: enriched.orderNo3,
       customer3: enriched.customer3,
       product3: enriched.product3,
+      // 二次承認
+      approvedBy2: '',
+      approvedAt2: '',
       // その他
       hrMailSentAt: '',
       pdfGeneratedAt: '',
@@ -600,6 +603,9 @@ function appendRequestRow_(obj) {
     orderNo3: 'orderNo3',
     customer3: 'customer3',
     product3: 'product3',
+
+    approvedBy2: 'approvedBy2',
+    approvedAt2: 'approvedAt2',
 
     hrMailSentAt: 'hrMailSentAt',
     pdfGeneratedAt: 'pdfGeneratedAt',

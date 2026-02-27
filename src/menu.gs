@@ -92,7 +92,7 @@ function setupTriggers_() {
     .create();
 }
 
-// ====== トリガー作成（メール：夕方2回＋朝1回） ======
+// ====== トリガー作成（メール：夕方1回＋朝1回） ======
 
 function setupMailTriggers_() {
   const triggers = ScriptApp.getProjectTriggers();
@@ -104,20 +104,12 @@ function setupMailTriggers_() {
       && t.getEventType() === ScriptApp.EventType.CLOCK
   ).length;
 
-  // 夕方 17:10 + 18:10 の2本が必要（既に2本以上あればスキップ）
-  if (eveningCount < 2) {
+  // 夕方 18:10 の1本のみ（二次承認フローに合わせて統一）
+  if (eveningCount !== 1) {
     // 既存をすべて削除してから再作成（半端な状態を解消）
     triggers
       .filter(t => t.getHandlerFunction() === 'sendEveningMail_')
       .forEach(t => ScriptApp.deleteTrigger(t));
-
-    // 夕方 17:10（17時台）
-    ScriptApp.newTrigger('sendEveningMail_')
-      .timeBased()
-      .everyDays(1)
-      .atHour(17)
-      .nearMinute(10)
-      .create();
 
     // 夕方 18:10（18時台）
     ScriptApp.newTrigger('sendEveningMail_')
@@ -195,7 +187,7 @@ function setupAllTriggers_() {
   cleanupFormSubmitTriggers_(); // 旧フォーム個別トリガーを削除
   setupSyncTrigger_();          // マスタ転記（6:00）
   setupTriggers_();              // フォーム毎朝更新（6:30）
-  setupMailTriggers_();          // 夕方2回（17:10, 18:10）＋朝バッチ（7:10）
+  setupMailTriggers_();          // 夕方1回（18:10）＋朝バッチ（7:10）
   setupFormPollTrigger_();       // フォーム回答ポーリング（1分間隔）
   Logger.log('全トリガーをセットアップしました。');
 }

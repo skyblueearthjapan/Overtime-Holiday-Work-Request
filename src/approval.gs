@@ -427,3 +427,222 @@ function api_getApproverDepts() {
   }
   return { isAdmin: false, approvers: mine, currentEmail: emailLc };
 }
+
+// ====== 二次承認API ======
+
+/**
+ * 指定日の全申請一覧を取得（二次承認画面用）
+ * @param {string} dateYmd - 'yyyy-MM-dd'
+ */
+function api_getSecondaryApprovalList(dateYmd) {
+  assertAdmin_();
+
+  var d = new Date(dateYmd);
+  if (isNaN(d.getTime())) throw new Error('日付が不正です（yyyy-MM-dd）');
+
+  var ymd = fmtDate_(d, 'yyyy-MM-dd');
+  var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return { date: ymd, items: [] };
+
+  var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+  var out = [];
+
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+    if (!status || status === 'canceled') continue;
+
+    var targetDateVal = row[idx['targetDate']];
+    var targetYmd;
+    try {
+      targetYmd = targetDateVal instanceof Date
+        ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
+        : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+    } catch (e) { continue; }
+    if (targetYmd !== ymd) continue;
+
+    var submittedAtRaw = row[idx['submittedAt']];
+    var submittedAt = '';
+    if (submittedAtRaw instanceof Date) {
+      submittedAt = fmtDate_(submittedAtRaw, 'yyyy-MM-dd HH:mm');
+    } else if (submittedAtRaw) {
+      submittedAt = String(submittedAtRaw);
+    }
+
+    var approvedAtRaw = row[idx['approvedAt']];
+    var approvedAt = '';
+    if (approvedAtRaw instanceof Date) {
+      approvedAt = fmtDate_(approvedAtRaw, 'yyyy-MM-dd HH:mm');
+    } else if (approvedAtRaw) {
+      approvedAt = String(approvedAtRaw);
+    }
+
+    var approvedAt2Raw = idx['approvedAt2'] !== undefined ? row[idx['approvedAt2']] : '';
+    var approvedAt2 = '';
+    if (approvedAt2Raw instanceof Date) {
+      approvedAt2 = fmtDate_(approvedAt2Raw, 'yyyy-MM-dd HH:mm');
+    } else if (approvedAt2Raw) {
+      approvedAt2 = String(approvedAt2Raw);
+    }
+
+    out.push({
+      requestId: normalize_(row[idx['requestId']]),
+      requestType: normalize_(row[idx['requestType(overtime/holiday)']]),
+      status: status,
+      dept: normalize_(row[idx['dept']]),
+      workerName: normalize_(row[idx['workerName']]),
+      targetDate: targetYmd,
+      approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
+      submittedAt: submittedAt,
+      approvedBy: idx['approvedBy'] !== undefined ? normalize_(row[idx['approvedBy']]) : '',
+      approvedAt: approvedAt,
+      approvedBy2: idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '',
+      approvedAt2: approvedAt2,
+      pdfFileId: idx['pdfFileId'] !== undefined ? normalize_(row[idx['pdfFileId']]) : '',
+    });
+  }
+
+  // ソート: 二次未承認＆一次承認済みを先頭 → 部署 → 氏名
+  out.sort(function(a, b) {
+    var aReady = (a.status === 'approved' && !a.approvedBy2) ? 0 : 1;
+    var bReady = (b.status === 'approved' && !b.approvedBy2) ? 0 : 1;
+    if (aReady !== bReady) return aReady - bReady;
+    if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
+    return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
+  });
+
+  return { date: ymd, items: out };
+}
+
+/**
+ * 二次承認（個別）
+ * @param {string} requestId
+ */
+function api_secondaryApprove(requestId) {
+  var email = assertAdmin_();
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) throw new Error('Requestsが空です。');
+
+    var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+    var rowNo = -1;
+    var status = '';
+    var existingApprovedBy2 = '';
+
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i];
+      if (normalize_(row[idx['requestId']]) === requestId) {
+        rowNo = i + 2;
+        status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+        existingApprovedBy2 = idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '';
+        break;
+      }
+    }
+
+    if (rowNo === -1) throw new Error('requestIdが見つかりません。');
+    if (status !== 'approved') throw new Error('一次承認が完了していません（現在: ' + status + '）。');
+    if (existingApprovedBy2) return { ok: true, message: '既に二次承認済みです。' };
+
+    var now = new Date();
+    if (idx['approvedBy2'] !== undefined) sh.getRange(rowNo, idx['approvedBy2'] + 1).setValue(email);
+    if (idx['approvedAt2'] !== undefined) sh.getRange(rowNo, idx['approvedAt2'] + 1).setValue(now);
+
+    // PDF再生成トリガー: 既存PDFがあれば削除してpdfフィールドをクリア
+    clearExistingPdfForRegeneration_(sh, idx, values[rowNo - 2], rowNo);
+
+    SpreadsheetApp.flush();
+    return { ok: true, requestId: requestId, approvedBy2: email, approvedAt2: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * 二次承認（一括）
+ * @param {string[]} requestIds
+ */
+function api_secondaryApproveBatch(requestIds) {
+  if (!requestIds || requestIds.length === 0) return { ok: true, results: [] };
+  if (requestIds.length > 50) throw new Error('一括承認は50件までです。');
+
+  var email = assertAdmin_();
+
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return { ok: true, results: [] };
+
+    var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+    var now = new Date();
+    var results = [];
+    var targetSet = {};
+    for (var k = 0; k < requestIds.length; k++) targetSet[requestIds[k]] = true;
+
+    var pendingWrites = [];
+
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i];
+      var rid = normalize_(row[idx['requestId']]);
+      if (!rid || !targetSet[rid]) continue;
+
+      var rowNo = i + 2;
+      var status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+      var existingApprovedBy2 = idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '';
+
+      if (existingApprovedBy2) {
+        results.push({ requestId: rid, ok: true, message: '既に二次承認済み' });
+        delete targetSet[rid];
+        continue;
+      }
+      if (status !== 'approved') {
+        results.push({ requestId: rid, ok: false, error: '一次承認未完了' });
+        delete targetSet[rid];
+        continue;
+      }
+
+      pendingWrites.push({ rowNo: rowNo, rowIdx: i });
+      results.push({ requestId: rid, ok: true, approvedBy2: email, approvedAt2: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') });
+      delete targetSet[rid];
+    }
+
+    // 一括書き込み
+    var by2Col = idx['approvedBy2'] !== undefined ? idx['approvedBy2'] + 1 : -1;
+    var at2Col = idx['approvedAt2'] !== undefined ? idx['approvedAt2'] + 1 : -1;
+    for (var w = 0; w < pendingWrites.length; w++) {
+      var rn = pendingWrites[w].rowNo;
+      if (by2Col > 0) sh.getRange(rn, by2Col).setValue(email);
+      if (at2Col > 0) sh.getRange(rn, at2Col).setValue(now);
+
+      // PDF再生成トリガー
+      clearExistingPdfForRegeneration_(sh, idx, values[pendingWrites[w].rowIdx], rn);
+    }
+    if (pendingWrites.length > 0) SpreadsheetApp.flush();
+
+    for (var missing in targetSet) results.push({ requestId: missing, ok: false, error: '見つかりません' });
+    return { ok: true, results: results };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * 二次承認時に既存PDFをゴミ箱に移し、pdfフィールドをクリアして翌朝バッチで再生成させる
+ */
+function clearExistingPdfForRegeneration_(sh, idx, row, rowNo) {
+  var existingPdfId = idx['pdfFileId'] !== undefined ? normalize_(row[idx['pdfFileId']]) : '';
+  if (existingPdfId) {
+    try { DriveApp.getFileById(existingPdfId).setTrashed(true); } catch (e) {
+      Logger.log('旧PDF削除スキップ: ' + e.message);
+    }
+  }
+  if (idx['pdfGeneratedAt'] !== undefined) sh.getRange(rowNo, idx['pdfGeneratedAt'] + 1).setValue('');
+  if (idx['pdfFileId'] !== undefined) sh.getRange(rowNo, idx['pdfFileId'] + 1).setValue('');
+  if (idx['pdfFolderId'] !== undefined) sh.getRange(rowNo, idx['pdfFolderId'] + 1).setValue('');
+}
