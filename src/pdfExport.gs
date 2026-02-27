@@ -163,9 +163,22 @@ function generatePdfForRequest_(requestId) {
     var reasonText = buildReasonText_(reasonVal, reasonDetailVal);
     formSheet.getRange(PDF_MAP.reason).setValue(reasonText);
 
-    // 残業の開始時刻を直接書込（WorkLogsのTZバグ回避）
+    // 実績時刻を直接書込（WorkLogsのTZバグ回避）
     if (req.requestType === 'overtime') {
       formSheet.getRange(PDF_MAP.startAt).setValue('17:20');
+    } else if (req.requestType === 'holiday') {
+      // 休日出勤も残業と同様に直接書込（XLOOKUPのTZバグ回避）
+      var wlMap = buildWorkLogsMapByRequestId_();
+      var wl = wlMap.get(requestId) || {};
+      var hStartTime = extractHHmm_(wl.actualStartAt);
+      var hEndTime = extractHHmm_(wl.actualEndAt);
+      if (hStartTime) formSheet.getRange(PDF_MAP.startAt).setValue(hStartTime);
+      if (hEndTime) formSheet.getRange(PDF_MAP.endAt).setValue(hEndTime);
+      formSheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
+      formSheet.getRange(PDF_MAP.netMin).setValue(Number(wl.netMinutes || 0));
+      // 区分
+      var hMins = Number(req.approvedMinutes || 0);
+      formSheet.getRange(PDF_MAP.kubun).setValue(hMins <= 240 ? '半日' : '1日');
     }
 
     // 印鑑画像挿入（XLOOKUPでは画像挿入不可のため直接処理）
@@ -910,7 +923,16 @@ function debugStampData() {
 
 function extractHHmm_(val) {
   if (!val) return '';
-  if (val instanceof Date) return fmtDate_(val, 'HH:mm');
+  if (val instanceof Date) {
+    // GASがJST文字列をスプレッドシートTZで解釈してDate化するため、
+    // 同じTZで再フォーマットして元のHH:mmを復元する（TZバグ回避）
+    try {
+      var ssTz = getDb_().getSpreadsheetTimeZone();
+      return Utilities.formatDate(val, ssTz, 'HH:mm');
+    } catch (e) {
+      return fmtDate_(val, 'HH:mm');
+    }
+  }
   // JST文字列 "yyyy-MM-dd HH:mm:ss" や "HH:mm" 形式
   const s = String(val);
   const m = s.match(/(\d{1,2}:\d{2})/);

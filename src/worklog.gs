@@ -215,7 +215,11 @@ function api_markHolidayDone(requestId) {
     // actualStartAt は Date オブジェクトまたは JST 文字列のいずれか
     let start;
     if (startRaw instanceof Date) {
-      start = startRaw;
+      // TZバグ回避: GASがJST文字列をスプレッドシートTZで解釈してDate化するため、
+      // 同じTZで再フォーマットして元のJST文字列を復元 → JSTとして再パース
+      var ssTz = sh.getParent().getSpreadsheetTimeZone();
+      var startStr = Utilities.formatDate(startRaw, ssTz, "yyyy-MM-dd'T'HH:mm:ss");
+      start = new Date(startStr + '+09:00');
     } else if (startRaw) {
       // JST文字列 "yyyy-MM-dd HH:mm:ss" → +09:00 付きでパースして正しいUTCに
       start = new Date(String(startRaw).replace(' ', 'T') + '+09:00');
@@ -230,6 +234,7 @@ function api_markHolidayDone(requestId) {
     const netMinutes = Math.max(0, actualMinutes - breakMinutes);
 
     updateWorkLog_(requestId, {
+      actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'), // TZバグ回避: 正しいJST文字列で再保存
       actualEndAt:   fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'),
       actualMinutes: actualMinutes,
       breakMinutes: breakMinutes,
@@ -336,8 +341,21 @@ function api_getDashboard() {
     const nextMonday = new Date(monday);
     nextMonday.setDate(monday.getDate() + 7);
 
+    // 来週金曜まで祝日を含めて weekendEnd を拡張（隣接していなくても表示）
+    const nextFriday = new Date(monday);
+    nextFriday.setDate(monday.getDate() + 11); // 来週金曜
+    const calId = 'ja.japanese#holiday@group.v.calendar.google.com';
+    var hldays = getHolidaysFromCalendar_(calId, nextMonday, nextFriday);
+    if (hldays.length === 0) {
+      hldays = getKnownJapaneseHolidays_(nextMonday, nextFriday);
+    }
+    // 祝日が1つでもあれば来週金曜まで表示範囲を拡張
+    const weekendEndDate = hldays.length > 0
+      ? new Date(nextFriday.getTime() + 86400000) // nextFriday翌日（金曜を含むため+1日）
+      : nextMonday;
+
     const weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
-    const weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
+    const weekendEnd = fmtDate_(weekendEndDate, 'yyyy-MM-dd');
 
     const dayNames = ['日','月','火','水','木','金','土'];
     const overtime = [];
@@ -386,7 +404,7 @@ function api_getDashboard() {
 
       if (requestType === 'overtime' && targetDate === today) {
         overtime.push(item);
-      } else if (requestType === 'holiday' && targetDate >= weekendStart && targetDate <= weekendEnd) {
+      } else if (requestType === 'holiday' && targetDate >= (today < weekendStart ? today : weekendStart) && targetDate <= weekendEnd) {
         const d = new Date(targetDate + 'T00:00:00');
         item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
         holiday.push(item);

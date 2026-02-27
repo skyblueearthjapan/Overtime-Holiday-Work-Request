@@ -245,15 +245,24 @@ function api_getHolidayCandidateDates() {
     type: 'weekend'
   });
 
+  // 来週金曜まで祝日を検索（週末直後の連続祝日を拾うため）
+  const nextFriday = new Date(monday);
+  nextFriday.setDate(monday.getDate() + 11); // 来週金曜 = 月曜+11日
+
   // Googleカレンダーの日本の祝日を検索
   const calId = 'ja.japanese#holiday@group.v.calendar.google.com';
-  let holidays = getHolidaysFromCalendar_(calId, monday, sunday);
+  let holidays = getHolidaysFromCalendar_(calId, monday, nextFriday);
 
   // カレンダーAPIで取得できなければ振替休日ロジックで補完
   if (holidays.length === 0) {
-    holidays = getKnownJapaneseHolidays_(monday, sunday);
+    holidays = getKnownJapaneseHolidays_(monday, nextFriday);
   }
 
+  // 祝日マップを構築（date -> title）
+  const holidayMap = {};
+  holidays.forEach(function(h) { holidayMap[h.date] = h.title; });
+
+  // 今週〜来週金曜の祝日をすべて候補に追加（隣接していなくてもOK）
   holidays.forEach(function(h) {
     const existing = candidates.find(function(c) { return c.date === h.date; });
     if (existing) {
@@ -271,7 +280,9 @@ function api_getHolidayCandidateDates() {
   // 日付順でソート
   candidates.sort(function(a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
 
-  return candidates;
+  // 過去の日付は除外（その曜日を超えたら非表示）
+  const todayStr = fmtDate_(today);
+  return candidates.filter(function(c) { return c.date >= todayStr; });
 }
 
 /**
