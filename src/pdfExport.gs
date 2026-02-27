@@ -119,6 +119,16 @@ function generatePdfForRequest_(requestId) {
     const formSheet = tmpSs.getSheetByName('申請書フォーム');
     if (!formSheet) throw new Error('テンプレに「申請書フォーム」シートがありません。');
 
+    // 理由を直接書込（XLOOKUPでは理由列を正しく参照できない場合の保険）
+    const reasonVal = normalize_(req.reason || '');
+    const reasonDetailVal = normalize_(req.reasonDetail || '');
+    let reasonText = reasonVal;
+    if (reasonVal && reasonVal.indexOf('その他') >= 0 && reasonDetailVal) {
+      reasonText = 'その他: ' + reasonDetailVal;
+    }
+    formSheet.getRange(PDF_MAP.reason).setValue(reasonText || '');
+    SpreadsheetApp.flush();
+
     // 保存先フォルダ（targetDate基準で日付フォルダ）
     const targetDate = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
     const dateFolder = getOrCreateDateFolder_(rootFolderId, targetDate);
@@ -186,6 +196,8 @@ function exportSheetToPdfBlob_(spreadsheetId, sheetId, filename) {
 
 function getRequestFullData_(requestId) {
   const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  Logger.log('[PDF] Requests headers: ' + Object.keys(idx).join(', '));
+  Logger.log('[PDF] "reason" in idx? ' + (idx['reason'] !== undefined) + ', "reasonDetail" in idx? ' + (idx['reasonDetail'] !== undefined));
   const lastRow = sh.getLastRow();
   if (lastRow < 2) return null;
 
@@ -197,6 +209,7 @@ function getRequestFullData_(requestId) {
       for (const [key, col] of Object.entries(idx)) {
         data[key] = row[col];
       }
+      Logger.log('[PDF] Found request row=' + (i+2) + ', reason=' + JSON.stringify(data['reason']) + ', reasonDetail=' + JSON.stringify(data['reasonDetail']));
       return data;
     }
   }
@@ -350,11 +363,14 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   // 理由（定型理由 or 「その他: 補足理由」）
   const reason = normalize_(reqData['reason']);
   const reasonDetail = normalize_(reqData['reasonDetail']);
+  Logger.log('[PDF] reason=' + JSON.stringify(reason) + ', reasonDetail=' + JSON.stringify(reasonDetail));
+  Logger.log('[PDF] reqData keys=' + Object.keys(reqData).join(', '));
   let reasonText = reason;
   if (reason && reason.indexOf('その他') >= 0 && reasonDetail) {
     reasonText = 'その他: ' + reasonDetail;
   }
-  if (reasonText) sheet.getRange(PDF_MAP.reason).setValue(reasonText);
+  // 空でもsetValueして、テンプレのXLOOKUP数式をクリアする
+  sheet.getRange(PDF_MAP.reason).setValue(reasonText || '');
 
   // F34: 承認者（名前＋印鑑画像）
   const approvedBy = normalize_(reqData['approvedBy']);
