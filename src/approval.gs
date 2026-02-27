@@ -555,7 +555,9 @@ function api_getSecondaryApprovalList(dateYmd) {
  */
 function api_secondaryApprove(requestId) {
   var email = assertAdmin_();
+  var approvedAt2Str = '';
 
+  // ---- Phase 1: 二次承認書き込み（ロック内） ----
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -583,17 +585,36 @@ function api_secondaryApprove(requestId) {
     if (existingApprovedBy2) return { ok: true, message: '既に二次承認済みです。' };
 
     var now = new Date();
+    approvedAt2Str = fmtDate_(now, 'yyyy-MM-dd HH:mm:ss');
     if (idx['approvedBy2'] !== undefined) sh.getRange(rowNo, idx['approvedBy2'] + 1).setValue(email);
     if (idx['approvedAt2'] !== undefined) sh.getRange(rowNo, idx['approvedAt2'] + 1).setValue(now);
 
-    // PDF再生成トリガー: 既存PDFがあれば削除してpdfフィールドをクリア
+    // 既存PDFがあれば削除してpdfフィールドをクリア
     clearExistingPdfForRegeneration_(sh, idx, values[rowNo - 2], rowNo);
 
     SpreadsheetApp.flush();
-    return { ok: true, requestId: requestId, approvedBy2: email, approvedAt2: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') };
   } finally {
     lock.releaseLock();
   }
+
+  // ---- Phase 2: PDF即時再生成（ロック外 → generatePdfDirect_ が独自ロック取得） ----
+  var pdfResult = null;
+  try {
+    // ヘッダーキャッシュをクリア（approvedBy2書き込み後の最新データを読むため）
+    _headerCache = {};
+    pdfResult = generatePdfDirect_(requestId);
+    Logger.log('二次承認後PDF再生成成功: ' + JSON.stringify(pdfResult));
+  } catch (e) {
+    Logger.log('二次承認後PDF再生成エラー（後でバッチ再生成可）: ' + e.message);
+  }
+
+  return {
+    ok: true,
+    requestId: requestId,
+    approvedBy2: email,
+    approvedAt2: approvedAt2Str,
+    pdfRegenerated: pdfResult ? (pdfResult.ok || false) : false,
+  };
 }
 
 /**
@@ -605,9 +626,12 @@ function api_secondaryApproveBatch(requestIds) {
   if (requestIds.length > 50) throw new Error('一括承認は50件までです。');
 
   var email = assertAdmin_();
+  var pdfTargetIds = []; // PDF再生成が必要なrequestId一覧
 
+  // ---- Phase 1: 二次承認書き込み（ロック内） ----
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
+  var results = [];
   try {
     var { sh, idx } = ensureSecondaryApprovalColumns_();
     var lastRow = sh.getLastRow();
@@ -615,7 +639,6 @@ function api_secondaryApproveBatch(requestIds) {
 
     var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
     var now = new Date();
-    var results = [];
     var targetSet = {};
     for (var k = 0; k < requestIds.length; k++) targetSet[requestIds[k]] = true;
 
@@ -641,7 +664,7 @@ function api_secondaryApproveBatch(requestIds) {
         continue;
       }
 
-      pendingWrites.push({ rowNo: rowNo, rowIdx: i });
+      pendingWrites.push({ rowNo: rowNo, rowIdx: i, requestId: rid });
       results.push({ requestId: rid, ok: true, approvedBy2: email, approvedAt2: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') });
       delete targetSet[rid];
     }
@@ -654,16 +677,31 @@ function api_secondaryApproveBatch(requestIds) {
       if (by2Col > 0) sh.getRange(rn, by2Col).setValue(email);
       if (at2Col > 0) sh.getRange(rn, at2Col).setValue(now);
 
-      // PDF再生成トリガー
       clearExistingPdfForRegeneration_(sh, idx, values[pendingWrites[w].rowIdx], rn);
+      pdfTargetIds.push(pendingWrites[w].requestId);
     }
     if (pendingWrites.length > 0) SpreadsheetApp.flush();
 
     for (var missing in targetSet) results.push({ requestId: missing, ok: false, error: '見つかりません' });
-    return { ok: true, results: results };
   } finally {
     lock.releaseLock();
   }
+
+  // ---- Phase 2: PDF即時再生成（ロック外） ----
+  if (pdfTargetIds.length > 0) {
+    _headerCache = {};
+    for (var p = 0; p < pdfTargetIds.length; p++) {
+      try {
+        generatePdfDirect_(pdfTargetIds[p]);
+        Logger.log('一括二次承認PDF再生成成功: ' + pdfTargetIds[p]);
+      } catch (e) {
+        Logger.log('一括二次承認PDF再生成エラー(' + pdfTargetIds[p] + '): ' + e.message);
+      }
+      if (pdfTargetIds.length > 5) Utilities.sleep(500);
+    }
+  }
+
+  return { ok: true, results: results };
 }
 
 /**
