@@ -153,14 +153,23 @@ function api_markOvertimeDone(requestId) {
     });
     SpreadsheetApp.flush(); // PDF生成前にWorkLogs書込を確定
 
+    // TZバグ回避: WorkLogsを再読み込みせず、計算済みの正しい値を直接PDFに渡す
+    const wlOverride = {
+      actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(now,   'yyyy-MM-dd HH:mm:ss'),
+      actualMinutes: actualMinutes,
+      breakMinutes:  breakMinutes,
+      netMinutes:    netMinutes,
+    };
+
     // 承認済みならPDF生成（失敗してもWorkLogs更新は成功扱い）
     let pdf = null;
     if (req.status === 'approved') {
       try {
         const useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
         pdf = useDirect
-          ? generatePdfDirect_(requestId)
-          : generatePdfForRequest_(requestId);
+          ? generatePdfDirect_(requestId, wlOverride)
+          : generatePdfForRequest_(requestId, wlOverride);
       } catch (pdfErr) {
         console.warn('PDF生成警告（残業）: ' + pdfErr.message);
       }
@@ -252,14 +261,23 @@ function api_markHolidayDone(requestId) {
     });
     SpreadsheetApp.flush(); // PDF生成前にWorkLogs書込を確定
 
+    // TZバグ回避: WorkLogsを再読み込みせず、計算済みの正しい値を直接PDFに渡す
+    const wlOverride = {
+      actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(now,   'yyyy-MM-dd HH:mm:ss'),
+      actualMinutes: actualMinutes,
+      breakMinutes:  breakMinutes,
+      netMinutes:    netMinutes,
+    };
+
     // 承認済みならPDF生成（失敗してもWorkLogs更新は成功扱い）
     let pdf = null;
     if (req.status === 'approved') {
       try {
         const useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
         pdf = useDirect
-          ? generatePdfDirect_(requestId)
-          : generatePdfForRequest_(requestId);
+          ? generatePdfDirect_(requestId, wlOverride)
+          : generatePdfForRequest_(requestId, wlOverride);
       } catch (pdfErr) {
         console.warn('PDF生成警告（休日）: ' + pdfErr.message);
       }

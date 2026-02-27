@@ -119,7 +119,7 @@ function getOrCreateDateFolder_(rootFolderId, dateObj) {
 // テンプレSSをコピー → 操作!B3 に requestId セット → 申請書フォームシートだけPDF出力
 // → Drive日付フォルダに保存 → Requests に pdfGeneratedAt/pdfFileId/pdfFolderId を記録
 
-function generatePdfForRequest_(requestId) {
+function generatePdfForRequest_(requestId, workLogOverride) {
   const req = getRequestById_(requestId);
   if (!req) throw new Error('申請が見つかりません。');
   if (req.status !== 'approved') throw new Error('未承認のためPDF生成できません。');
@@ -164,8 +164,8 @@ function generatePdfForRequest_(requestId) {
     formSheet.getRange(PDF_MAP.reason).setValue(reasonText);
 
     // 実績時刻を直接書込（WorkLogsのTZバグ回避）
-    var wlMap = buildWorkLogsMapByRequestId_();
-    var wl = wlMap.get(requestId) || {};
+    // workLogOverride が渡された場合はWorkLogsを再読み込みせず、計算済みの正しい値を使用
+    var wl = workLogOverride || (buildWorkLogsMapByRequestId_().get(requestId) || {});
     if (req.requestType === 'overtime') {
       formSheet.getRange(PDF_MAP.startAt).setValue('17:20');
       var oEndTime = extractHHmm_(wl.actualEndAt);
@@ -319,7 +319,7 @@ function getRequestFullData_(requestId) {
 
 // ====== PDF直接書込方式（XLOOKUP不要、PDF_MAPでセルに直接値を書く） ======
 
-function generatePdfDirect_(requestId) {
+function generatePdfDirect_(requestId, workLogOverride) {
   const req = getRequestFullData_(requestId);
   if (!req) throw new Error('申請が見つかりません。');
 
@@ -351,7 +351,7 @@ function generatePdfDirect_(requestId) {
     const formSheet = tmpSs.getSheetByName('申請書フォーム');
     if (!formSheet) throw new Error('テンプレに「申請書フォーム」シートがありません。');
 
-    fillPdfTemplate_(formSheet, req, requestId);
+    fillPdfTemplate_(formSheet, req, requestId, workLogOverride);
     SpreadsheetApp.flush();
 
     // 保存先フォルダ（targetDate基準で日付フォルダ）
@@ -393,16 +393,15 @@ function generatePdfDirect_(requestId) {
 
 // ====== 申請書フォームへのセル直接書込 ======
 
-function fillPdfTemplate_(sheet, reqData, requestId) {
+function fillPdfTemplate_(sheet, reqData, requestId, workLogOverride) {
   const now = new Date();
   const requestType = normalize_(reqData['requestType(overtime/holiday)']);
   const targetDateVal = reqData['targetDate'];
   const targetDate = targetDateVal instanceof Date ? targetDateVal : new Date(targetDateVal);
   const typeLabel = requestType === 'overtime' ? '残業' : '休日出勤';
 
-  // WorkLogs データ取得
-  const wlMap = buildWorkLogsMapByRequestId_();
-  const wl = wlMap.get(requestId) || {};
+  // WorkLogs データ取得（workLogOverride が渡された場合は再読み込み不要）
+  const wl = workLogOverride || (buildWorkLogsMapByRequestId_().get(requestId) || {});
 
   const settings = getSettings_();
 
