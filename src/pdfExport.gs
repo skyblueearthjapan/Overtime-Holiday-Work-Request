@@ -90,6 +90,8 @@ function buildReasonText_(reason, reasonDetail) {
   var r = reason || '';
   var d = reasonDetail || '';
   if (!r && !d) return '';
+  // PDF表示用：「その他（→補足理由必須）」→「その他」に短縮
+  r = r.replace(/[（(][^）)]*補足理由[^）)]*[）)]/g, '').trim();
   // 「その他」系の理由 → 補足理由を結合
   if (r.indexOf('その他') >= 0 && d) {
     return r + '\n' + d;
@@ -175,7 +177,7 @@ function generatePdfForRequest_(requestId) {
       if (stampBlob) {
         try {
           const stampSize = 270; // 区分印鑑を大きく（3倍）
-          const img = formSheet.insertImage(stampBlob, 6, 2, 0, 0); // F2起点（上に2段）
+          const img = formSheet.insertImage(stampBlob, 6, 1, 0, 0); // F1起点（最上段）
           img.setWidth(stampSize).setHeight(stampSize);
         } catch (e) { Logger.log('区分印鑑挿入エラー: ' + e.message); }
       }
@@ -399,7 +401,7 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
     const stampBlob = getStampBlob_(stampTypeId);
     if (stampBlob) {
       const stampSize = 270; // 区分印鑑を大きく（3倍）
-      const img = sheet.insertImage(stampBlob, 6, 2, 0, 0); // F2起点（上に2段）
+      const img = sheet.insertImage(stampBlob, 6, 1, 0, 0); // F1起点（最上段）
       img.setWidth(stampSize).setHeight(stampSize);
     }
   } else {
