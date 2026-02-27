@@ -204,10 +204,13 @@ function addDatePrefill_(formResponse, form, questionTitle, targetDateStr) {
   let d;
   if (targetDateStr) {
     // 'yyyy-MM-dd' 形式を想定
+    // TZバグ回避: 正午に設定することでUTC/JST どちらで日付部分を取得しても同日になる
+    // (例: 2026-03-01 12:00 JST = 2026-03-01 03:00 UTC → どちらもMarch 1)
     const parts = String(targetDateStr).split('-');
-    d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]), 12, 0, 0);
   } else {
-    d = new Date();
+    var now = new Date();
+    d = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 12, 0, 0);
   }
 
   const itemResponse = item.asDateItem().createResponse(d);
