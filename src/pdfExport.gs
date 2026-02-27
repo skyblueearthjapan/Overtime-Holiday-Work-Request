@@ -41,7 +41,7 @@ function getStampBlob_(fileId) {
   // 大きい場合はDriveサムネイルで縮小取得
   try {
     Logger.log('印鑑画像が大きいためサムネイル取得: fileId=' + fileId);
-    var url = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=200';
+    var url = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=400';
     var res = UrlFetchApp.fetch(url, {
       headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
       muteHttpExceptions: true,
@@ -169,12 +169,22 @@ function generatePdfForRequest_(requestId) {
       const stampBlob = getStampBlob_(stampTypeId);
       if (stampBlob) {
         try {
-          const img = formSheet.insertImage(stampBlob, 6, 4); // F4: 区分印鑑
-          img.setWidth(60).setHeight(60);
+          const stampSize = 90; // 区分印鑑を大きく
+          const colW = formSheet.getColumnWidth(6);
+          const rowH = formSheet.getRowHeight(4);
+          const offX = Math.max(0, Math.floor((colW - stampSize) / 2));
+          const offY = Math.max(0, Math.floor((rowH - stampSize) / 2));
+          const img = formSheet.insertImage(stampBlob, 6, 4, offX, offY); // F4: 区分印鑑
+          img.setWidth(stampSize).setHeight(stampSize);
         } catch (e) { Logger.log('区分印鑑挿入エラー: ' + e.message); }
       }
+    } else {
+      // 印鑑画像がない場合、テキストのフォントを大きくする
+      try {
+        formSheet.getRange('F4').setFontSize(18).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
+      } catch (e) { /* ignore */ }
     }
-    // 承認者印鑑
+    // 承認者印鑑（メールアドレスは書き込まない）
     const approvedBy = req.approvedBy || '';
     if (approvedBy) {
       const approverStampId = lookupStampFileIdByEmail_(approvedBy);
@@ -182,8 +192,13 @@ function generatePdfForRequest_(requestId) {
         const blob = getStampBlob_(approverStampId);
         if (blob) {
           try {
-            const img = formSheet.insertImage(blob, 6, 34); // F34
-            img.setWidth(50).setHeight(50);
+            const aStampSize = 55;
+            const aColW = formSheet.getColumnWidth(6);
+            const aRowH = formSheet.getRowHeight(34);
+            const aOffX = Math.max(0, Math.floor((aColW - aStampSize) / 2));
+            const aOffY = Math.max(0, Math.floor((aRowH - aStampSize) / 2));
+            const img = formSheet.insertImage(blob, 6, 34, aOffX, aOffY); // F34 中央配置
+            img.setWidth(aStampSize).setHeight(aStampSize);
           } catch (e) { Logger.log('承認者印鑑挿入エラー: ' + e.message); }
         }
       }
@@ -380,9 +395,17 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   if (stampTypeId) {
     const stampBlob = getStampBlob_(stampTypeId);
     if (stampBlob) {
-      const img = sheet.insertImage(stampBlob, 6, 4); // F4
-      img.setWidth(60).setHeight(60);
+      const stampSize = 90; // 区分印鑑を大きく
+      const colW = sheet.getColumnWidth(6);
+      const rowH = sheet.getRowHeight(4);
+      const offX = Math.max(0, Math.floor((colW - stampSize) / 2));
+      const offY = Math.max(0, Math.floor((rowH - stampSize) / 2));
+      const img = sheet.insertImage(stampBlob, 6, 4, offX, offY); // F4 中央配置
+      img.setWidth(stampSize).setHeight(stampSize);
     }
+  } else {
+    // 印鑑画像がない場合、テキストのフォントを大きくする
+    sheet.getRange(PDF_MAP.typeLabelBig).setFontSize(18).setFontWeight('bold').setHorizontalAlignment('center').setVerticalAlignment('middle');
   }
 
   // 区分
@@ -429,30 +452,38 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   // 空でもsetValueして、テンプレのXLOOKUP数式をクリアする
   sheet.getRange(PDF_MAP.reason).setValue(buildReasonText_(reason, reasonDetail));
 
-  // F34: 承認者（名前＋印鑑画像）
+  // F34: 承認者（印鑑画像のみ、メールアドレスは書き込まない）
   const approvedBy = normalize_(reqData['approvedBy']);
   if (approvedBy) {
-    sheet.getRange(PDF_MAP.approverBox).setValue(approvedBy);
     const approverStampId = lookupStampFileIdByEmail_(approvedBy);
     if (approverStampId) {
       const blob = getStampBlob_(approverStampId);
       if (blob) {
-        const img = sheet.insertImage(blob, 6, 34); // F34
-        img.setWidth(50).setHeight(50);
+        const aStampSize = 55;
+        const aColW = sheet.getColumnWidth(6);
+        const aRowH = sheet.getRowHeight(34);
+        const aOffX = Math.max(0, Math.floor((aColW - aStampSize) / 2));
+        const aOffY = Math.max(0, Math.floor((aRowH - aStampSize) / 2));
+        const img = sheet.insertImage(blob, 6, 34, aOffX, aOffY); // F34 中央配置
+        img.setWidth(aStampSize).setHeight(aStampSize);
       }
     }
   }
 
-  // G34: 2次承認者（印鑑画像）※将来の2次承認フロー実装時に有効化
+  // G34: 2次承認者（印鑑画像のみ）※将来の2次承認フロー実装時に有効化
   const approvedBy2 = normalize_(reqData['approvedBy2'] || '');
   if (approvedBy2) {
-    sheet.getRange(PDF_MAP.approverBox2).setValue(approvedBy2);
     const approver2StampId = lookupStampFileIdByEmail_(approvedBy2);
     if (approver2StampId) {
       const blob = getStampBlob_(approver2StampId);
       if (blob) {
-        const img = sheet.insertImage(blob, 7, 34); // G34
-        img.setWidth(50).setHeight(50);
+        const a2StampSize = 55;
+        const a2ColW = sheet.getColumnWidth(7);
+        const a2RowH = sheet.getRowHeight(34);
+        const a2OffX = Math.max(0, Math.floor((a2ColW - a2StampSize) / 2));
+        const a2OffY = Math.max(0, Math.floor((a2RowH - a2StampSize) / 2));
+        const img = sheet.insertImage(blob, 7, 34, a2OffX, a2OffY); // G34 中央配置
+        img.setWidth(a2StampSize).setHeight(a2StampSize);
       }
     }
   }
