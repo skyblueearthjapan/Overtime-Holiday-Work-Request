@@ -151,6 +151,7 @@ function api_markOvertimeDone(requestId) {
       updatedAt: fmtDate_(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
+    SpreadsheetApp.flush(); // PDF生成前にWorkLogs書込を確定
 
     // 承認済みならPDF生成（失敗してもWorkLogs更新は成功扱い）
     let pdf = null;
@@ -249,6 +250,7 @@ function api_markHolidayDone(requestId) {
       updatedAt: fmtDate_(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
+    SpreadsheetApp.flush(); // PDF生成前にWorkLogs書込を確定
 
     // 承認済みならPDF生成（失敗してもWorkLogs更新は成功扱い）
     let pdf = null;

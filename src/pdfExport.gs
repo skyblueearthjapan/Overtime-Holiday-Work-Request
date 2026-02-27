@@ -164,12 +164,16 @@ function generatePdfForRequest_(requestId) {
     formSheet.getRange(PDF_MAP.reason).setValue(reasonText);
 
     // 実績時刻を直接書込（WorkLogsのTZバグ回避）
+    var wlMap = buildWorkLogsMapByRequestId_();
+    var wl = wlMap.get(requestId) || {};
     if (req.requestType === 'overtime') {
       formSheet.getRange(PDF_MAP.startAt).setValue('17:20');
+      var oEndTime = extractHHmm_(wl.actualEndAt);
+      if (oEndTime) formSheet.getRange(PDF_MAP.endAt).setValue(oEndTime);
+      formSheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
+      formSheet.getRange(PDF_MAP.netMin).setValue(Number(wl.netMinutes || 0));
     } else if (req.requestType === 'holiday') {
       // 休日出勤も残業と同様に直接書込（XLOOKUPのTZバグ回避）
-      var wlMap = buildWorkLogsMapByRequestId_();
-      var wl = wlMap.get(requestId) || {};
       var hStartTime = extractHHmm_(wl.actualStartAt);
       var hEndTime = extractHHmm_(wl.actualEndAt);
       if (hStartTime) formSheet.getRange(PDF_MAP.startAt).setValue(hStartTime);
