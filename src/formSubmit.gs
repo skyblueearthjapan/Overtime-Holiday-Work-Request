@@ -608,12 +608,26 @@ function appendRequestRow_(obj) {
     exportError: 'exportError',
   };
 
+  // 不足ヘッダーを自動追加（reasonDetail等がシートにない場合）
+  let headerChanged = false;
+  for (const [prop, headerName] of Object.entries(keyMap)) {
+    if (idx[headerName] === undefined) {
+      const newCol = header.length;
+      sh.getRange(1, newCol + 1).setValue(headerName);
+      header.push(headerName);
+      idx[headerName] = newCol;
+      headerChanged = true;
+      Logger.log('Requests: ヘッダー自動追加 [' + headerName + '] → 列' + (newCol + 1));
+    }
+  }
+  if (headerChanged) SpreadsheetApp.flush();
+
   // 1行分の配列をヘッダ長で作り、該当キーだけ埋める
   const row = new Array(header.length).fill('');
 
   for (const [prop, headerName] of Object.entries(keyMap)) {
     const col = idx[headerName];
-    if (col === undefined) continue; // 存在しない列はスキップ（V1の柔軟性）
+    if (col === undefined) continue;
     row[col] = obj[prop] ?? '';
   }
 

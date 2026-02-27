@@ -26,15 +26,32 @@ const PDF_MAP = {
 
 /**
  * Drive上の画像ファイルIDからBlobを取得（存在しなければnull）
+ * 大きい画像はDriveサムネイルAPIで縮小して取得（2MB/100万px制限回避）
  */
 function getStampBlob_(fileId) {
   if (!fileId) return null;
   try {
-    return DriveApp.getFileById(fileId).getBlob();
+    var blob = DriveApp.getFileById(fileId).getBlob();
+    // 2MB未満ならそのまま返す
+    if (blob.getBytes().length < 2 * 1024 * 1024) return blob;
   } catch (e) {
     Logger.log('印鑑画像取得エラー (fileId=' + fileId + '): ' + e.message);
     return null;
   }
+  // 大きい場合はDriveサムネイルで縮小取得
+  try {
+    Logger.log('印鑑画像が大きいためサムネイル取得: fileId=' + fileId);
+    var url = 'https://drive.google.com/thumbnail?id=' + fileId + '&sz=200';
+    var res = UrlFetchApp.fetch(url, {
+      headers: { Authorization: 'Bearer ' + ScriptApp.getOAuthToken() },
+      muteHttpExceptions: true,
+    });
+    if (res.getResponseCode() === 200) return res.getBlob();
+    Logger.log('サムネイル取得失敗: HTTP ' + res.getResponseCode());
+  } catch (e) {
+    Logger.log('サムネイル取得エラー: ' + e.message);
+  }
+  return null;
 }
 
 /**
@@ -450,7 +467,7 @@ function batchGeneratePdfs_(dateObj) {
 
   // Settings で直接書込方式かXLOOKUP方式か判定
   const settings = getSettings_();
-  const useDirect = normalize_(settings['PDF_MODE']) === 'direct';
+  const useDirect = normalize_(settings['PDF_MODE']).indexOf('direct') >= 0;
 
   for (const it of items) {
     if (it.pdfFileId) {
@@ -612,6 +629,74 @@ function debugPdfReason() {
   }
 
   Logger.log('\n===== 診断完了 =====');
+}
+
+// ====== PDF強制再生成（最新の承認済み申請、手動実行用） ======
+
+function forceRegeneratePdf() {
+  Logger.log('===== PDF強制再生成 =====');
+
+  // 最新の承認済み申請を探す
+  var reqSh = requireSheet_('Requests');
+  var headers = reqSh.getRange(1, 1, 1, reqSh.getLastColumn()).getValues()[0];
+  var normH = headers.map(function(h) { return normalize_(h); });
+  var idx = {};
+  normH.forEach(function(h, i) { if (h) idx[h] = i; });
+
+  var statusCol = idx['status(submitted/approved/canceled)'];
+  var ridCol = idx['requestId'];
+  var pdfAtCol = idx['pdfGeneratedAt'];
+  var pdfIdCol = idx['pdfFileId'];
+  var pdfFolderCol = idx['pdfFolderId'];
+
+  var lastRow = reqSh.getLastRow();
+  if (lastRow < 2) { Logger.log('Requestsにデータなし'); return; }
+
+  var data = reqSh.getRange(2, 1, lastRow - 1, reqSh.getLastColumn()).getValues();
+  var targetRow = -1;
+  var requestId = '';
+
+  // 最新から逆順で承認済みを探す
+  for (var r = data.length - 1; r >= 0; r--) {
+    if (normalize_(data[r][statusCol]) === 'approved') {
+      targetRow = r + 2;
+      requestId = normalize_(data[r][ridCol]);
+      Logger.log('対象: 行' + targetRow + ' requestId=' + requestId);
+      Logger.log('  reason=[' + data[r][idx['reason']] + ']');
+      Logger.log('  reasonDetail=[' + data[r][idx['reasonDetail']] + ']');
+      Logger.log('  approvedBy=[' + data[r][idx['approvedBy']] + ']');
+      Logger.log('  既存pdfFileId=[' + data[r][pdfIdCol] + ']');
+      break;
+    }
+  }
+
+  if (targetRow < 0) { Logger.log('承認済み申請が見つかりません'); return; }
+
+  // pdfGeneratedAt / pdfFileId / pdfFolderId をクリア（再生成を許可）
+  if (pdfAtCol !== undefined) reqSh.getRange(targetRow, pdfAtCol + 1).setValue('');
+  if (pdfIdCol !== undefined) reqSh.getRange(targetRow, pdfIdCol + 1).setValue('');
+  if (pdfFolderCol !== undefined) reqSh.getRange(targetRow, pdfFolderCol + 1).setValue('');
+  SpreadsheetApp.flush();
+  Logger.log('pdfGeneratedAt/pdfFileId/pdfFolderIdをクリア → 再生成開始');
+
+  // PDF_MODE に応じて再生成
+  var settings = getSettings_();
+  var useDirect = normalize_(settings['PDF_MODE']).indexOf('direct') >= 0;
+  Logger.log('PDF_MODE: [' + (settings['PDF_MODE'] || '(未設定→XLOOKUP)') + '] → ' + (useDirect ? 'Direct方式' : 'XLOOKUP方式'));
+
+  try {
+    var result;
+    if (useDirect) {
+      result = generatePdfDirect_(requestId);
+    } else {
+      result = generatePdfForRequest_(requestId);
+    }
+    Logger.log('再生成成功: ' + JSON.stringify(result));
+  } catch (e) {
+    Logger.log('再生成エラー: ' + e.message + '\n' + e.stack);
+  }
+
+  Logger.log('===== 完了 =====');
 }
 
 // ====== 診断: 印鑑データのデバッグ（手動実行用） ======

@@ -147,7 +147,7 @@ function api_markOvertimeDone(requestId) {
     let pdf = null;
     if (req.status === 'approved') {
       try {
-        const useDirect = normalize_(getSettings_()['PDF_MODE']) === 'direct';
+        const useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
         pdf = useDirect
           ? generatePdfDirect_(requestId)
           : generatePdfForRequest_(requestId);
@@ -240,7 +240,7 @@ function api_markHolidayDone(requestId) {
     let pdf = null;
     if (req.status === 'approved') {
       try {
-        const useDirect = normalize_(getSettings_()['PDF_MODE']) === 'direct';
+        const useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
         pdf = useDirect
           ? generatePdfDirect_(requestId)
           : generatePdfForRequest_(requestId);
