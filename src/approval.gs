@@ -172,7 +172,7 @@ function api_getApproverDashboard(deptsOrDept) {
     for (let r = 1; r < values.length; r++) {
       const row = values[r];
       const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
-      if (!status || status === 'canceled') continue;
+      if (!status) continue;
 
       const rowDept = normalize_(row[idx['dept']]);
       if (allowedDepts && !allowedDepts.has(rowDept)) continue;
@@ -200,6 +200,9 @@ function api_getApproverDashboard(deptsOrDept) {
         submittedAt = String(submittedAtRaw);
       }
 
+      // 未処理の過去申請にはアラームフラグ
+      var isOverdue = false;
+
       const item = {
         requestId: requestId || '',
         requestType: requestType || '',
@@ -210,14 +213,51 @@ function api_getApproverDashboard(deptsOrDept) {
         targetDateLabel: '',
         approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
         submittedAt: submittedAt,
+        isOverdue: false,
       };
 
-      if (requestType === 'overtime' && targetDate === today) {
-        overtime.push(item);
-      } else if (requestType === 'holiday' && targetDate >= weekendStart && targetDate <= weekendEnd) {
-        const d = new Date(targetDate + 'T00:00:00');
-        item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
-        holiday.push(item);
+      if (requestType === 'overtime') {
+        if (status === 'submitted') {
+          // 未処理: targetDateが今日以前なら全て表示（過去分はアラーム）
+          if (targetDate <= today) {
+            if (targetDate < today) {
+              item.isOverdue = true;
+            }
+            overtime.push(item);
+          }
+        } else {
+          // approved/canceled: 当日のみ表示
+          if (targetDate === today) {
+            overtime.push(item);
+          }
+        }
+      } else if (requestType === 'holiday') {
+        if (status === 'submitted') {
+          // 未処理: targetDateが今日以前 or 今週末範囲なら表示
+          if (targetDate <= today) {
+            if (targetDate < today) {
+              item.isOverdue = true;
+            }
+            const d = new Date(targetDate + 'T00:00:00');
+            item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+            holiday.push(item);
+          } else if (targetDate >= weekendStart && targetDate <= weekendEnd) {
+            const d = new Date(targetDate + 'T00:00:00');
+            item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+            holiday.push(item);
+          }
+        } else {
+          // approved/canceled: 当日 or 今週末範囲で当日のみ
+          if (targetDate === today) {
+            const d = new Date(targetDate + 'T00:00:00');
+            item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+            holiday.push(item);
+          } else if (targetDate >= weekendStart && targetDate <= weekendEnd) {
+            const d = new Date(targetDate + 'T00:00:00');
+            item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+            holiday.push(item);
+          }
+        }
       }
     }
 
@@ -289,6 +329,46 @@ function api_approveRequest(requestId) {
     if (idx['approvedBy'] !== undefined) sh.getRange(rowNo, idx['approvedBy']+1).setValue(email);
 
     return { ok: true, requestId, approvedBy: email, approvedAt: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ====== 却下API ======
+
+function api_rejectRequest(requestId) {
+  var email = Session.getActiveUser().getEmail() || 'unknown';
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) throw new Error('Requestsが空です。');
+
+    var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+    var rowNo = -1;
+    var dept = '';
+    var status = '';
+
+    for (var i = 0; i < values.length; i++) {
+      var row = values[i];
+      if (normalize_(row[idx['requestId']]) === requestId) {
+        rowNo = i + 2;
+        dept = normalize_(row[idx['dept']]);
+        status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+        break;
+      }
+    }
+    if (rowNo === -1) throw new Error('requestIdが見つかりません。');
+    if (!canApproveDept_(email, dept)) throw new Error('この申請の承認権限がありません。');
+    if (status !== 'submitted') throw new Error('未承認状態でのみ却下可能です（現在: ' + status + '）。');
+
+    var now = new Date();
+    sh.getRange(rowNo, idx['status(submitted/approved/canceled)'] + 1).setValue('canceled');
+    if (idx['approvedBy'] !== undefined) sh.getRange(rowNo, idx['approvedBy'] + 1).setValue(email + '(却下)');
+    if (idx['approvedAt'] !== undefined) sh.getRange(rowNo, idx['approvedAt'] + 1).setValue(now);
+
+    return { ok: true, requestId: requestId };
   } finally {
     lock.releaseLock();
   }
@@ -487,6 +567,10 @@ function api_getSecondaryApprovalList(dateYmd) {
     var status = normalize_(row[idx['status(submitted/approved/canceled)']]);
     if (!status || status === 'canceled') continue;
 
+    // 二次承認済みはスキップ（非表示）
+    var approvedBy2Val = idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '';
+    if (approvedBy2Val) continue;
+
     var targetDateVal = row[idx['targetDate']];
     var targetYmd;
     try {
@@ -531,7 +615,7 @@ function api_getSecondaryApprovalList(dateYmd) {
       submittedAt: submittedAt,
       approvedBy: idx['approvedBy'] !== undefined ? normalize_(row[idx['approvedBy']]) : '',
       approvedAt: approvedAt,
-      approvedBy2: idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '',
+      approvedBy2: approvedBy2Val,
       approvedAt2: approvedAt2,
       pdfFileId: idx['pdfFileId'] !== undefined ? normalize_(row[idx['pdfFileId']]) : '',
     });

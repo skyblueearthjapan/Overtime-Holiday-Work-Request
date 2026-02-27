@@ -411,6 +411,9 @@ function api_getDashboard() {
       const actualEndAt = wl.actualEndAt instanceof Date
         ? fmtDate_(wl.actualEndAt, 'yyyy-MM-dd HH:mm:ss') : String(wl.actualEndAt || '');
 
+      // 二次承認状態を取得
+      const approvedBy2 = idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '';
+
       const item = {
         requestId: requestId || '',
         requestType: requestType || '',
@@ -427,7 +430,11 @@ function api_getDashboard() {
         breakMinutes: Number(wl.breakMinutes || 0),
         netMinutes: Number(wl.netMinutes || 0),
         pdfFileId: normalize_(row[idx['pdfFileId']]) || '',
+        approvedBy2: approvedBy2,
       };
+
+      // 完了+二次承認済み → 非表示
+      if (wl.actualEndAt && approvedBy2) continue;
 
       if (requestType === 'overtime' && targetDate === today) {
         overtime.push(item);

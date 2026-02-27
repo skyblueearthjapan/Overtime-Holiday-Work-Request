@@ -167,52 +167,151 @@ function fmtMinutesJa_(mins) {
 // 夕方メール（17–18 / 18–19）— 承認時間（予定）を報告
 // ====================================================================
 
+// ====== 今週末〜の休日出勤申請を取得 ======
+
+function listHolidayRequestsForWeekend_(dateObj) {
+  var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  var lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  // 今週末の日付範囲を算出（api_getDashboardと同じロジック）
+  var now = dateObj;
+  var dow = now.getDay();
+  var monday = new Date(now);
+  monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
+  monday.setHours(0, 0, 0, 0);
+  var saturday = new Date(monday);
+  saturday.setDate(monday.getDate() + 5);
+  var nextMonday = new Date(monday);
+  nextMonday.setDate(monday.getDate() + 7);
+
+  var weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
+  var weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
+
+  var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+  var out = [];
+
+  for (var i = 0; i < values.length; i++) {
+    var row = values[i];
+    var status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+    if (!status || status === 'canceled') continue;
+
+    var requestType = normalize_(row[idx['requestType(overtime/holiday)']]);
+    if (requestType !== 'holiday') continue;
+
+    var targetDateVal = row[idx['targetDate']];
+    var targetYmd;
+    try {
+      targetYmd = targetDateVal instanceof Date
+        ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
+        : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+    } catch (e) { continue; }
+
+    if (targetYmd < weekendStart || targetYmd > weekendEnd) continue;
+
+    var dayNames = ['日','月','火','水','木','金','土'];
+    var d = new Date(targetYmd + 'T00:00:00');
+    var dateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+
+    out.push({
+      requestId: normalize_(row[idx['requestId']]),
+      requestType: requestType,
+      status: status,
+      dept: normalize_(row[idx['dept']]),
+      workerName: normalize_(row[idx['workerName']]),
+      workerEmail: normalize_(row[idx['workerEmail']]),
+      approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
+      submittedAt: row[idx['submittedAt']],
+      approvedAt: row[idx['approvedAt']],
+      approvedBy2: idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '',
+      targetDate: targetYmd,
+      targetDateLabel: dateLabel,
+    });
+  }
+
+  out.sort(function(a, b) {
+    if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
+    return (a.dept + a.workerName).localeCompare(b.dept + b.workerName, 'ja');
+  });
+  return out;
+}
+
 // ====== 本文生成（部署別に見やすく） ======
 
 function buildEveningMailBody_(dateObj) {
   const settings = getSettings_();
   const appUrl = normalize_(settings['APP_URL']) || '';
 
-  const items = listAllRequestsByDate_(dateObj);
+  // 残業: 当日のみ
+  const allItems = listAllRequestsByDate_(dateObj);
+  const overtimeItems = allItems.filter(function(it) { return it.requestType === 'overtime'; });
+
+  // 休日: 今週末〜の範囲
+  const holidayItems = listHolidayRequestsForWeekend_(dateObj);
+
   const dateLabel = fmtDate_(dateObj, 'yyyy/MM/dd');
   const dateParam = fmtDate_(dateObj, 'yyyy-MM-dd');
 
-  if (items.length === 0) {
+  if (overtimeItems.length === 0 && holidayItems.length === 0) {
     return [
       `【残業・休日出勤 申請状況報告】${dateLabel}`,
       '',
-      '本日分の申請はありません。',
+      '本日分の残業申請および今週末の休日出勤申請はありません。',
       '',
       appUrl ? `詳細（アプリ）：${appUrl}` : '',
     ].filter(Boolean).join('\n');
   }
 
-  // dept -> rows
-  const groups = new Map();
-  for (const it of items) {
-    if (!groups.has(it.dept)) groups.set(it.dept, []);
-    groups.get(it.dept).push(it);
-  }
-
   const lines = [];
   lines.push(`【残業・休日出勤 申請状況報告】${dateLabel}`);
   lines.push('');
-  lines.push('本日分の申請状況を報告します。');
-  lines.push('');
 
-  for (const [dept, arr] of groups.entries()) {
-    lines.push(`■ ${dept}`);
-    for (const it of arr) {
-      const typeJa = it.requestType === 'overtime' ? '残業' : '休日出勤';
-      let statusLabel = '未承認';
-      if (it.approvedBy2) {
-        statusLabel = '二次承認済';
-      } else if (it.status === 'approved') {
-        statusLabel = '承認済';
-      }
-      lines.push(`- ${it.workerName}：${typeJa} ${fmtMinutesJa_(it.approvedMinutes)}（${statusLabel}）`);
-    }
+  // 残業セクション
+  if (overtimeItems.length > 0) {
+    lines.push('【本日の残業申請】');
     lines.push('');
+    const otGroups = new Map();
+    for (const it of overtimeItems) {
+      if (!otGroups.has(it.dept)) otGroups.set(it.dept, []);
+      otGroups.get(it.dept).push(it);
+    }
+    for (const [dept, arr] of otGroups.entries()) {
+      lines.push(`■ ${dept}`);
+      for (const it of arr) {
+        let statusLabel = '未承認';
+        if (it.approvedBy2) {
+          statusLabel = '二次承認済';
+        } else if (it.status === 'approved') {
+          statusLabel = '承認済';
+        }
+        lines.push(`- ${it.workerName}：残業 ${fmtMinutesJa_(it.approvedMinutes)}（${statusLabel}）`);
+      }
+      lines.push('');
+    }
+  }
+
+  // 休日セクション
+  if (holidayItems.length > 0) {
+    lines.push('【今週末の休日出勤申請】');
+    lines.push('');
+    const hdGroups = new Map();
+    for (const it of holidayItems) {
+      if (!hdGroups.has(it.dept)) hdGroups.set(it.dept, []);
+      hdGroups.get(it.dept).push(it);
+    }
+    for (const [dept, arr] of hdGroups.entries()) {
+      lines.push(`■ ${dept}`);
+      for (const it of arr) {
+        let statusLabel = '未承認';
+        if (it.approvedBy2) {
+          statusLabel = '二次承認済';
+        } else if (it.status === 'approved') {
+          statusLabel = '承認済';
+        }
+        lines.push(`- ${it.workerName}：休日出勤 ${it.targetDateLabel} ${fmtMinutesJa_(it.approvedMinutes)}（${statusLabel}）`);
+      }
+      lines.push('');
+    }
   }
 
   if (appUrl) {
@@ -239,6 +338,128 @@ function sendEveningMail_() {
   const body = buildEveningMailBody_(now);
 
   GmailApp.sendEmail(to, subject, body);
+}
+
+// ====================================================================
+// データ蓄積スプレッドシート
+// ====================================================================
+
+/**
+ * 当日分のデータを蓄積スプレッドシートに追記する。
+ * 既に同日データがあれば削除→再追記。
+ */
+function appendToAccumulationSS_(dateObj) {
+  var settings = getSettings_();
+  var ssId = normalize_(settings['ACCUMULATION_SS_ID']);
+  var folderId = '1Bs1FvgRvlCAkpARZ0XN3YkXJS9eoIN1B';
+  var ss;
+
+  // スプレッドシート取得 or 新規作成
+  if (ssId) {
+    try {
+      ss = SpreadsheetApp.openById(ssId);
+    } catch (e) {
+      Logger.log('蓄積SS取得失敗（ID: ' + ssId + '）、新規作成します: ' + e.message);
+      ssId = '';
+    }
+  }
+
+  if (!ssId) {
+    ss = SpreadsheetApp.create('残業・休日出勤 データ蓄積');
+    ssId = ss.getId();
+    // 指定フォルダに移動
+    try {
+      var file = DriveApp.getFileById(ssId);
+      var folder = DriveApp.getFolderById(folderId);
+      folder.addFile(file);
+      DriveApp.getRootFolder().removeFile(file);
+    } catch (e) {
+      Logger.log('フォルダ移動スキップ: ' + e.message);
+    }
+    // Settings に保存
+    var settingsSh = requireSheet_('Settings');
+    settingsSh.appendRow(['ACCUMULATION_SS_ID', ssId]);
+    Logger.log('蓄積SS新規作成: ' + ssId);
+  }
+
+  var ymd = fmtDate_(dateObj, 'yyyy/MM/dd');
+  var items = listApprovedRequestsByDate_(dateObj);
+  var workMap = buildWorkLogsMapByRequestId_();
+
+  var accHeader = ['日付', '部署', '氏名', '承認時間(分)', '開始', '終了', '実働(分)', '休憩(分)', '実残業/実働(分)', 'PDF', 'requestId'];
+
+  // 残業・休日出勤でそれぞれ分割
+  var overtimeRows = [];
+  var holidayRows = [];
+
+  for (var i = 0; i < items.length; i++) {
+    var it = items[i];
+    var wl = workMap.get(it.requestId) || {};
+    var startStr = wl.actualStartAt || '';
+    var endStr = wl.actualEndAt || '';
+    if (startStr instanceof Date) startStr = fmtDate_(startStr, 'HH:mm');
+    else if (startStr) startStr = String(startStr).replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
+    if (endStr instanceof Date) endStr = fmtDate_(endStr, 'HH:mm');
+    else if (endStr) endStr = String(endStr).replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
+
+    var row = [
+      ymd,
+      it.dept,
+      it.workerName,
+      it.approvedMinutes,
+      startStr,
+      endStr,
+      wl.actualMinutes || 0,
+      wl.breakMinutes || 0,
+      wl.netMinutes || 0,
+      it.pdfFileId ? '作成済' : '未作成',
+      it.requestId,
+    ];
+
+    if (it.requestType === 'overtime') {
+      overtimeRows.push(row);
+    } else {
+      holidayRows.push(row);
+    }
+  }
+
+  // シートに書き込み
+  writeAccumulationSheet_(ss, '残業', accHeader, ymd, overtimeRows);
+  writeAccumulationSheet_(ss, '休日出勤', accHeader, ymd, holidayRows);
+}
+
+/**
+ * 蓄積SSの指定シートに書き込む。同日データがあれば削除→再追記。
+ */
+function writeAccumulationSheet_(ss, sheetName, header, ymd, rows) {
+  var sh = ss.getSheetByName(sheetName);
+  if (!sh) {
+    sh = ss.insertSheet(sheetName);
+    sh.appendRow(header);
+  }
+
+  // 既存の同日データを削除（日付列=1列目で判定、下から削除）
+  var lastRow = sh.getLastRow();
+  if (lastRow >= 2) {
+    var existingValues = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = existingValues.length - 1; i >= 0; i--) {
+      var cellVal = existingValues[i][0];
+      var cellYmd = '';
+      if (cellVal instanceof Date) {
+        cellYmd = fmtDate_(cellVal, 'yyyy/MM/dd');
+      } else {
+        cellYmd = String(cellVal);
+      }
+      if (cellYmd === ymd) {
+        sh.deleteRow(i + 2);
+      }
+    }
+  }
+
+  // 追記
+  for (var j = 0; j < rows.length; j++) {
+    sh.appendRow(rows[j]);
+  }
 }
 
 // ====================================================================
@@ -358,7 +579,7 @@ function countGeneratedPdfsForDate_(dateObj) {
   return { overtime, holiday, total: overtime + holiday };
 }
 
-// ====== 朝メール送信（CSV + Excel 添付） ======
+// ====== 朝メール送信（本文にテキストテーブル＋リンク） ======
 
 function sendMorningMail_() {
   const settings = getSettings_();
@@ -368,35 +589,56 @@ function sendMorningMail_() {
   const now = new Date();
   const dateLabel = fmtDate_(now, 'yyyy/MM/dd');
   const appUrl = normalize_(settings['APP_URL']) || '';
+  const pdfFolderUrl = normalize_(settings['PDF_DRIVE_FOLDER_URL']) || 'https://drive.google.com/drive/folders/1Bs1FvgRvlCAkpARZ0XN3YkXJS9eoIN1B?usp=sharing';
+  const accSsId = normalize_(settings['ACCUMULATION_SS_ID']);
+  const accSsUrl = accSsId ? 'https://docs.google.com/spreadsheets/d/' + accSsId + '/edit' : '';
 
-  const rows = buildMorningReportRows_(now);
+  const items = listApprovedRequestsByDate_(now);
+  const workMap = buildWorkLogsMapByRequestId_();
   const counts = countGeneratedPdfsForDate_(now);
 
-  const subject = `【残業・休日出勤】実績一覧（CSV/Excel添付） ${dateLabel}`;
+  const subject = `【残業・休日出勤】実績報告 ${dateLabel}`;
 
   const bodyLines = [];
-  bodyLines.push(`【残業・休日出勤 実績一覧】${dateLabel}`);
+  bodyLines.push(`【残業・休日出勤 実績報告】${dateLabel}`);
   bodyLines.push('');
-  bodyLines.push('本メールには、承認済み申請の「実績（開始/終了/実働/休憩/実残業）」一覧を添付しています。');
+
+  if (items.length === 0) {
+    bodyLines.push('本日の承認済み申請はありません。');
+    bodyLines.push('');
+  } else {
+    // 部署別にグループ化
+    const groups = new Map();
+    for (const it of items) {
+      if (!groups.has(it.dept)) groups.set(it.dept, []);
+      groups.get(it.dept).push(it);
+    }
+
+    for (const [dept, arr] of groups.entries()) {
+      bodyLines.push(`■ ${dept}`);
+      for (const it of arr) {
+        const wl = workMap.get(it.requestId) || {};
+        const typeJa = it.requestType === 'overtime' ? '残業' : '休日出勤';
+        const pdfStatus = it.pdfFileId ? 'PDF作成済' : 'PDF未作成';
+        const actualMin = wl.actualMinutes || 0;
+        const breakMin = wl.breakMinutes || 0;
+        const netMin = wl.netMinutes || 0;
+
+        bodyLines.push(`- ${it.workerName}：${typeJa} 承認${fmtMinutesJa_(it.approvedMinutes)} / 実働${fmtMinutesJa_(actualMin)} / 休憩${fmtMinutesJa_(breakMin)} / 実残業${fmtMinutesJa_(netMin)} [${pdfStatus}]`);
+      }
+      bodyLines.push('');
+    }
+  }
+
+  bodyLines.push(`PDF作成状況：残業 ${counts.overtime}件 / 休日 ${counts.holiday}件 / 合計 ${counts.total}件`);
   bodyLines.push('');
-  bodyLines.push(`PDF作成状況：`);
-  bodyLines.push(`- 残業申請書PDF：${counts.overtime} 件`);
-  bodyLines.push(`- 休日申請書PDF：${counts.holiday} 件`);
-  bodyLines.push(`- 合計：${counts.total} 件`);
-  bodyLines.push('');
+  bodyLines.push(`PDFフォルダ：${pdfFolderUrl}`);
+  if (accSsUrl) bodyLines.push(`データ蓄積：${accSsUrl}`);
   if (appUrl) bodyLines.push(`詳細（アプリ）：${appUrl}`);
   bodyLines.push('');
   bodyLines.push('※本メールは自動送信です。');
 
-  const csvName = `実績一覧_${fmtDate_(now,'yyyyMMdd')}.csv`;
-  const xlsxName = `実績一覧_${fmtDate_(now,'yyyyMMdd')}.xlsx`;
-
-  const csvBlob = makeCsvBlob_(rows, csvName);
-  const xlsxBlob = exportRowsToXlsxBlob_(rows, xlsxName);
-
-  GmailApp.sendEmail(to, subject, bodyLines.join('\n'), {
-    attachments: [csvBlob, xlsxBlob],
-  });
+  GmailApp.sendEmail(to, subject, bodyLines.join('\n'));
 }
 
 // ====================================================================
@@ -414,6 +656,13 @@ function morningBatch_() {
   // 2) BatchLogsに記録
   logBatchResult_('morningBatch', today, pdfResult);
 
-  // 3) 朝メール送信（CSV/XLSX添付）
+  // 3) データ蓄積スプレッドシートに追記
+  try {
+    appendToAccumulationSS_(today);
+  } catch (e) {
+    Logger.log('蓄積SSエラー: ' + e.message);
+  }
+
+  // 4) 朝メール送信（本文にテキストテーブル＋リンク）
   sendMorningMail_();
 }

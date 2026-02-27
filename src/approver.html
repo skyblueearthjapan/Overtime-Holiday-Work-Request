@@ -601,16 +601,24 @@ function renderDashboard(res){
 function buildOvertimeRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">未承認</span>'
-    : '<span class="pill ok">承認済</span>';
+    : (it.status === 'canceled' ? '<span class="pill danger">却下</span>' : '<span class="pill ok">承認済</span>');
 
   var submittedTime = fmtTime(it.submittedAt);
   var actionCell = buildActionCell(it);
 
+  var nameCell = '<b>' + escHtml(it.workerName) + '</b>';
+  if(it.isOverdue){
+    nameCell += ' <span style="color:var(--danger);font-size:11px;font-weight:700;">&#9888; 未処理</span>';
+  }
+
   var tr = document.createElement('tr');
   tr.setAttribute('data-request-id', it.requestId);
+  if(it.isOverdue){
+    tr.style.background = 'rgba(255,90,95,0.06)';
+  }
   tr.innerHTML =
     '<td>' + escHtml(it.dept) + '</td>' +
-    '<td><b>' + escHtml(it.workerName) + '</b></td>' +
+    '<td>' + nameCell + '</td>' +
     '<td>' + statusPill + '</td>' +
     '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
     '<td>' + submittedTime + '</td>' +
@@ -621,17 +629,25 @@ function buildOvertimeRow(it){
 function buildHolidayRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">未承認</span>'
-    : '<span class="pill ok">承認済</span>';
+    : (it.status === 'canceled' ? '<span class="pill danger">却下</span>' : '<span class="pill ok">承認済</span>');
 
   var submittedTime = fmtTime(it.submittedAt);
   var actionCell = buildActionCell(it);
 
+  var nameCell = '<b>' + escHtml(it.workerName) + '</b>';
+  if(it.isOverdue){
+    nameCell += ' <span style="color:var(--danger);font-size:11px;font-weight:700;">&#9888; 未処理</span>';
+  }
+
   var tr = document.createElement('tr');
   tr.setAttribute('data-request-id', it.requestId);
+  if(it.isOverdue){
+    tr.style.background = 'rgba(255,90,95,0.06)';
+  }
   tr.innerHTML =
     '<td>' + escHtml(it.targetDateLabel || it.targetDate) + '</td>' +
     '<td>' + escHtml(it.dept) + '</td>' +
-    '<td><b>' + escHtml(it.workerName) + '</b></td>' +
+    '<td>' + nameCell + '</td>' +
     '<td>' + statusPill + '</td>' +
     '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
     '<td>' + submittedTime + '</td>' +
@@ -650,7 +666,12 @@ function fmtTime(val){
 function buildActionCell(it){
   if(it.status === 'submitted'){
     return '<button class="btn-approve btn-sm" ' +
-      'onclick="doApprove(\'' + it.requestId + '\',this)">承認</button>';
+      'onclick="doApprove(\'' + it.requestId + '\',this)">承認</button>' +
+      ' <button class="btn-sm" style="background:linear-gradient(135deg,var(--danger),#ff8a8e);" ' +
+      'onclick="doReject(\'' + it.requestId + '\',this)">却下</button>';
+  }
+  if(it.status === 'canceled'){
+    return '<span class="pill danger">却下済</span>';
   }
   return '<span class="muted">承認済</span>';
 }
@@ -682,10 +703,11 @@ function updateRowToApproved(requestId) {
 }
 
 function updateKpiCounters() {
-  var submitted = 0, approved = 0;
+  var submitted = 0, approved = 0, canceled = 0;
   ALL_ITEMS.forEach(function(it) {
     if (it.status === 'submitted') submitted++;
     if (it.status === 'approved') approved++;
+    if (it.status === 'canceled') canceled++;
   });
   document.getElementById('kpiTotal').innerText = ALL_ITEMS.length;
   document.getElementById('kpiPending').innerText = submitted;
@@ -705,6 +727,51 @@ function doApprove(requestId, btn){
       loadDashboard();  // 失敗時のみ全件リロードで復元
     })
     .api_approveRequest(requestId);
+}
+
+// ====== 却下実行 ======
+function doReject(requestId, btn){
+  if(!confirm('この申請を却下しますか？')) return;
+  btn.disabled = true;
+  // 即時反映: 行をcanceled表示に
+  updateRowToRejected(requestId);
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res || !res.ok){
+        alert('エラー: ' + ((res && res.message) || '不明'));
+        loadDashboard();
+      }
+    })
+    .withFailureHandler(function(err){
+      alert('却下エラー: ' + (err.message || err));
+      loadDashboard();
+    })
+    .api_rejectRequest(requestId);
+}
+
+function updateRowToRejected(requestId) {
+  var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
+  if (!row) return;
+  var cells = row.querySelectorAll('td');
+  var isHoliday = row.closest('table').id === 'tblHoliday';
+  var statusIdx = isHoliday ? 3 : 2;
+  var actionIdx = isHoliday ? 6 : 5;
+
+  cells[statusIdx].innerHTML = '<span class="pill danger">却下</span>';
+  cells[actionIdx].innerHTML = '<span class="pill danger">却下済</span>';
+
+  row.style.transition = 'background 0.4s';
+  row.style.background = 'rgba(255,90,95,0.08)';
+  setTimeout(function(){ row.style.background = ''; }, 1200);
+
+  for (var i = 0; i < ALL_ITEMS.length; i++) {
+    if (ALL_ITEMS[i].requestId === requestId) {
+      ALL_ITEMS[i].status = 'canceled';
+      break;
+    }
+  }
+  updateKpiCounters();
 }
 
 // ====== 全件一括承認（残業 or 休日） ======

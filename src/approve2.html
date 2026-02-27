@@ -178,22 +178,18 @@
     </div>
 
     <!-- KPIs -->
-    <div class="grid" style="margin-bottom:12px">
+    <div class="grid" style="margin-bottom:12px; grid-template-columns: 1fr 1fr 1fr;">
       <div class="card">
-        <div class="sub">申請総数</div>
+        <div class="sub">表示件数</div>
         <div class="kpi" id="kpiTotal">-</div>
       </div>
       <div class="card">
-        <div class="sub">一次承認済</div>
-        <div class="kpi" id="kpiApproved">-</div>
+        <div class="sub">承認可能（一次承認済）</div>
+        <div class="kpi" id="kpiApproved" style="color:var(--accent)">-</div>
       </div>
       <div class="card">
-        <div class="sub">二次承認済</div>
-        <div class="kpi" id="kpiApproved2">-</div>
-      </div>
-      <div class="card">
-        <div class="sub">未承認（一次）</div>
-        <div class="kpi" id="kpiPending">-</div>
+        <div class="sub">一次未承認</div>
+        <div class="kpi" id="kpiPending" style="color:var(--warn)">-</div>
       </div>
     </div>
 
@@ -278,15 +274,13 @@ function loadList(){
 }
 
 function renderAll(){
-  // KPI
+  // KPI（二次承認済みはサーバー側で除外済み）
   var total = DATA.length;
-  var approved = DATA.filter(function(d){ return d.status === 'approved'; }).length;
-  var approved2 = DATA.filter(function(d){ return !!d.approvedBy2; }).length;
+  var approvedReady = DATA.filter(function(d){ return d.status === 'approved' && !d.approvedBy2; }).length;
   var pending = DATA.filter(function(d){ return d.status === 'submitted'; }).length;
 
   document.getElementById('kpiTotal').textContent = total;
-  document.getElementById('kpiApproved').textContent = approved;
-  document.getElementById('kpiApproved2').textContent = approved2;
+  document.getElementById('kpiApproved').textContent = approvedReady;
   document.getElementById('kpiPending').textContent = pending;
 
   // Table
