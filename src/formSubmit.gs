@@ -462,10 +462,11 @@ function handleFormSubmit_(e) {
     // 作業員マスタからメールアドレスを補完
     const workerEmail = lookupWorkerEmail_(workerCode);
 
-    // 実施日
+    // 実施日（TZバグ回避: DateオブジェクトをJST文字列に変換して保存）
     const targetDateRaw = ans.get(Q.DATE);
-    const targetDate = targetDateRaw instanceof Date ? targetDateRaw : new Date(targetDateRaw);
-    if (!targetDate || isNaN(targetDate.getTime())) throw new Error(`作業実施日が不正です: ${targetDateRaw}`);
+    const targetDateObj = targetDateRaw instanceof Date ? targetDateRaw : new Date(targetDateRaw);
+    if (!targetDateObj || isNaN(targetDateObj.getTime())) throw new Error(`作業実施日が不正です: ${targetDateRaw}`);
+    const targetDate = fmtDate_(targetDateObj, 'yyyy-MM-dd');
 
     // 業務内容（任意）
     const workContent = normalize_(ans.get(Q.WORK_CONTENT) || '');
