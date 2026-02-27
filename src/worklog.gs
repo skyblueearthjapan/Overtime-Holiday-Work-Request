@@ -60,6 +60,7 @@ function getRequestById_(requestId) {
         workerEmail: normalize_(row[idx['workerEmail']]),
         targetDate: row[idx['targetDate']],
         approvedMinutes: row[idx['approvedMinutes']],
+        approvedBy: idx['approvedBy'] !== undefined ? normalize_(row[idx['approvedBy']]) : '',
         reason: idx['reason'] !== undefined ? row[idx['reason']] : '',
         reasonDetail: idx['reasonDetail'] !== undefined ? row[idx['reasonDetail']] : '',
         workContent: idx['workContent'] !== undefined ? row[idx['workContent']] : '',

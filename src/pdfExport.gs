@@ -47,10 +47,11 @@ function lookupStampFileIdByEmail_(email) {
     const sh = requireSheet_(SHEET.STAMP_MAP);
     const values = sh.getDataRange().getValues();
     const H = values[0].map(h => normalize_(h));
+    const HL = H.map(h => h.toLowerCase());
     const emailIdx = H.indexOf('メール');
-    const stampIdx = H.indexOf('stampfileid');
+    const stampIdx = HL.indexOf('stampfileid');
     if (emailIdx < 0 || stampIdx < 0) {
-      Logger.log('StampMap: ヘッダに「メール」または「stampFileId」列がありません');
+      Logger.log('StampMap: ヘッダ不一致 — emailIdx=' + emailIdx + ' stampIdx=' + stampIdx + ' ヘッダ=[' + H.join(', ') + ']');
       return '';
     }
 
@@ -64,6 +65,23 @@ function lookupStampFileIdByEmail_(email) {
     Logger.log('StampMap 参照エラー: ' + e.message);
   }
   return '';
+}
+
+// ====== 理由テキスト生成（共通ヘルパー） ======
+
+function buildReasonText_(reason, reasonDetail) {
+  var r = reason || '';
+  var d = reasonDetail || '';
+  if (!r && !d) return '';
+  // 「その他」系の理由 → 補足理由を結合
+  if (r.indexOf('その他') >= 0 && d) {
+    return r + '\n' + d;
+  }
+  // 通常理由だが補足もある場合 → 補足も付与
+  if (r && d) {
+    return r + '\n' + d;
+  }
+  return r || d;
 }
 
 // ====== Drive フォルダ作成（YYYY.MM.DD） ======
@@ -122,11 +140,38 @@ function generatePdfForRequest_(requestId) {
     // 理由を直接書込（XLOOKUPでは理由列を正しく参照できない場合の保険）
     const reasonVal = normalize_(req.reason || '');
     const reasonDetailVal = normalize_(req.reasonDetail || '');
-    let reasonText = reasonVal;
-    if (reasonVal && reasonVal.indexOf('その他') >= 0 && reasonDetailVal) {
-      reasonText = 'その他: ' + reasonDetailVal;
+    Logger.log('[PDF/XLOOKUP] reason=[' + reasonVal + '] reasonDetail=[' + reasonDetailVal + ']');
+    var reasonText = buildReasonText_(reasonVal, reasonDetailVal);
+    formSheet.getRange(PDF_MAP.reason).setValue(reasonText);
+
+    // 印鑑画像挿入（XLOOKUPでは画像挿入不可のため直接処理）
+    const requestType = req.requestType;
+    const stampTypeKey = requestType === 'overtime' ? 'STAMP_OVERTIME_FILE_ID' : 'STAMP_HOLIDAY_FILE_ID';
+    const stampTypeId = normalize_(settings[stampTypeKey]);
+    if (stampTypeId) {
+      const stampBlob = getStampBlob_(stampTypeId);
+      if (stampBlob) {
+        try {
+          const img = formSheet.insertImage(stampBlob, 6, 4); // F4: 区分印鑑
+          img.setWidth(60).setHeight(60);
+        } catch (e) { Logger.log('区分印鑑挿入エラー: ' + e.message); }
+      }
     }
-    formSheet.getRange(PDF_MAP.reason).setValue(reasonText || '');
+    // 承認者印鑑
+    const approvedBy = req.approvedBy || '';
+    if (approvedBy) {
+      const approverStampId = lookupStampFileIdByEmail_(approvedBy);
+      if (approverStampId) {
+        const blob = getStampBlob_(approverStampId);
+        if (blob) {
+          try {
+            const img = formSheet.insertImage(blob, 6, 34); // F34
+            img.setWidth(50).setHeight(50);
+          } catch (e) { Logger.log('承認者印鑑挿入エラー: ' + e.message); }
+        }
+      }
+    }
+
     SpreadsheetApp.flush();
 
     // 保存先フォルダ（targetDate基準で日付フォルダ）
@@ -363,14 +408,9 @@ function fillPdfTemplate_(sheet, reqData, requestId) {
   // 理由（定型理由 or 「その他: 補足理由」）
   const reason = normalize_(reqData['reason']);
   const reasonDetail = normalize_(reqData['reasonDetail']);
-  Logger.log('[PDF] reason=' + JSON.stringify(reason) + ', reasonDetail=' + JSON.stringify(reasonDetail));
-  Logger.log('[PDF] reqData keys=' + Object.keys(reqData).join(', '));
-  let reasonText = reason;
-  if (reason && reason.indexOf('その他') >= 0 && reasonDetail) {
-    reasonText = 'その他: ' + reasonDetail;
-  }
+  Logger.log('[PDF/Direct] reason=[' + reason + '] reasonDetail=[' + reasonDetail + ']');
   // 空でもsetValueして、テンプレのXLOOKUP数式をクリアする
-  sheet.getRange(PDF_MAP.reason).setValue(reasonText || '');
+  sheet.getRange(PDF_MAP.reason).setValue(buildReasonText_(reason, reasonDetail));
 
   // F34: 承認者（名前＋印鑑画像）
   const approvedBy = normalize_(reqData['approvedBy']);
@@ -460,6 +500,215 @@ function logBatchResult_(batchName, dateObj, result) {
     result.fail || 0,
     errText,
   ]);
+}
+
+// ====== 診断: PDF理由フィールドのデバッグ（手動実行用） ======
+
+function debugPdfReason() {
+  Logger.log('===== PDF理由フィールド診断 =====');
+
+  // 1. Requests シートのヘッダー一覧
+  Logger.log('\n--- 1. Requests ヘッダー ---');
+  const reqSh = requireSheet_('Requests');
+  const reqHeaders = reqSh.getRange(1, 1, 1, reqSh.getLastColumn()).getValues()[0];
+  reqHeaders.forEach(function(h, i) {
+    Logger.log('  col ' + (i+1) + ': [' + h + '] → normalize: [' + normalize_(h) + ']');
+  });
+
+  const normHeaders = reqHeaders.map(function(h) { return normalize_(h); });
+  var reasonColIdx = normHeaders.indexOf('reason');
+  var reasonDetailColIdx = normHeaders.indexOf('reasonDetail');
+  Logger.log('  reason 列インデックス: ' + reasonColIdx + ' (-1 = 存在しない!)');
+  Logger.log('  reasonDetail 列インデックス: ' + reasonDetailColIdx + ' (-1 = 存在しない!)');
+
+  // 理由っぽい列を探す（日本語ヘッダーの可能性）
+  Logger.log('\n--- 1b. 理由に関連しそうなヘッダー ---');
+  normHeaders.forEach(function(h, i) {
+    if (h.indexOf('理由') >= 0 || h.indexOf('reason') >= 0 || h.indexOf('Reason') >= 0) {
+      Logger.log('  col ' + (i+1) + ': [' + reqHeaders[i] + '] → normalize: [' + h + ']');
+    }
+  });
+
+  // 2. 最新の承認済み申請の reason データ
+  Logger.log('\n--- 2. 最新承認済み申請の理由データ ---');
+  var lastRow = reqSh.getLastRow();
+  if (lastRow >= 2) {
+    var allData = reqSh.getRange(2, 1, lastRow - 1, reqSh.getLastColumn()).getValues();
+    var statusColIdx = normHeaders.indexOf('status(submitted/approved/canceled)');
+    var found = false;
+    // 最新から逆順で探す
+    for (var r = allData.length - 1; r >= 0; r--) {
+      var st = normalize_(allData[r][statusColIdx]);
+      if (st === 'approved') {
+        Logger.log('  行番号: ' + (r + 2));
+        if (reasonColIdx >= 0) {
+          Logger.log('  reason 列の値: [' + allData[r][reasonColIdx] + '] (type=' + typeof allData[r][reasonColIdx] + ')');
+        } else {
+          Logger.log('  reason 列が存在しません！');
+        }
+        if (reasonDetailColIdx >= 0) {
+          Logger.log('  reasonDetail 列の値: [' + allData[r][reasonDetailColIdx] + '] (type=' + typeof allData[r][reasonDetailColIdx] + ')');
+        }
+        // 全列ダンプ（該当行）
+        Logger.log('  全列ダンプ:');
+        for (var c = 0; c < reqHeaders.length; c++) {
+          var v = allData[r][c];
+          if (v !== '' && v !== null && v !== undefined) {
+            Logger.log('    [' + reqHeaders[c] + '] = [' + v + ']');
+          }
+        }
+        found = true;
+        break;
+      }
+    }
+    if (!found) Logger.log('  承認済み申請が見つかりません。');
+  }
+
+  // 3. テンプレートの A29 セル構造
+  Logger.log('\n--- 3. テンプレート 申請書フォーム A29 の構造 ---');
+  try {
+    var settings = getSettings_();
+    var templateSsid = normalize_(settings['TEMPLATE_SSID']);
+    if (!templateSsid) {
+      Logger.log('  TEMPLATE_SSID が未設定です。');
+    } else {
+      var tmpSs = SpreadsheetApp.openById(templateSsid);
+      var formSheet = tmpSs.getSheetByName('申請書フォーム');
+      if (!formSheet) {
+        Logger.log('  申請書フォーム シートが見つかりません。');
+      } else {
+        var a29 = formSheet.getRange('A29');
+        Logger.log('  A29 現在の値: [' + a29.getValue() + ']');
+        Logger.log('  A29 数式: [' + a29.getFormula() + ']');
+        Logger.log('  A29 表示値: [' + a29.getDisplayValue() + ']');
+        Logger.log('  A29 isPartOfMerge: ' + a29.isPartOfMerge());
+
+        // マージ範囲の確認
+        if (a29.isPartOfMerge()) {
+          var merges = formSheet.getRange('A25:H35').getMergedRanges();
+          for (var m = 0; m < merges.length; m++) {
+            var mr = merges[m];
+            if (mr.getRow() <= 29 && mr.getLastRow() >= 29 &&
+                mr.getColumn() <= 1 && mr.getLastColumn() >= 1) {
+              Logger.log('  A29 を含むマージ範囲: ' + mr.getA1Notation());
+              Logger.log('  マージ左上セル: 行' + mr.getRow() + ' 列' + mr.getColumn());
+            }
+          }
+        }
+
+        // A29 周辺のセルも確認（A27〜A31）
+        Logger.log('\n  A27〜A31 のセル値:');
+        for (var row = 27; row <= 31; row++) {
+          var cell = formSheet.getRange(row, 1);
+          var val = cell.getValue();
+          var formula = cell.getFormula();
+          var merged = cell.isPartOfMerge();
+          Logger.log('  A' + row + ': 値=[' + val + '] 数式=[' + formula + '] マージ=' + merged);
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('  テンプレート読取エラー: ' + e.message);
+  }
+
+  Logger.log('\n===== 診断完了 =====');
+}
+
+// ====== 診断: 印鑑データのデバッグ（手動実行用） ======
+
+function debugStampData() {
+  Logger.log('===== 印鑑データ診断 =====');
+
+  // 1. Settings の印鑑関連キー
+  Logger.log('\n--- 1. Settings 印鑑キー ---');
+  try {
+    var settings = getSettings_();
+    var keys = ['STAMP_OVERTIME_FILE_ID', 'STAMP_HOLIDAY_FILE_ID'];
+    for (var k = 0; k < keys.length; k++) {
+      var val = settings[keys[k]];
+      Logger.log('  ' + keys[k] + ': [' + (val || '(未設定)') + ']');
+      if (val) {
+        try {
+          var file = DriveApp.getFileById(normalize_(val));
+          Logger.log('    → ファイル存在: ' + file.getName() + ' (' + file.getMimeType() + ')');
+        } catch (e) {
+          Logger.log('    → ファイル取得エラー: ' + e.message);
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('  Settings読取エラー: ' + e.message);
+  }
+
+  // 2. StampMap シートの構造
+  Logger.log('\n--- 2. StampMap シート ---');
+  try {
+    var sh = requireSheet_(SHEET.STAMP_MAP);
+    var values = sh.getDataRange().getValues();
+    var headers = values[0];
+    Logger.log('  ヘッダー(生): [' + headers.join(', ') + ']');
+    var normH = headers.map(function(h) { return normalize_(h); });
+    Logger.log('  ヘッダー(normalize): [' + normH.join(', ') + ']');
+    var lowerH = normH.map(function(h) { return h.toLowerCase(); });
+    Logger.log('  ヘッダー(lowercase): [' + lowerH.join(', ') + ']');
+
+    var emailIdx = normH.indexOf('メール');
+    var stampIdx_exact = normH.indexOf('stampfileid');
+    var stampIdx_lower = lowerH.indexOf('stampfileid');
+    Logger.log('  メール列: idx=' + emailIdx);
+    Logger.log('  stampfileid(完全一致): idx=' + stampIdx_exact + ' ← バグ原因！');
+    Logger.log('  stampfileid(小文字比較): idx=' + stampIdx_lower + ' ← 修正後');
+
+    // データ行ダンプ
+    Logger.log('  データ行数: ' + (values.length - 1));
+    for (var r = 1; r < values.length; r++) {
+      var email = emailIdx >= 0 ? values[r][emailIdx] : '(列なし)';
+      var stampId = stampIdx_lower >= 0 ? values[r][stampIdx_lower] : '(列なし)';
+      Logger.log('  行' + (r+1) + ': メール=[' + email + '] stampFileId=[' + stampId + ']');
+      if (stampId && String(stampId).trim()) {
+        try {
+          var f = DriveApp.getFileById(normalize_(stampId));
+          Logger.log('    → ファイル存在: ' + f.getName() + ' (' + f.getMimeType() + ')');
+        } catch (e) {
+          Logger.log('    → ファイル取得エラー: ' + e.message);
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('  StampMap読取エラー: ' + e.message);
+  }
+
+  // 3. 最新承認済み申請の approvedBy
+  Logger.log('\n--- 3. 最新承認済み申請の承認者 ---');
+  try {
+    var reqSh = requireSheet_('Requests');
+    var reqHeaders = reqSh.getRange(1, 1, 1, reqSh.getLastColumn()).getValues()[0];
+    var normReqH = reqHeaders.map(function(h) { return normalize_(h); });
+    var approvedByIdx = normReqH.indexOf('approvedBy');
+    var statusIdx = normReqH.indexOf('status(submitted/approved/canceled)');
+    Logger.log('  approvedBy 列: idx=' + approvedByIdx);
+
+    if (approvedByIdx >= 0 && statusIdx >= 0) {
+      var lastRow = reqSh.getLastRow();
+      if (lastRow >= 2) {
+        var data = reqSh.getRange(2, 1, lastRow - 1, reqSh.getLastColumn()).getValues();
+        for (var i = data.length - 1; i >= 0; i--) {
+          if (normalize_(data[i][statusIdx]) === 'approved') {
+            var approver = data[i][approvedByIdx];
+            Logger.log('  最新承認者: [' + approver + ']');
+            // StampMap で引けるか
+            var stampId = lookupStampFileIdByEmail_(String(approver));
+            Logger.log('  → lookupStampFileIdByEmail_ 結果: [' + stampId + ']');
+            break;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    Logger.log('  Requests読取エラー: ' + e.message);
+  }
+
+  Logger.log('\n===== 印鑑診断完了 =====');
 }
 
 // ====== Date or JST文字列から "HH:mm" を抽出 ======
