@@ -431,6 +431,40 @@ function api_getApproverDepts() {
 // ====== 二次承認API ======
 
 /**
+ * Requestsシートに approvedBy2 / approvedAt2 列がなければ自動追加し、
+ * 最新のヘッダーインデックスを返す。
+ * ※ getSheetHeaderIndex_ はキャッシュを使うため、列追加後はキャッシュを破棄する。
+ */
+function ensureSecondaryApprovalColumns_() {
+  var sh = requireSheet_('Requests');
+  var header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function(h){ return normalize_(h); });
+  var idx = buildHeaderIndex_(header);
+  var changed = false;
+
+  if (idx['approvedBy2'] === undefined) {
+    var newCol = header.length;
+    sh.getRange(1, newCol + 1).setValue('approvedBy2');
+    header.push('approvedBy2');
+    idx['approvedBy2'] = newCol;
+    changed = true;
+  }
+  if (idx['approvedAt2'] === undefined) {
+    var newCol2 = header.length;
+    sh.getRange(1, newCol2 + 1).setValue('approvedAt2');
+    header.push('approvedAt2');
+    idx['approvedAt2'] = newCol2;
+    changed = true;
+  }
+  if (changed) {
+    SpreadsheetApp.flush();
+    // getSheetHeaderIndex_ のキャッシュを破棄
+    _headerCache = {};
+  }
+
+  return { sh: sh, idx: idx };
+}
+
+/**
  * 指定日の全申請一覧を取得（二次承認画面用）
  * @param {string} dateYmd - 'yyyy-MM-dd'
  */
@@ -441,7 +475,7 @@ function api_getSecondaryApprovalList(dateYmd) {
   if (isNaN(d.getTime())) throw new Error('日付が不正です（yyyy-MM-dd）');
 
   var ymd = fmtDate_(d, 'yyyy-MM-dd');
-  var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  var { sh, idx } = ensureSecondaryApprovalColumns_();
   var lastRow = sh.getLastRow();
   if (lastRow < 2) return { date: ymd, items: [] };
 
@@ -525,7 +559,7 @@ function api_secondaryApprove(requestId) {
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
-    var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    var { sh, idx } = ensureSecondaryApprovalColumns_();
     var lastRow = sh.getLastRow();
     if (lastRow < 2) throw new Error('Requestsが空です。');
 
@@ -575,7 +609,7 @@ function api_secondaryApproveBatch(requestIds) {
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+    var { sh, idx } = ensureSecondaryApprovalColumns_();
     var lastRow = sh.getLastRow();
     if (lastRow < 2) return { ok: true, results: [] };
 
