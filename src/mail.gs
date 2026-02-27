@@ -53,7 +53,9 @@ function buildWorkLogsMapByRequestId_() {
   if (ridCol === undefined) throw new Error('WorkLogsに requestId 列がありません。');
 
   // TZバグ回避: DateオブジェクトはスプレッドシートTZでフォーマットして元のJST文字列を復元
-  const ssTz = sh.getParent().getSpreadsheetTimeZone();
+  var ssTz;
+  try { ssTz = sh.getParent().getSpreadsheetTimeZone(); } catch (_) {}
+  if (!ssTz) ssTz = TZ; // フォールバック: Asia/Tokyo
 
   const values = sh.getRange(3,1,lastRow-2,sh.getLastColumn()).getValues();
   const map = new Map();
@@ -79,7 +81,8 @@ function buildWorkLogsMapByRequestId_() {
 function toJstString_(val, ssTz) {
   if (!val) return '';
   if (val instanceof Date) {
-    return Utilities.formatDate(val, ssTz, 'yyyy-MM-dd HH:mm:ss');
+    var tz = ssTz || TZ;
+    return Utilities.formatDate(val, tz, 'yyyy-MM-dd HH:mm:ss');
   }
   return String(val);
 }

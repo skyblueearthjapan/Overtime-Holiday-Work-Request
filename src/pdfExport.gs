@@ -927,7 +927,7 @@ function extractHHmm_(val) {
     // GASがJST文字列をスプレッドシートTZで解釈してDate化するため、
     // 同じTZで再フォーマットして元のHH:mmを復元する（TZバグ回避）
     try {
-      var ssTz = getDb_().getSpreadsheetTimeZone();
+      var ssTz = getDb_().getSpreadsheetTimeZone() || TZ;
       return Utilities.formatDate(val, ssTz, 'HH:mm');
     } catch (e) {
       return fmtDate_(val, 'HH:mm');

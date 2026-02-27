@@ -217,7 +217,9 @@ function api_markHolidayDone(requestId) {
     if (startRaw instanceof Date) {
       // TZバグ回避: GASがJST文字列をスプレッドシートTZで解釈してDate化するため、
       // 同じTZで再フォーマットして元のJST文字列を復元 → JSTとして再パース
-      var ssTz = sh.getParent().getSpreadsheetTimeZone();
+      var ssTz;
+      try { ssTz = sh.getParent().getSpreadsheetTimeZone(); } catch (_) {}
+      if (!ssTz) ssTz = TZ;
       var startStr = Utilities.formatDate(startRaw, ssTz, "yyyy-MM-dd'T'HH:mm:ss");
       start = new Date(startStr + '+09:00');
     } else if (startRaw) {
