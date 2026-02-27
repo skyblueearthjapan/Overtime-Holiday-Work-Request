@@ -52,6 +52,9 @@ function buildWorkLogsMapByRequestId_() {
   const ridCol = idx['requestId'];
   if (ridCol === undefined) throw new Error('WorkLogsに requestId 列がありません。');
 
+  // TZバグ回避: DateオブジェクトはスプレッドシートTZでフォーマットして元のJST文字列を復元
+  const ssTz = sh.getParent().getSpreadsheetTimeZone();
+
   const values = sh.getRange(3,1,lastRow-2,sh.getLastColumn()).getValues();
   const map = new Map();
 
@@ -59,14 +62,26 @@ function buildWorkLogsMapByRequestId_() {
     const rid = normalize_(row[ridCol]);
     if (!rid) continue;
     map.set(rid, {
-      actualStartAt: row[idx['actualStartAt']],
-      actualEndAt: row[idx['actualEndAt']],
+      actualStartAt: toJstString_(row[idx['actualStartAt']], ssTz),
+      actualEndAt: toJstString_(row[idx['actualEndAt']], ssTz),
       actualMinutes: Number(row[idx['actualMinutes']] || 0),
       breakMinutes: Number(row[idx['breakMinutes']] || 0),
       netMinutes: Number(row[idx['netMinutes']] || 0),
     });
   }
   return map;
+}
+
+/**
+ * WorkLogsのDate/文字列値をJST文字列に安全に変換するヘルパー。
+ * GASがJST文字列をスプレッドシートTZで解釈してDate化するバグを回避。
+ */
+function toJstString_(val, ssTz) {
+  if (!val) return '';
+  if (val instanceof Date) {
+    return Utilities.formatDate(val, ssTz, 'yyyy-MM-dd HH:mm:ss');
+  }
+  return String(val);
 }
 
 // ====== 共通：分→「X時間Y分」表記 ======
