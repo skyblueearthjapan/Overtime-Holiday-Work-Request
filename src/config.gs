@@ -50,6 +50,16 @@ const REASONS = [
 const OT_HOURS = ['0.5','1.0','1.5','2.0','2.5','3.0','3.5','4.0'];
 const HD_HOURS = ['半日','1日'];
 
+// 休憩スケジュール（時刻ベース）
+const BREAK_WINDOWS = [
+  { startH: 10, startM:  0, endH: 10, endM: 10 },  // 10時休憩
+  { startH: 12, startM: 15, endH: 13, endM:  0 },  // 昼休憩
+  { startH: 15, startM:  0, endH: 15, endM: 10 },  // 15時休憩
+  { startH: 17, startM: 10, endH: 17, endM: 20 },  // 残業1回目休憩
+  { startH: 19, startM: 20, endH: 19, endM: 30 },  // 残業2回目休憩
+  { startH: 21, startM: 30, endH: 21, endM: 40 },  // 残業3回目休憩
+];
+
 // ====== UTIL ======
 function fmtDate_(d, pattern='yyyy-MM-dd') {
   return Utilities.formatDate(d, TZ, pattern);

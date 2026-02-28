@@ -106,6 +106,25 @@ function calcBreakMinutesByMaster_(type, actualMinutes) {
   return 0;
 }
 
+// ====== 休憩控除（時刻ベース：勤務時間帯と休憩ウィンドウの重複を算出） ======
+
+function calcBreakByClockTime_(startDate, endDate) {
+  // startDate/endDate から JST の時刻コンポーネントを取得
+  const startStr = fmtDate_(startDate, 'yyyy-MM-dd HH:mm');
+  const endStr   = fmtDate_(endDate,   'yyyy-MM-dd HH:mm');
+  const workStartMin = parseInt(startStr.substr(11, 2)) * 60 + parseInt(startStr.substr(14, 2));
+  const workEndMin   = parseInt(endStr.substr(11, 2))   * 60 + parseInt(endStr.substr(14, 2));
+
+  let totalBreak = 0;
+  for (const w of BREAK_WINDOWS) {
+    const bStart = w.startH * 60 + w.startM;
+    const bEnd   = w.endH   * 60 + w.endM;
+    const overlap = Math.max(0, Math.min(workEndMin, bEnd) - Math.max(workStartMin, bStart));
+    totalBreak += overlap;
+  }
+  return totalBreak;
+}
+
 // ====== 作業者本人チェック ======
 
 function assertSelf_(request) {
@@ -139,7 +158,7 @@ function api_markOvertimeDone(requestId) {
     const start = new Date(targetYmd + 'T17:20:00+09:00'); // 明示的にJST指定
 
     const actualMinutes = Math.max(0, Math.round((now.getTime() - start.getTime()) / 60000));
-    const breakMinutes = calcBreakMinutesByMaster_('overtime', actualMinutes);
+    const breakMinutes = calcBreakByClockTime_(start, now);
     const netMinutes = Math.max(0, actualMinutes - breakMinutes);
 
     updateWorkLog_(requestId, {
@@ -247,7 +266,7 @@ function api_markHolidayDone(requestId) {
 
     const now = new Date();
     const actualMinutes = Math.max(0, Math.round((now.getTime() - start.getTime()) / 60000));
-    const breakMinutes = calcBreakMinutesByMaster_('holiday', actualMinutes);
+    const breakMinutes = calcBreakByClockTime_(start, now);
     const netMinutes = Math.max(0, actualMinutes - breakMinutes);
 
     updateWorkLog_(requestId, {
