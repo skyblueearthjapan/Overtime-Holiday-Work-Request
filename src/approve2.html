@@ -178,7 +178,7 @@
     </div>
 
     <!-- KPIs -->
-    <div class="grid" style="margin-bottom:12px; grid-template-columns: 1fr 1fr 1fr;">
+    <div class="grid" style="margin-bottom:12px; grid-template-columns: 1fr 1fr 1fr 1fr;">
       <div class="card">
         <div class="sub">表示件数</div>
         <div class="kpi" id="kpiTotal">-</div>
@@ -190,6 +190,10 @@
       <div class="card">
         <div class="sub">一次未承認</div>
         <div class="kpi" id="kpiPending" style="color:var(--warn)">-</div>
+      </div>
+      <div class="card">
+        <div class="sub">期限超過</div>
+        <div class="kpi" id="kpiOverdue" style="color:var(--danger)">-</div>
       </div>
     </div>
 
@@ -206,6 +210,7 @@
             <th style="width:30px"></th>
             <th>部署</th>
             <th>氏名</th>
+            <th>対象日</th>
             <th>種別</th>
             <th>予定時間</th>
             <th>一次承認</th>
@@ -278,17 +283,19 @@ function renderAll(){
   var total = DATA.length;
   var approvedReady = DATA.filter(function(d){ return d.status === 'approved' && !d.approvedBy2; }).length;
   var pending = DATA.filter(function(d){ return d.status === 'submitted'; }).length;
+  var overdue = DATA.filter(function(d){ return d.isOverdue; }).length;
 
   document.getElementById('kpiTotal').textContent = total;
   document.getElementById('kpiApproved').textContent = approvedReady;
   document.getElementById('kpiPending').textContent = pending;
+  document.getElementById('kpiOverdue').textContent = overdue;
 
   // Table
   var tbody = document.getElementById('tbody');
   tbody.innerHTML = '';
 
   if (total === 0) {
-    tbody.innerHTML = '<tr><td colspan="9" class="muted">申請データがありません</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="muted">申請データがありません</td></tr>';
     updateSelectedCount();
     return;
   }
@@ -301,6 +308,8 @@ function renderAll(){
     var tr = document.createElement('tr');
     if (isPending) tr.className = 'disabled';
     if (isDone) tr.className = 'done';
+    // 期限超過の行は薄赤背景
+    if (d.isOverdue) tr.style.background = 'rgba(255,90,95,0.06)';
 
     var typeJa = d.requestType === 'overtime' ? '残業' : '休日出勤';
 
@@ -308,6 +317,11 @@ function renderAll(){
     var cbHtml = isReady
       ? '<input type="checkbox" class="row-cb" data-idx="'+i+'" onchange="updateSelectedCount()">'
       : '';
+
+    // 対象日（期限超過時は⚠マーク付き）
+    var targetDateHtml = d.isOverdue
+      ? '<span style="color:var(--danger)">⚠ ' + escHtml(d.targetDate) + '</span>'
+      : escHtml(d.targetDate);
 
     // 一次承認
     var approvedLabel = d.status === 'approved'
@@ -338,6 +352,7 @@ function renderAll(){
       '<td>'+cbHtml+'</td>'+
       '<td>'+escHtml(d.dept)+'</td>'+
       '<td><b>'+escHtml(d.workerName)+'</b></td>'+
+      '<td>'+targetDateHtml+'</td>'+
       '<td>'+typeJa+'</td>'+
       '<td>'+fmtMin(d.approvedMinutes)+'</td>'+
       '<td>'+approvedLabel+'</td>'+

@@ -578,7 +578,9 @@ function api_getSecondaryApprovalList(dateYmd) {
         ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
         : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
     } catch (e) { continue; }
-    if (targetYmd !== ymd) continue;
+    // 未2次承認: 対象日以前の申請も表示（期限超過として）
+    // 2次承認済みは既にスキップ済み（L572）なので、ここでは未承認分のみ
+    if (targetYmd > ymd) continue;  // 未来の申請は除外
 
     var submittedAtRaw = row[idx['submittedAt']];
     var submittedAt = '';
@@ -611,6 +613,7 @@ function api_getSecondaryApprovalList(dateYmd) {
       dept: normalize_(row[idx['dept']]),
       workerName: normalize_(row[idx['workerName']]),
       targetDate: targetYmd,
+      isOverdue: targetYmd < ymd,  // 対象日より前の申請は期限超過
       approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
       submittedAt: submittedAt,
       approvedBy: idx['approvedBy'] !== undefined ? normalize_(row[idx['approvedBy']]) : '',
@@ -621,11 +624,19 @@ function api_getSecondaryApprovalList(dateYmd) {
     });
   }
 
-  // ソート: 二次未承認＆一次承認済みを先頭 → 部署 → 氏名
+  // ソート: 期限超過 → 二次未承認＆一次承認済み → 日付（古い順） → 部署 → 氏名
   out.sort(function(a, b) {
+    // 1. 期限超過を先頭
+    var aOver = a.isOverdue ? 0 : 1;
+    var bOver = b.isOverdue ? 0 : 1;
+    if (aOver !== bOver) return aOver - bOver;
+    // 2. 二次未承認 & 一次承認済みを優先
     var aReady = (a.status === 'approved' && !a.approvedBy2) ? 0 : 1;
     var bReady = (b.status === 'approved' && !b.approvedBy2) ? 0 : 1;
     if (aReady !== bReady) return aReady - bReady;
+    // 3. 日付（古い順）
+    if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
+    // 4. 部署 → 氏名
     if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
     return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
   });
