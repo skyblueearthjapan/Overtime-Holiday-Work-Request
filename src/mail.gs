@@ -760,17 +760,31 @@ function sendMorningMail_() {
     bodyLines.push('確認の上、総務部画面（日次詳細）より手動で実績を入力してください。');
     bodyLines.push('');
 
-    const incGroups = new Map();
+    // 日付別にグループ化（同じ日付のリンクをまとめる）
+    const incByDate = new Map();
     for (const it of incompleteList) {
-      if (!incGroups.has(it.dept)) incGroups.set(it.dept, []);
-      incGroups.get(it.dept).push(it);
+      if (!incByDate.has(it.targetDate)) incByDate.set(it.targetDate, []);
+      incByDate.get(it.targetDate).push(it);
     }
-    for (const [dept, arr] of incGroups.entries()) {
-      bodyLines.push(`■ ${dept}`);
-      for (const it of arr) {
-        const typeJa = it.requestType === 'overtime' ? '残業' : '休日出勤';
-        const dateStr = it.targetDate.replace(/-/g, '/');
-        bodyLines.push(`  - ${it.workerName}：${typeJa} 承認${fmtMinutesJa_(it.approvedMinutes)}（${dateStr}）`);
+
+    for (const [targetDate, dateItems] of incByDate.entries()) {
+      // 部署別にサブグループ
+      const deptMap = new Map();
+      for (const it of dateItems) {
+        if (!deptMap.has(it.dept)) deptMap.set(it.dept, []);
+        deptMap.get(it.dept).push(it);
+      }
+      const dateStr = targetDate.replace(/-/g, '/');
+      bodyLines.push(`▼ ${dateStr} の未記録`);
+      for (const [dept, arr] of deptMap.entries()) {
+        bodyLines.push(`  ■ ${dept}`);
+        for (const it of arr) {
+          const typeJa = it.requestType === 'overtime' ? '残業' : '休日出勤';
+          bodyLines.push(`    - ${it.workerName}：${typeJa} 承認${fmtMinutesJa_(it.approvedMinutes)}`);
+        }
+      }
+      if (appUrl) {
+        bodyLines.push(`  → 手動入力はこちら：${appUrl}?page=admin&date=${targetDate}`);
       }
       bodyLines.push('');
     }

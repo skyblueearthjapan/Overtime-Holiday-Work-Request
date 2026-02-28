@@ -457,8 +457,11 @@ function escHtml(s){
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+// URLパラメータから date を取得（メールリンクからの遷移用）
+var URL_DATE_PARAM = '<?= DATE_PARAM ?>';
+
 document.getElementById('ym').value = todayYM();
-document.getElementById('day').value = todayYMD();
+document.getElementById('day').value = URL_DATE_PARAM || todayYMD();
 document.getElementById('fyBase').value = todayYMD();
 
 // 部署候補
@@ -999,6 +1002,10 @@ loadMonthly();
 loadFiscal();
 loadSpecial();
 loadPending();
+// メールリンクからの遷移時は日次詳細を自動ロード
+if(URL_DATE_PARAM){
+  loadDaily();
+}
 </script>
 </body>
 </html>
