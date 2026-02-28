@@ -458,8 +458,8 @@ function api_getDashboard() {
         approvedBy2: approvedBy2,
       };
 
-      // 完了+二次承認済み → 非表示
-      if (wl.actualEndAt && approvedBy2) continue;
+      // 完了+二次承認済み → 当日中は表示維持、翌日以降は非表示
+      if (wl.actualEndAt && approvedBy2 && targetDate !== today) continue;
 
       if (requestType === 'overtime' && targetDate === today) {
         overtime.push(item);
