@@ -809,8 +809,36 @@ function buildPdfCell(it){
   return '<span class="muted">-</span>';
 }
 
+// ====== 4時間超過アラーム判定 ======
+function check4hAlert(it){
+  if(it.status !== 'approved' || it.actualEndAt) return '';
+  var now = new Date();
+  var elapsed = 0;
+
+  if(it.requestType === 'overtime'){
+    // 残業: targetDate 17:20 JST からの経過
+    var startTime = new Date(it.targetDate + 'T17:20:00+09:00');
+    elapsed = (now.getTime() - startTime.getTime()) / 60000;
+  } else if(it.requestType === 'holiday' && it.actualStartAt){
+    // 休日: actualStartAt からの経過
+    var startStr = String(it.actualStartAt).replace(' ','T');
+    if(startStr.indexOf('+') < 0 && startStr.indexOf('Z') < 0) startStr += '+09:00';
+    var startTime2 = new Date(startStr);
+    if(!isNaN(startTime2.getTime())){
+      elapsed = (now.getTime() - startTime2.getTime()) / 60000;
+    }
+  }
+
+  if(elapsed > 240){
+    return ' <span class="pill danger">4h超過</span>';
+  }
+  return '';
+}
+
 // ====== 操作ボタン構築 ======
 function buildActionCell(it){
+  var alert4h = check4hAlert(it);
+
   if(it.status === 'submitted'){
     return '<span class="muted">承認待ち</span>';
   }
@@ -820,7 +848,7 @@ function buildActionCell(it){
       return '<span class="pill ok">完了済</span>';
     }
     return '<button class="btn-blue btn-sm" ' +
-      'onclick="doOvertimeDone(\'' + it.requestId + '\',this)">残業完了</button>';
+      'onclick="doOvertimeDone(\'' + it.requestId + '\',this)">残業完了</button>' + alert4h;
   }
 
   if(it.requestType === 'holiday'){
@@ -829,7 +857,7 @@ function buildActionCell(it){
     }
     if(it.actualStartAt){
       return '<button class="btn-sm" ' +
-        'onclick="doHolidayDone(\'' + it.requestId + '\',this)">休日完了</button>';
+        'onclick="doHolidayDone(\'' + it.requestId + '\',this)">休日完了</button>' + alert4h;
     }
     return '<button class="btn-warn btn-sm" ' +
       'onclick="doHolidayStart(\'' + it.requestId + '\',this)">開始</button>';

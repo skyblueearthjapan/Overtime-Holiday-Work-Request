@@ -341,7 +341,7 @@
           <tr>
             <th>部署</th><th>氏名</th><th>種別</th>
             <th>承認</th><th>実績</th><th>休憩</th><th>実残業/実働</th>
-            <th>PDF</th>
+            <th>PDF</th><th>操作</th>
           </tr>
         </thead>
         <tbody></tbody>
@@ -398,6 +398,33 @@
       <div class="sub" style="margin-top:8px">※status=submitted のまま放置されている申請を検出。</div>
     </div>
 
+  </div>
+
+  <!-- 手動実績入力モーダル -->
+  <div id="manualEntryWrap" style="display:none;">
+    <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:200;" onclick="closeManualEntry()"></div>
+    <div class="card" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:201; max-width:420px; width:94%; padding:24px;">
+      <div style="font-weight:900; font-size:16px; margin-bottom:12px;">手動実績入力</div>
+      <div style="display:grid; grid-template-columns:auto 1fr; gap:8px 14px; font-size:14px; margin-bottom:16px;">
+        <div class="sub">氏名</div><div id="meWorker" style="font-weight:700;"></div>
+        <div class="sub">種別</div><div id="meType"></div>
+        <div class="sub">日付</div><div id="meDate"></div>
+      </div>
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px;">
+        <div>
+          <div class="sub" style="margin-bottom:4px;">開始時刻</div>
+          <input type="time" id="meStart" style="width:100%; padding:10px; border-radius:12px; border:1px solid var(--line); font-size:15px;">
+        </div>
+        <div>
+          <div class="sub" style="margin-bottom:4px;">終了時刻</div>
+          <input type="time" id="meEnd" style="width:100%; padding:10px; border-radius:12px; border:1px solid var(--line); font-size:15px;">
+        </div>
+      </div>
+      <div style="display:flex; gap:8px; justify-content:flex-end;">
+        <button class="ghost" onclick="closeManualEntry()">キャンセル</button>
+        <button onclick="submitManualEntry()">登録</button>
+      </div>
+    </div>
   </div>
 
 <script>
@@ -576,6 +603,17 @@ function loadDaily(){
       var pdf = it.pdfFileId
         ? '<a href="https://drive.google.com/file/d/'+escHtml(it.pdfFileId)+'/view" target="_blank" class="pill ok">開く</a>'
         : '<span class="pill warn">未作成</span>';
+
+      // 操作列
+      var action = '';
+      if(it.status === 'approved' && !it.actualEndAt){
+        action = '<button class="ghost" style="font-size:12px;padding:4px 10px;border-radius:8px;" '+
+          'onclick="openManualEntry(\''+escHtml(it.requestId)+'\',\''+escHtml(it.workerName)+'\',\''+
+          escHtml(it.requestType)+'\',\''+escHtml(res.date)+'\',\''+escHtml(it.actualStartAt||'')+'\')">手動入力</button>';
+      } else if(it.actualEndAt){
+        action = '<span class="pill ok">完了</span>';
+      }
+
       var tr=document.createElement('tr');
       tr.innerHTML=
         '<td>'+escHtml(it.dept)+'</td>'+
@@ -585,12 +623,64 @@ function loadDaily(){
         '<td>'+fmtMin(it.actualMinutes)+'</td>'+
         '<td>'+fmtMin(it.breakMinutes)+'</td>'+
         '<td><b>'+fmtMin(it.netMinutes)+'</b></td>'+
-        '<td>'+pdf+'</td>';
+        '<td>'+pdf+'</td>'+
+        '<td>'+action+'</td>';
       tb.appendChild(tr);
     });
   }).withFailureHandler(function(err){
     alert(err.message || err);
   }).api_adminDailyDetail(day, dept);
+}
+
+// ====== 手動実績入力モーダル ======
+var ME_REQUEST_ID = '';
+
+function openManualEntry(requestId, workerName, requestType, dateYmd, actualStartAt){
+  ME_REQUEST_ID = requestId;
+  document.getElementById('meWorker').innerText = workerName;
+  document.getElementById('meType').innerText = requestType === 'overtime' ? '残業' : '休日出勤';
+  document.getElementById('meDate').innerText = dateYmd;
+
+  // 開始時刻プリセット
+  var startInput = document.getElementById('meStart');
+  if(requestType === 'overtime'){
+    startInput.value = '17:20';
+  } else if(actualStartAt){
+    // "yyyy-MM-dd HH:mm:ss" → HH:mm
+    var m = String(actualStartAt).match(/(\d{2}:\d{2})/);
+    startInput.value = m ? m[1] : '';
+  } else {
+    startInput.value = '';
+  }
+  document.getElementById('meEnd').value = '';
+  document.getElementById('manualEntryWrap').style.display = 'block';
+}
+
+function closeManualEntry(){
+  document.getElementById('manualEntryWrap').style.display = 'none';
+  ME_REQUEST_ID = '';
+}
+
+function submitManualEntry(){
+  var startTime = document.getElementById('meStart').value;
+  var endTime = document.getElementById('meEnd').value;
+  if(!endTime){
+    alert('終了時刻を入力してください。');
+    return;
+  }
+  if(!startTime){
+    alert('開始時刻を入力してください。');
+    return;
+  }
+  if(!confirm('手動実績を登録しますか？\n開始: '+startTime+' → 終了: '+endTime)) return;
+
+  google.script.run.withSuccessHandler(function(res){
+    closeManualEntry();
+    alert('登録完了\n実働: '+fmtMin(res.actualMinutes)+'\n休憩控除: '+fmtMin(res.breakMinutes)+'\n実残業/実働: '+fmtMin(res.netMinutes));
+    loadDaily();
+  }).withFailureHandler(function(err){
+    alert('エラー: '+(err.message || err));
+  }).api_adminManualComplete(ME_REQUEST_ID, endTime, startTime);
 }
 
 function loadFiscal(){

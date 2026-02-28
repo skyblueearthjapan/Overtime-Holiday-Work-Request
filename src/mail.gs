@@ -550,6 +550,70 @@ function upsertAccumulationRow_(requestId) {
 }
 
 // ====================================================================
+// 作業完了未記録の申請を抽出（過去7日以内の approved + actualEndAt 空）
+// ====================================================================
+
+function listIncompleteRequests_() {
+  const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+
+  const now = new Date();
+  const todayYmd = fmtDate_(now, 'yyyy-MM-dd');
+
+  // 7日前
+  const sevenDaysAgo = new Date(now);
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const limitYmd = fmtDate_(sevenDaysAgo, 'yyyy-MM-dd');
+
+  const values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+  const wlMap = buildWorkLogsMapByRequestId_();
+
+  const out = [];
+  for (let i = 0; i < values.length; i++) {
+    const row = values[i];
+    const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
+    if (status !== 'approved') continue;
+
+    const targetDateVal = row[idx['targetDate']];
+    let targetYmd;
+    try {
+      targetYmd = targetDateVal instanceof Date
+        ? fmtDate_(targetDateVal, 'yyyy-MM-dd')
+        : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
+    } catch (e) { continue; }
+
+    // 今日の申請は除外（まだ勤務前の可能性）
+    if (targetYmd >= todayYmd) continue;
+    // 7日より前は除外
+    if (targetYmd < limitYmd) continue;
+
+    const requestId = normalize_(row[idx['requestId']]);
+    const wl = wlMap.get(requestId) || {};
+
+    // actualEndAt が空 → 作業完了未記録
+    if (wl.actualEndAt) continue;
+
+    out.push({
+      requestId,
+      requestType: normalize_(row[idx['requestType(overtime/holiday)']]),
+      dept: normalize_(row[idx['dept']]),
+      workerName: normalize_(row[idx['workerName']]),
+      targetDate: targetYmd,
+      approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
+    });
+  }
+
+  // 部署→氏名→日付でソート
+  out.sort((a, b) => {
+    if (a.dept !== b.dept) return a.dept.localeCompare(b.dept, 'ja');
+    if (a.workerName !== b.workerName) return a.workerName.localeCompare(b.workerName, 'ja');
+    return a.targetDate.localeCompare(b.targetDate);
+  });
+  return out;
+}
+
+// ====================================================================
 // 翌朝メール（7–8）— 実績一覧（CSV/Excel添付）＋ PDF作成件数
 // ====================================================================
 
@@ -687,6 +751,33 @@ function sendMorningMail_() {
   const subject = `【残業・休日出勤】実績報告 ${dateLabel}`;
 
   const bodyLines = [];
+
+  // 作業完了未記録アラートを先頭に挿入
+  const incompleteList = listIncompleteRequests_();
+  if (incompleteList.length > 0) {
+    bodyLines.push('【⚠ 作業完了未記録のお知らせ】');
+    bodyLines.push('以下の作業員は作業完了ボタンが押されておらず、実働時間が記録されていません。');
+    bodyLines.push('確認の上、総務部画面（日次詳細）より手動で実績を入力してください。');
+    bodyLines.push('');
+
+    const incGroups = new Map();
+    for (const it of incompleteList) {
+      if (!incGroups.has(it.dept)) incGroups.set(it.dept, []);
+      incGroups.get(it.dept).push(it);
+    }
+    for (const [dept, arr] of incGroups.entries()) {
+      bodyLines.push(`■ ${dept}`);
+      for (const it of arr) {
+        const typeJa = it.requestType === 'overtime' ? '残業' : '休日出勤';
+        const dateStr = it.targetDate.replace(/-/g, '/');
+        bodyLines.push(`  - ${it.workerName}：${typeJa} 承認${fmtMinutesJa_(it.approvedMinutes)}（${dateStr}）`);
+      }
+      bodyLines.push('');
+    }
+    bodyLines.push('---');
+    bodyLines.push('');
+  }
+
   bodyLines.push(`【残業・休日出勤 実績報告】${dateLabel}`);
   bodyLines.push('');
 

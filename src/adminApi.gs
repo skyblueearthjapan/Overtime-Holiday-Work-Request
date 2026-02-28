@@ -412,6 +412,96 @@ function api_adminPendingWatch() {
 }
 
 // ====================================================================
+// 総務部API：手動実績入力（作業完了未押下の救済）
+// ====================================================================
+
+function api_adminManualComplete(requestId, endTimeStr, startTimeStr) {
+  assertAdmin_();
+
+  const lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    const req = getRequestById_(requestId);
+    if (!req) throw new Error('申請が見つかりません。');
+    if (req.status !== 'approved') throw new Error('承認済みの申請のみ手動入力できます。');
+
+    // targetDateのJST日付文字列を取得
+    const d = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
+    const targetYmd = fmtDate_(d, 'yyyy-MM-dd');
+
+    // 開始時刻の決定
+    let startStr;
+    if (startTimeStr) {
+      startStr = startTimeStr; // HH:mm
+    } else if (req.requestType === 'overtime') {
+      startStr = '17:20'; // 残業の既定開始時刻
+    } else {
+      // 休日: WorkLogsの actualStartAt を確認
+      const wlMap = buildWorkLogsMapByRequestId_();
+      const wl = wlMap.get(requestId) || {};
+      if (wl.actualStartAt) {
+        // "yyyy-MM-dd HH:mm:ss" から HH:mm を抽出
+        const raw = String(wl.actualStartAt);
+        const m = raw.match(/(\d{2}:\d{2})/);
+        startStr = m ? m[1] : '';
+      }
+      if (!startStr) throw new Error('休日出勤の開始時刻が不明です。開始時刻を指定してください。');
+    }
+
+    if (!endTimeStr) throw new Error('終了時刻を指定してください。');
+
+    // Date オブジェクトに変換（JSTタイムゾーン明示）
+    const start = new Date(targetYmd + 'T' + startStr + ':00+09:00');
+    const end = new Date(targetYmd + 'T' + endTimeStr + ':00+09:00');
+
+    if (isNaN(start.getTime())) throw new Error('開始時刻が不正です: ' + startStr);
+    if (isNaN(end.getTime())) throw new Error('終了時刻が不正です: ' + endTimeStr);
+    if (end <= start) throw new Error('終了時刻は開始時刻より後にしてください。');
+
+    const actualMinutes = Math.round((end.getTime() - start.getTime()) / 60000);
+    const breakMinutes = calcBreakByClockTime_(start, end);
+    const netMinutes = Math.max(0, actualMinutes - breakMinutes);
+
+    updateWorkLog_(requestId, {
+      actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(end,   'yyyy-MM-dd HH:mm:ss'),
+      actualMinutes: actualMinutes,
+      breakMinutes:  breakMinutes,
+      netMinutes:    netMinutes,
+      updatedAt:     fmtDate_(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+      updatedBy:     Session.getActiveUser().getEmail() || 'admin-manual',
+    });
+    SpreadsheetApp.flush();
+
+    // PDF生成
+    const wlOverride = {
+      actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(end,   'yyyy-MM-dd HH:mm:ss'),
+      actualMinutes: actualMinutes,
+      breakMinutes:  breakMinutes,
+      netMinutes:    netMinutes,
+    };
+    try {
+      const useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
+      if (useDirect) {
+        generatePdfDirect_(requestId, wlOverride);
+      } else {
+        generatePdfForRequest_(requestId, wlOverride);
+      }
+    } catch (pdfErr) {
+      Logger.log('手動入力PDF生成警告: ' + pdfErr.message);
+    }
+
+    // 蓄積SS更新
+    upsertAccumulationRow_(requestId);
+
+    return { ok: true, actualMinutes, breakMinutes, netMinutes };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ====================================================================
 // 総務部API：部署プルダウン用
 // ====================================================================
 
