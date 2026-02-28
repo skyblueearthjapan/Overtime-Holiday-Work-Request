@@ -345,42 +345,48 @@ function sendEveningMail_() {
 // ====================================================================
 
 /**
- * 当日分のデータを蓄積スプレッドシートに追記する。
- * 既に同日データがあれば削除→再追記。
+ * 蓄積スプレッドシートを取得（なければ新規作成してSettingsに保存）。
+ * @return {Spreadsheet}
  */
-function appendToAccumulationSS_(dateObj) {
+function getAccumulationSS_() {
   var settings = getSettings_();
   var ssId = normalize_(settings['ACCUMULATION_SS_ID']);
   var folderId = '1Bs1FvgRvlCAkpARZ0XN3YkXJS9eoIN1B';
   var ss;
 
-  // スプレッドシート取得 or 新規作成
   if (ssId) {
     try {
       ss = SpreadsheetApp.openById(ssId);
+      return ss;
     } catch (e) {
       Logger.log('蓄積SS取得失敗（ID: ' + ssId + '）、新規作成します: ' + e.message);
-      ssId = '';
     }
   }
 
-  if (!ssId) {
-    ss = SpreadsheetApp.create('残業・休日出勤 データ蓄積');
-    ssId = ss.getId();
-    // 指定フォルダに移動
-    try {
-      var file = DriveApp.getFileById(ssId);
-      var folder = DriveApp.getFolderById(folderId);
-      folder.addFile(file);
-      DriveApp.getRootFolder().removeFile(file);
-    } catch (e) {
-      Logger.log('フォルダ移動スキップ: ' + e.message);
-    }
-    // Settings に保存
-    var settingsSh = requireSheet_('Settings');
-    settingsSh.appendRow(['ACCUMULATION_SS_ID', ssId]);
-    Logger.log('蓄積SS新規作成: ' + ssId);
+  ss = SpreadsheetApp.create('残業・休日出勤 データ蓄積');
+  ssId = ss.getId();
+  // 指定フォルダに移動
+  try {
+    var file = DriveApp.getFileById(ssId);
+    var folder = DriveApp.getFolderById(folderId);
+    folder.addFile(file);
+    DriveApp.getRootFolder().removeFile(file);
+  } catch (e) {
+    Logger.log('フォルダ移動スキップ: ' + e.message);
   }
+  // Settings に保存
+  var settingsSh = requireSheet_('Settings');
+  settingsSh.appendRow(['ACCUMULATION_SS_ID', ssId]);
+  Logger.log('蓄積SS新規作成: ' + ssId);
+  return ss;
+}
+
+/**
+ * 当日分のデータを蓄積スプレッドシートに追記する。
+ * 既に同日データがあれば削除→再追記。
+ */
+function appendToAccumulationSS_(dateObj) {
+  var ss = getAccumulationSS_();
 
   var ymd = fmtDate_(dateObj, 'yyyy/MM/dd');
   var items = listApprovedRequestsByDate_(dateObj);
@@ -459,6 +465,87 @@ function writeAccumulationSheet_(ss, sheetName, header, ymd, rows) {
   // 追記
   for (var j = 0; j < rows.length; j++) {
     sh.appendRow(rows[j]);
+  }
+}
+
+/**
+ * 指定requestIdの申請データを蓄積SSにupsert（既存行があれば上書き、なければ追記）。
+ * 作業完了時・二次承認時にリアルタイムで呼び出す。
+ * 失敗しても呼び出し元の処理には影響しない。
+ */
+function upsertAccumulationRow_(requestId) {
+  try {
+    var req = getRequestById_(requestId);
+    if (!req) { Logger.log('upsert蓄積: 申請が見つかりません: ' + requestId); return; }
+
+    var workMap = buildWorkLogsMapByRequestId_();
+    var wl = workMap.get(requestId) || {};
+
+    var ss = getAccumulationSS_();
+
+    // 日付フォーマット
+    var d = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
+    var ymd = fmtDate_(d, 'yyyy/MM/dd');
+
+    // 開始・終了の時刻部分を抽出
+    var startStr = wl.actualStartAt || '';
+    var endStr = wl.actualEndAt || '';
+    if (startStr instanceof Date) startStr = fmtDate_(startStr, 'HH:mm');
+    else if (startStr) startStr = String(startStr).replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
+    if (endStr instanceof Date) endStr = fmtDate_(endStr, 'HH:mm');
+    else if (endStr) endStr = String(endStr).replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
+
+    // PDF状態を最新で再取得（generatePdf後にRequestsが更新されている可能性）
+    var reqLatest = getRequestById_(requestId);
+    var pdfStatus = (reqLatest && reqLatest.pdfFileId) ? '作成済' : '未作成';
+
+    var rowData = [
+      ymd,
+      req.dept,
+      req.workerName,
+      Number(req.approvedMinutes || 0),
+      startStr,
+      endStr,
+      wl.actualMinutes || 0,
+      wl.breakMinutes || 0,
+      wl.netMinutes || 0,
+      pdfStatus,
+      requestId,
+    ];
+
+    var sheetName = req.requestType === 'overtime' ? '残業' : '休日出勤';
+    var accHeader = ['日付', '部署', '氏名', '承認時間(分)', '開始', '終了', '実働(分)', '休憩(分)', '実残業/実働(分)', 'PDF', 'requestId'];
+
+    var sh = ss.getSheetByName(sheetName);
+    if (!sh) {
+      sh = ss.insertSheet(sheetName);
+      sh.appendRow(accHeader);
+    }
+
+    // requestId列（11列目=インデックス10）で既存行を検索
+    var lastRow = sh.getLastRow();
+    var existingRowNo = -1;
+    if (lastRow >= 2) {
+      var ridColValues = sh.getRange(2, accHeader.length, lastRow - 1, 1).getValues(); // requestId列
+      for (var i = 0; i < ridColValues.length; i++) {
+        if (normalize_(ridColValues[i][0]) === requestId) {
+          existingRowNo = i + 2;
+          break;
+        }
+      }
+    }
+
+    if (existingRowNo > 0) {
+      // 上書き
+      sh.getRange(existingRowNo, 1, 1, rowData.length).setValues([rowData]);
+    } else {
+      // 追記
+      sh.appendRow(rowData);
+    }
+
+    Logger.log('upsert蓄積完了: ' + requestId + ' → ' + sheetName + (existingRowNo > 0 ? '(上書き)' : '(追記)'));
+  } catch (e) {
+    Logger.log('upsert蓄積エラー（処理続行）: ' + e.message);
   }
 }
 

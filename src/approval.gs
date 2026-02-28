@@ -700,6 +700,9 @@ function api_secondaryApprove(requestId) {
     Logger.log('二次承認: PDF未生成（作業完了前）→ 作業完了時に二次承認印付きPDFが生成されます');
   }
 
+  // 蓄積SSにリアルタイム書き込み（失敗しても処理続行）
+  upsertAccumulationRow_(requestId);
+
   return {
     ok: true,
     requestId: requestId,
@@ -795,6 +798,13 @@ function api_secondaryApproveBatch(requestIds) {
         Logger.log('一括二次承認PDF再生成エラー(' + pdfTargetIds[p] + '): ' + e.message);
       }
       if (pdfTargetIds.length > 5) Utilities.sleep(500);
+    }
+  }
+
+  // ---- Phase 3: 蓄積SSにリアルタイム書き込み（失敗しても処理続行） ----
+  for (var q = 0; q < results.length; q++) {
+    if (results[q].ok && results[q].approvedBy2) {
+      upsertAccumulationRow_(results[q].requestId);
     }
   }
 

@@ -194,6 +194,9 @@ function api_markOvertimeDone(requestId) {
       }
     }
 
+    // 蓄積SSにリアルタイム書き込み（失敗しても処理続行）
+    upsertAccumulationRow_(requestId);
+
     return { ok:true, requestId, actualMinutes, breakMinutes, netMinutes, pdf };
   } finally {
     lock.releaseLock();
@@ -301,6 +304,9 @@ function api_markHolidayDone(requestId) {
         console.warn('PDF生成警告（休日）: ' + pdfErr.message);
       }
     }
+
+    // 蓄積SSにリアルタイム書き込み（失敗しても処理続行）
+    upsertAccumulationRow_(requestId);
 
     return { ok:true, requestId, actualMinutes, breakMinutes, netMinutes, pdf };
   } finally {
