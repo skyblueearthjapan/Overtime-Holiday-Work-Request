@@ -757,7 +757,8 @@ function sendMorningMail_() {
   if (incompleteList.length > 0) {
     bodyLines.push('【⚠ 作業完了未記録のお知らせ】');
     bodyLines.push('以下の作業員は作業完了ボタンが押されておらず、実働時間が記録されていません。');
-    bodyLines.push('確認の上、総務部画面（日次詳細）より手動で実績を入力してください。');
+    bodyLines.push('該当の作業員に連絡し、TOP画面から手入力で実績を記録するよう依頼してください。');
+    bodyLines.push('※ 総務部画面（日次詳細）からも手動入力が可能です。');
     bodyLines.push('');
 
     // 日付別にグループ化（同じ日付のリンクをまとめる）
@@ -784,7 +785,8 @@ function sendMorningMail_() {
         }
       }
       if (appUrl) {
-        bodyLines.push(`  → 手動入力はこちら：${appUrl}?page=admin&date=${targetDate}`);
+        bodyLines.push(`  → 作業員TOP画面：${appUrl}?page=top`);
+        bodyLines.push(`  → 総務部手動入力：${appUrl}?page=admin&date=${targetDate}`);
       }
       bodyLines.push('');
     }

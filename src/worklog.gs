@@ -137,7 +137,7 @@ function assertSelf_(request) {
 
 // ====== 残業：完了ボタン（17:20固定起点） ======
 
-function api_markOvertimeDone(requestId) {
+function api_markOvertimeDone(requestId, manualEndTime) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -149,21 +149,27 @@ function api_markOvertimeDone(requestId) {
     // 本人チェック（workerEmailが未設定ならスキップ）
     assertSelf_(req);
 
-    const now = new Date();
-
     // start = targetDate 17:20（JST）
     // 注意: new Date(y,m,d,h,m,s) はUTC基準のため、JSTの日付コンポーネントを使う
     const d = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
     const targetYmd = fmtDate_(d, 'yyyy-MM-dd'); // JST基準の日付文字列
     const start = new Date(targetYmd + 'T17:20:00+09:00'); // 明示的にJST指定
 
-    const actualMinutes = Math.max(0, Math.round((now.getTime() - start.getTime()) / 60000));
-    const breakMinutes = calcBreakByClockTime_(start, now);
+    // 終了時刻: 手入力(HH:mm)があればそれを使用、なければ現在時刻
+    var end;
+    if (manualEndTime && /^\d{2}:\d{2}$/.test(manualEndTime)) {
+      end = new Date(targetYmd + 'T' + manualEndTime + ':00+09:00');
+    } else {
+      end = new Date();
+    }
+
+    const actualMinutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+    const breakMinutes = calcBreakByClockTime_(start, end);
     const netMinutes = Math.max(0, actualMinutes - breakMinutes);
 
     updateWorkLog_(requestId, {
       actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
-      actualEndAt:   fmtDate_(now,   'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(end,   'yyyy-MM-dd HH:mm:ss'),
       actualMinutes: actualMinutes,
       breakMinutes: breakMinutes,
       netMinutes: netMinutes,
@@ -175,7 +181,7 @@ function api_markOvertimeDone(requestId) {
     // TZバグ回避: WorkLogsを再読み込みせず、計算済みの正しい値を直接PDFに渡す
     const wlOverride = {
       actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
-      actualEndAt:   fmtDate_(now,   'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(end,   'yyyy-MM-dd HH:mm:ss'),
       actualMinutes: actualMinutes,
       breakMinutes:  breakMinutes,
       netMinutes:    netMinutes,
@@ -205,7 +211,7 @@ function api_markOvertimeDone(requestId) {
 
 // ====== 休日：開始ボタン ======
 
-function api_markHolidayStart(requestId) {
+function api_markHolidayStart(requestId, manualStartTime) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -216,14 +222,23 @@ function api_markHolidayStart(requestId) {
 
     assertSelf_(req);
 
-    const now = new Date();
+    // 開始時刻: 手入力(HH:mm)があればそれを使用、なければ現在時刻
+    var startTime;
+    if (manualStartTime && /^\d{2}:\d{2}$/.test(manualStartTime)) {
+      const d = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
+      const targetYmd = fmtDate_(d, 'yyyy-MM-dd');
+      startTime = new Date(targetYmd + 'T' + manualStartTime + ':00+09:00');
+    } else {
+      startTime = new Date();
+    }
+
     updateWorkLog_(requestId, {
-      actualStartAt: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'),
-      updatedAt:     fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'),
+      actualStartAt: fmtDate_(startTime, 'yyyy-MM-dd HH:mm:ss'),
+      updatedAt:     fmtDate_(new Date(), 'yyyy-MM-dd HH:mm:ss'),
       updatedBy: Session.getActiveUser().getEmail() || 'unknown',
     });
 
-    return { ok:true, requestId, actualStartAt: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') };
+    return { ok:true, requestId, actualStartAt: fmtDate_(startTime, 'yyyy-MM-dd HH:mm:ss') };
   } finally {
     lock.releaseLock();
   }
@@ -231,7 +246,7 @@ function api_markHolidayStart(requestId) {
 
 // ====== 休日：完了ボタン（start/end で実績 → 休憩 → net） ======
 
-function api_markHolidayDone(requestId) {
+function api_markHolidayDone(requestId, manualEndTime) {
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -267,14 +282,23 @@ function api_markHolidayDone(requestId) {
       throw new Error('休日開始が記録されていません（開始ボタンを押してください）。');
     }
 
-    const now = new Date();
-    const actualMinutes = Math.max(0, Math.round((now.getTime() - start.getTime()) / 60000));
-    const breakMinutes = calcBreakByClockTime_(start, now);
+    // 終了時刻: 手入力(HH:mm)があればそれを使用、なければ現在時刻
+    var end;
+    if (manualEndTime && /^\d{2}:\d{2}$/.test(manualEndTime)) {
+      const dEnd = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
+      const targetYmd = fmtDate_(dEnd, 'yyyy-MM-dd');
+      end = new Date(targetYmd + 'T' + manualEndTime + ':00+09:00');
+    } else {
+      end = new Date();
+    }
+
+    const actualMinutes = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+    const breakMinutes = calcBreakByClockTime_(start, end);
     const netMinutes = Math.max(0, actualMinutes - breakMinutes);
 
     updateWorkLog_(requestId, {
       actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'), // TZバグ回避: 正しいJST文字列で再保存
-      actualEndAt:   fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(end,   'yyyy-MM-dd HH:mm:ss'),
       actualMinutes: actualMinutes,
       breakMinutes: breakMinutes,
       netMinutes: netMinutes,
@@ -286,7 +310,7 @@ function api_markHolidayDone(requestId) {
     // TZバグ回避: WorkLogsを再読み込みせず、計算済みの正しい値を直接PDFに渡す
     const wlOverride = {
       actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
-      actualEndAt:   fmtDate_(now,   'yyyy-MM-dd HH:mm:ss'),
+      actualEndAt:   fmtDate_(end,   'yyyy-MM-dd HH:mm:ss'),
       actualMinutes: actualMinutes,
       breakMinutes:  breakMinutes,
       netMinutes:    netMinutes,
@@ -413,6 +437,11 @@ function api_getDashboard() {
     const overtime = [];
     const holiday = [];
 
+    // 過去30日の下限（パフォーマンス考慮）
+    const thirtyDaysAgo = new Date(now);
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const overdueLimit = fmtDate_(thirtyDaysAgo, 'yyyy-MM-dd');
+
     for (let r = 1; r < values.length; r++) {
       const row = values[r];
       const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
@@ -439,6 +468,17 @@ function api_getDashboard() {
       // 二次承認状態を取得
       const approvedBy2 = idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '';
 
+      // 期限超過フラグ: 過去日 + 承認済み + 未完了
+      const isPastDate = targetDate < today;
+      let isOverdue = false;
+      if (isPastDate && status === 'approved' && targetDate >= overdueLimit) {
+        if (requestType === 'overtime' && !actualEndAt) {
+          isOverdue = true;
+        } else if (requestType === 'holiday' && (!actualStartAt || !actualEndAt)) {
+          isOverdue = true;
+        }
+      }
+
       const item = {
         requestId: requestId || '',
         requestType: requestType || '',
@@ -456,10 +496,23 @@ function api_getDashboard() {
         netMinutes: Number(wl.netMinutes || 0),
         pdfFileId: normalize_(row[idx['pdfFileId']]) || '',
         approvedBy2: approvedBy2,
+        isOverdue: isOverdue,
       };
 
       // 完了+二次承認済み → 当日中は表示維持、翌日以降は非表示
       if (wl.actualEndAt && approvedBy2 && targetDate !== today) continue;
+
+      // 期限超過アイテムは常に表示
+      if (isOverdue) {
+        const d2 = new Date(targetDate + 'T00:00:00');
+        item.targetDateLabel = (d2.getMonth()+1) + '/' + d2.getDate() + '(' + dayNames[d2.getDay()] + ')';
+        if (requestType === 'overtime') {
+          overtime.push(item);
+        } else {
+          holiday.push(item);
+        }
+        continue;
+      }
 
       if (requestType === 'overtime' && targetDate === today) {
         overtime.push(item);

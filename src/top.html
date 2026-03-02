@@ -136,6 +136,34 @@
     }
     .nav-link:hover{ background:var(--bg1); text-decoration:none; }
     .loading{ text-align:center; padding:30px; color:var(--muted); }
+    .manual-input-area{
+      display:none;
+      margin-top:6px;
+      padding:6px 8px;
+      background:#f8fafc;
+      border:1px solid var(--line);
+      border-radius:8px;
+    }
+    .manual-input-area input[type="time"]{
+      padding:4px 8px;
+      border:1px solid var(--line);
+      border-radius:6px;
+      font-size:13px;
+      width:90px;
+    }
+    .overdue-banner{
+      background:#fff0f0;
+      border:1px solid #ffb3b3;
+      border-radius:10px;
+      padding:10px 14px;
+      margin-bottom:10px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:13px;
+      font-weight:700;
+      color:#7a0b0b;
+    }
     .order-slot{ display:flex; align-items:center; }
     .order-item{
       padding:10px 14px;
@@ -727,6 +755,25 @@ function renderDashboard(res){
   otTb.innerHTML = '';
   document.getElementById('otCount').innerText = res.overtime.length + '名';
 
+  // 残業の期限超過件数を集計してバナー表示
+  var otOverdueCount = 0;
+  (res.overtime || []).forEach(function(it){ if(it.isOverdue) otOverdueCount++; });
+  var otBanner = document.getElementById('otOverdueBanner');
+  if(!otBanner){
+    otBanner = document.createElement('div');
+    otBanner.id = 'otOverdueBanner';
+    otBanner.className = 'overdue-banner';
+    var otCard = document.getElementById('tblOvertime').parentElement;
+    otCard.insertBefore(otBanner, document.getElementById('tblOvertime'));
+  }
+  if(otOverdueCount > 0){
+    otBanner.innerHTML = '<span style="font-size:18px;flex-shrink:0;">&#9888;</span>' +
+      '<span>作業完了が未記録の申請があります（' + otOverdueCount + '件）。手入力で記録してください。</span>';
+    otBanner.style.display = 'flex';
+  } else {
+    otBanner.style.display = 'none';
+  }
+
   if(!res.overtime || res.overtime.length === 0){
     otTb.innerHTML =
       '<tr><td colspan="9" class="muted" style="text-align:center;padding:24px">' +
@@ -739,6 +786,25 @@ function renderDashboard(res){
   var hdTb = document.querySelector('#tblHoliday tbody');
   hdTb.innerHTML = '';
   document.getElementById('hdCount').innerText = res.holiday.length + '名';
+
+  // 休日の期限超過件数を集計してバナー表示
+  var hdOverdueCount = 0;
+  (res.holiday || []).forEach(function(it){ if(it.isOverdue) hdOverdueCount++; });
+  var hdBanner = document.getElementById('hdOverdueBanner');
+  if(!hdBanner){
+    hdBanner = document.createElement('div');
+    hdBanner.id = 'hdOverdueBanner';
+    hdBanner.className = 'overdue-banner';
+    var hdCard = document.getElementById('tblHoliday').parentElement;
+    hdCard.insertBefore(hdBanner, document.getElementById('tblHoliday'));
+  }
+  if(hdOverdueCount > 0){
+    hdBanner.innerHTML = '<span style="font-size:18px;flex-shrink:0;">&#9888;</span>' +
+      '<span>作業完了が未記録の申請があります（' + hdOverdueCount + '件）。手入力で記録してください。</span>';
+    hdBanner.style.display = 'flex';
+  } else {
+    hdBanner.style.display = 'none';
+  }
 
   if(!res.holiday || res.holiday.length === 0){
     hdTb.innerHTML =
@@ -758,11 +824,18 @@ function buildOvertimeRow(it){
   var pdfCell = buildPdfCell(it);
   var actionCell = buildActionCell(it);
 
+  // 過去日の期限超過アイテムには日付ラベルを表示
+  var nameCell = '<b>' + escHtml(it.workerName) + '</b>';
+  if(it.isOverdue && it.targetDateLabel){
+    nameCell += ' <span class="pill danger" style="font-size:11px;">' + escHtml(it.targetDateLabel) + '</span>';
+  }
+
   var tr = document.createElement('tr');
   tr.setAttribute('data-request-id', it.requestId);
+  if(it.isOverdue) tr.style.background = 'rgba(255,90,95,0.05)';
   tr.innerHTML =
     '<td>' + escHtml(it.dept) + '</td>' +
-    '<td><b>' + escHtml(it.workerName) + '</b></td>' +
+    '<td>' + nameCell + '</td>' +
     '<td>' + statusPill + '</td>' +
     '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
     '<td>' + (it.actualMinutes > 0 ? fmtMin(it.actualMinutes) : '<span class="muted">-</span>') + '</td>' +
@@ -784,6 +857,7 @@ function buildHolidayRow(it){
 
   var tr = document.createElement('tr');
   tr.setAttribute('data-request-id', it.requestId);
+  if(it.isOverdue) tr.style.background = 'rgba(255,90,95,0.05)';
   tr.innerHTML =
     '<td>' + escHtml(it.targetDateLabel || it.targetDate) + '</td>' +
     '<td>' + escHtml(it.dept) + '</td>' +
@@ -838,6 +912,8 @@ function check4hAlert(it){
 // ====== 操作ボタン構築 ======
 function buildActionCell(it){
   var alert4h = check4hAlert(it);
+  var rid = it.requestId;
+  var overdueBadge = '';
 
   if(it.status === 'submitted'){
     return '<span class="muted">承認待ち</span>';
@@ -847,8 +923,16 @@ function buildActionCell(it){
     if(it.actualEndAt){
       return '<span class="pill ok">完了済</span>';
     }
-    return '<button class="btn-blue btn-sm" ' +
-      'onclick="doOvertimeDone(\'' + it.requestId + '\',this)">残業完了</button>' + alert4h;
+    if(it.isOverdue) overdueBadge = '<span class="pill danger">&#9888; 期限超過</span> ';
+    return overdueBadge +
+      '<button class="btn-blue btn-sm" onclick="doOvertimeDone(\'' + rid + '\',this)">残業完了</button>' +
+      ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'ot-end\')">手入力</button>' +
+      alert4h +
+      '<div class="manual-input-area" id="manual-area-' + rid + '">' +
+        '<span style="font-size:12px;">終了時刻：</span>' +
+        '<input type="time" id="manual-end-' + rid + '" value="' + (it.isOverdue ? '20:00' : '') + '" />' +
+        ' <button class="btn-blue btn-sm" onclick="doManualOvertimeDone(\'' + rid + '\')">記録</button>' +
+      '</div>';
   }
 
   if(it.requestType === 'holiday'){
@@ -856,11 +940,26 @@ function buildActionCell(it){
       return '<span class="pill ok">完了済</span>';
     }
     if(it.actualStartAt){
-      return '<button class="btn-sm" ' +
-        'onclick="doHolidayDone(\'' + it.requestId + '\',this)">休日完了</button>' + alert4h;
+      if(it.isOverdue) overdueBadge = '<span class="pill danger">&#9888; 期限超過</span> ';
+      return overdueBadge +
+        '<button class="btn-sm" onclick="doHolidayDone(\'' + rid + '\',this)">休日完了</button>' +
+        ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'hd-end\')">手入力</button>' +
+        alert4h +
+        '<div class="manual-input-area" id="manual-area-' + rid + '">' +
+          '<span style="font-size:12px;">終了時刻：</span>' +
+          '<input type="time" id="manual-end-' + rid + '" value="' + (it.isOverdue ? '17:00' : '') + '" />' +
+          ' <button class="btn-sm" onclick="doManualHolidayDone(\'' + rid + '\')">記録</button>' +
+        '</div>';
     }
-    return '<button class="btn-warn btn-sm" ' +
-      'onclick="doHolidayStart(\'' + it.requestId + '\',this)">開始</button>';
+    if(it.isOverdue) overdueBadge = '<span class="pill danger">&#9888; 未開始</span> ';
+    return overdueBadge +
+      '<button class="btn-warn btn-sm" onclick="doHolidayStart(\'' + rid + '\',this)">開始</button>' +
+      ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'hd-start\')">手入力</button>' +
+      '<div class="manual-input-area" id="manual-area-' + rid + '">' +
+        '<span style="font-size:12px;">開始時刻：</span>' +
+        '<input type="time" id="manual-start-' + rid + '" value="' + (it.isOverdue ? '08:00' : '') + '" />' +
+        ' <button class="btn-warn btn-sm" onclick="doManualHolidayStart(\'' + rid + '\')">記録</button>' +
+      '</div>';
   }
 
   return '-';
@@ -876,6 +975,13 @@ function updateRowAction(requestId, newHtml) {
   setTimeout(function(){ row.style.background = ''; }, 1200);
 }
 
+// ====== 手入力フィールドの展開/折りたたみ ======
+function toggleManualInput(requestId, type){
+  var area = document.getElementById('manual-area-' + requestId);
+  if(!area) return;
+  area.style.display = area.style.display === 'block' ? 'none' : 'block';
+}
+
 // ====== 残業完了 ======
 function doOvertimeDone(requestId, btn){
   if(!confirm('残業完了を記録しますか？\n（17:20から現在時刻まで自動計算されます）')) return;
@@ -884,11 +990,9 @@ function doOvertimeDone(requestId, btn){
 
   google.script.run
     .withSuccessHandler(function(res){
-      // 実績値をセルに反映（サーバーの計算結果）
       var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
       if(row){
         var c = row.querySelectorAll('td');
-        // 残業行: dept,name,status,plan,actual,break,net,pdf,action (9列)
         c[4].innerHTML = fmtMin(res.actualMinutes);
         c[5].innerHTML = fmtMin(res.breakMinutes);
         c[6].innerHTML = '<b>' + fmtMin(res.netMinutes) + '</b>';
@@ -901,6 +1005,32 @@ function doOvertimeDone(requestId, btn){
       loadDashboard();
     })
     .api_markOvertimeDone(requestId);
+}
+
+// ====== 手入力で残業完了 ======
+function doManualOvertimeDone(requestId){
+  var timeStr = document.getElementById('manual-end-' + requestId).value;
+  if(!timeStr){ alert('終了時刻を入力してください。'); return; }
+  if(!confirm('終了時刻 ' + timeStr + ' で残業完了を記録しますか？')) return;
+  updateRowAction(requestId, '<span class="pill ok">完了済</span>');
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
+      if(row){
+        var c = row.querySelectorAll('td');
+        c[4].innerHTML = fmtMin(res.actualMinutes);
+        c[5].innerHTML = fmtMin(res.breakMinutes);
+        c[6].innerHTML = '<b>' + fmtMin(res.netMinutes) + '</b>';
+      }
+      alert('残業完了を記録しました。\n実働: ' + fmtMin(res.actualMinutes) +
+        '\n休憩控除: ' + fmtMin(res.breakMinutes) + '\n実残業: ' + fmtMin(res.netMinutes));
+    })
+    .withFailureHandler(function(err){
+      alert('エラー: ' + (err.message || err));
+      loadDashboard();
+    })
+    .api_markOvertimeDone(requestId, timeStr);
 }
 
 // ====== 休日開始 ======
@@ -919,6 +1049,29 @@ function doHolidayStart(requestId, btn){
     .api_markHolidayStart(requestId);
 }
 
+// ====== 手入力で休日開始 ======
+function doManualHolidayStart(requestId){
+  var timeStr = document.getElementById('manual-start-' + requestId).value;
+  if(!timeStr){ alert('開始時刻を入力してください。'); return; }
+  if(!confirm('開始時刻 ' + timeStr + ' で休日出勤開始を記録しますか？')) return;
+  updateRowAction(requestId,
+    '<button class="btn-sm" onclick="doHolidayDone(\'' + requestId + '\',this)">休日完了</button>' +
+    ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + requestId + '\',\'hd-end\')">手入力</button>' +
+    '<div class="manual-input-area" id="manual-area-' + requestId + '">' +
+      '<span style="font-size:12px;">終了時刻：</span>' +
+      '<input type="time" id="manual-end-' + requestId + '" />' +
+      ' <button class="btn-sm" onclick="doManualHolidayDone(\'' + requestId + '\')">記録</button>' +
+    '</div>');
+
+  google.script.run
+    .withSuccessHandler(function(){})
+    .withFailureHandler(function(err){
+      alert('エラー: ' + (err.message || err));
+      loadDashboard();
+    })
+    .api_markHolidayStart(requestId, timeStr);
+}
+
 // ====== 休日完了 ======
 function doHolidayDone(requestId, btn){
   if(!confirm('休日出勤を完了しますか？\n（開始時刻から現在時刻まで自動計算されます）')) return;
@@ -930,7 +1083,6 @@ function doHolidayDone(requestId, btn){
       var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
       if(row){
         var c = row.querySelectorAll('td');
-        // 休日行: date,dept,name,status,plan,actual,break,net,pdf,action (10列)
         c[5].innerHTML = fmtMin(res.actualMinutes);
         c[6].innerHTML = fmtMin(res.breakMinutes);
         c[7].innerHTML = '<b>' + fmtMin(res.netMinutes) + '</b>';
@@ -943,6 +1095,32 @@ function doHolidayDone(requestId, btn){
       loadDashboard();
     })
     .api_markHolidayDone(requestId);
+}
+
+// ====== 手入力で休日完了 ======
+function doManualHolidayDone(requestId){
+  var timeStr = document.getElementById('manual-end-' + requestId).value;
+  if(!timeStr){ alert('終了時刻を入力してください。'); return; }
+  if(!confirm('終了時刻 ' + timeStr + ' で休日出勤完了を記録しますか？')) return;
+  updateRowAction(requestId, '<span class="pill ok">完了済</span>');
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
+      if(row){
+        var c = row.querySelectorAll('td');
+        c[5].innerHTML = fmtMin(res.actualMinutes);
+        c[6].innerHTML = fmtMin(res.breakMinutes);
+        c[7].innerHTML = '<b>' + fmtMin(res.netMinutes) + '</b>';
+      }
+      alert('休日出勤を完了しました。\n実働: ' + fmtMin(res.actualMinutes) +
+        '\n休憩控除: ' + fmtMin(res.breakMinutes) + '\n実残業/実働: ' + fmtMin(res.netMinutes));
+    })
+    .withFailureHandler(function(err){
+      alert('エラー: ' + (err.message || err));
+      loadDashboard();
+    })
+    .api_markHolidayDone(requestId, timeStr);
 }
 </script>
 </body>
