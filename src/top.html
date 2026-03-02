@@ -144,12 +144,12 @@
       border:1px solid var(--line);
       border-radius:8px;
     }
-    .manual-input-area input[type="time"]{
+    .manual-input-area select{
       padding:4px 8px;
       border:1px solid var(--line);
       border-radius:6px;
       font-size:13px;
-      width:90px;
+      width:100px;
     }
     .overdue-banner{
       background:#fff0f0;
@@ -930,7 +930,7 @@ function buildActionCell(it){
       alert4h +
       '<div class="manual-input-area" id="manual-area-' + rid + '">' +
         '<span style="font-size:12px;">終了時刻：</span>' +
-        '<input type="time" id="manual-end-' + rid + '" value="' + (it.isOverdue ? '20:00' : '') + '" />' +
+        buildTimeSelect('manual-end-' + rid, 'ot-end', it.isOverdue ? '20:00' : '') +
         ' <button class="btn-blue btn-sm" onclick="doManualOvertimeDone(\'' + rid + '\')">記録</button>' +
       '</div>';
   }
@@ -947,7 +947,7 @@ function buildActionCell(it){
         alert4h +
         '<div class="manual-input-area" id="manual-area-' + rid + '">' +
           '<span style="font-size:12px;">終了時刻：</span>' +
-          '<input type="time" id="manual-end-' + rid + '" value="' + (it.isOverdue ? '17:00' : '') + '" />' +
+          buildTimeSelect('manual-end-' + rid, 'hd-end', it.isOverdue ? '17:00' : '') +
           ' <button class="btn-sm" onclick="doManualHolidayDone(\'' + rid + '\')">記録</button>' +
         '</div>';
     }
@@ -957,7 +957,7 @@ function buildActionCell(it){
       ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'hd-start\')">手入力</button>' +
       '<div class="manual-input-area" id="manual-area-' + rid + '">' +
         '<span style="font-size:12px;">開始時刻：</span>' +
-        '<input type="time" id="manual-start-' + rid + '" value="' + (it.isOverdue ? '08:00' : '') + '" />' +
+        buildTimeSelect('manual-start-' + rid, 'hd-start', it.isOverdue ? '08:00' : '') +
         ' <button class="btn-warn btn-sm" onclick="doManualHolidayStart(\'' + rid + '\')">記録</button>' +
       '</div>';
   }
@@ -980,6 +980,28 @@ function toggleManualInput(requestId, type){
   var area = document.getElementById('manual-area-' + requestId);
   if(!area) return;
   area.style.display = area.style.display === 'block' ? 'none' : 'block';
+}
+
+// ====== 10分刻みの時刻プルダウン生成 ======
+// type: 'ot-end'(残業終了17:30~翌03:00), 'hd-start'(休日開始06:00~18:00), 'hd-end'(休日終了08:00~23:00)
+function buildTimeSelect(id, type, defaultVal){
+  var ranges = {
+    'ot-end':   { startH:17, startM:30, endH:27, endM:0 },
+    'hd-start': { startH:6,  startM:0,  endH:18, endM:0 },
+    'hd-end':   { startH:8,  startM:0,  endH:23, endM:0 }
+  };
+  var r = ranges[type] || { startH:6, startM:0, endH:23, endM:0 };
+  var html = '<select id="' + id + '">';
+  html += '<option value="">--:--</option>';
+  for(var t = r.startH * 60 + r.startM; t <= r.endH * 60 + r.endM; t += 10){
+    var h = Math.floor(t / 60) % 24;
+    var m = t % 60;
+    var val = (h < 10 ? '0' : '') + h + ':' + (m < 10 ? '0' : '') + m;
+    var sel = (val === defaultVal) ? ' selected' : '';
+    html += '<option value="' + val + '"' + sel + '>' + val + '</option>';
+  }
+  html += '</select>';
+  return html;
 }
 
 // ====== 残業完了 ======
@@ -1059,7 +1081,7 @@ function doManualHolidayStart(requestId){
     ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + requestId + '\',\'hd-end\')">手入力</button>' +
     '<div class="manual-input-area" id="manual-area-' + requestId + '">' +
       '<span style="font-size:12px;">終了時刻：</span>' +
-      '<input type="time" id="manual-end-' + requestId + '" />' +
+      buildTimeSelect('manual-end-' + requestId, 'hd-end', '') +
       ' <button class="btn-sm" onclick="doManualHolidayDone(\'' + requestId + '\')">記録</button>' +
     '</div>');
 
