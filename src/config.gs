@@ -11,6 +11,7 @@ const SHEET = {
   ORDERS: '工番マスタ',
   BATCH_LOGS: 'BatchLogs',
   STAMP_MAP: 'StampMap',        // メール→印鑑画像FileIDマッピング
+  COMPANY_CALENDAR: '社内カレンダーマスタ', // 年度カレンダー（休日/祝日/出勤日）
 };
 
 // フォーム内の質問タイトル（両テンプレフォームで統一すること）
