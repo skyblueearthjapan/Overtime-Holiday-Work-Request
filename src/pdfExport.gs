@@ -10,7 +10,7 @@ const PDF_MAP = {
   startAt: 'C10',          // 開始時刻
   endAt: 'F10',            // 終了時刻
   breakMin: 'C12',         // 休憩時間（分）
-  netMin: 'F12',           // 実残業/実働時間（分）
+  netMin: 'F12',           // 実残業時間（例: "1時間30分"）
   detail: [
     { workNo: 'B18', customer: 'D18', product: 'F18' },
     { workNo: 'B19', customer: 'D19', product: 'F19' },
@@ -21,6 +21,17 @@ const PDF_MAP = {
   approverBox: 'F34',      // 承認者
   approverBox2: 'G34',     // 2次承認者
 };
+
+// ====== 分→時間表示ヘルパー（例: 90→"1時間30分"） ======
+
+function fmtMinToHM_(min) {
+  min = Math.max(0, Math.round(Number(min || 0)));
+  var h = Math.floor(min / 60);
+  var r = min % 60;
+  if (h === 0) return r + '分';
+  if (r === 0) return h + '時間';
+  return h + '時間' + r + '分';
+}
 
 // ====== 印鑑画像ヘルパー ======
 
@@ -171,7 +182,7 @@ function generatePdfForRequest_(requestId, workLogOverride) {
       var oEndTime = extractHHmm_(wl.actualEndAt);
       if (oEndTime) formSheet.getRange(PDF_MAP.endAt).setValue(oEndTime);
       formSheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
-      formSheet.getRange(PDF_MAP.netMin).setValue(Number(wl.netMinutes || 0));
+      formSheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(wl.netMinutes));
     } else if (req.requestType === 'holiday') {
       // 休日出勤も残業と同様に直接書込（XLOOKUPのTZバグ回避）
       var hStartTime = extractHHmm_(wl.actualStartAt);
@@ -179,7 +190,7 @@ function generatePdfForRequest_(requestId, workLogOverride) {
       if (hStartTime) formSheet.getRange(PDF_MAP.startAt).setValue(hStartTime);
       if (hEndTime) formSheet.getRange(PDF_MAP.endAt).setValue(hEndTime);
       formSheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
-      formSheet.getRange(PDF_MAP.netMin).setValue(Number(wl.netMinutes || 0));
+      formSheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(wl.netMinutes));
       // 区分
       var hMins = Number(req.approvedMinutes || 0);
       formSheet.getRange(PDF_MAP.kubun).setValue(hMins <= 240 ? '半日' : '1日');
@@ -455,7 +466,7 @@ function fillPdfTemplate_(sheet, reqData, requestId, workLogOverride) {
 
   // 休憩・実残業
   sheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
-  sheet.getRange(PDF_MAP.netMin).setValue(Number(wl.netMinutes || 0));
+  sheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(wl.netMinutes));
 
   // 明細行（最大3行）
   for (let i = 0; i < PDF_MAP.detail.length; i++) {
