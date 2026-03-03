@@ -33,6 +33,37 @@ function fmtMinToHM_(min) {
   return h + '時間' + r + '分';
 }
 
+/**
+ * netMinutesの異常値（24時間=1440分超）をチェックし、
+ * TZバグ等で不正な値が出た場合は警告ログを出してstartAt/endAtから再計算する。
+ */
+function sanitizeNetMinutes_(wl, requestType) {
+  var net = Number(wl.netMinutes || 0);
+  // 残業は最大12時間(720分)、休日は最大16時間(960分)を上限とする
+  var limit = (requestType === 'overtime') ? 720 : 960;
+  if (net > limit) {
+    Logger.log('[PDF警告] netMinutes=' + net + ' が上限(' + limit + ')超過。'
+      + ' startAt=' + wl.actualStartAt + ' endAt=' + wl.actualEndAt
+      + ' — TZバグの可能性あり。startAt/endAtから再計算します。');
+    // startAt/endAtから再計算
+    var startStr = String(wl.actualStartAt || '');
+    var endStr = String(wl.actualEndAt || '');
+    var startMatch = startStr.match(/(\d{2}):(\d{2})/);
+    var endMatch = endStr.match(/(\d{2}):(\d{2})/);
+    if (startMatch && endMatch) {
+      var startMin = parseInt(startMatch[1]) * 60 + parseInt(startMatch[2]);
+      var endMin = parseInt(endMatch[1]) * 60 + parseInt(endMatch[2]);
+      var diff = endMin - startMin;
+      if (diff > 0) {
+        var brk = Number(wl.breakMinutes || 0);
+        net = Math.max(0, diff - brk);
+        Logger.log('[PDF警告] 再計算結果: net=' + net + '分 (start=' + startMatch[0] + ' end=' + endMatch[0] + ' break=' + brk + ')');
+      }
+    }
+  }
+  return net;
+}
+
 // ====== 印鑑画像ヘルパー ======
 
 /**
@@ -181,16 +212,18 @@ function generatePdfForRequest_(requestId, workLogOverride) {
       formSheet.getRange(PDF_MAP.startAt).setValue('17:20');
       var oEndTime = extractHHmm_(wl.actualEndAt);
       if (oEndTime) formSheet.getRange(PDF_MAP.endAt).setValue(oEndTime);
-      formSheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
-      formSheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(wl.netMinutes));
+      formSheet.getRange(PDF_MAP.breakMin).setValue(fmtMinToHM_(wl.breakMinutes));
+      var oNet = sanitizeNetMinutes_(wl, 'overtime');
+      formSheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(oNet));
     } else if (req.requestType === 'holiday') {
       // 休日出勤も残業と同様に直接書込（XLOOKUPのTZバグ回避）
       var hStartTime = extractHHmm_(wl.actualStartAt);
       var hEndTime = extractHHmm_(wl.actualEndAt);
       if (hStartTime) formSheet.getRange(PDF_MAP.startAt).setValue(hStartTime);
       if (hEndTime) formSheet.getRange(PDF_MAP.endAt).setValue(hEndTime);
-      formSheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
-      formSheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(wl.netMinutes));
+      formSheet.getRange(PDF_MAP.breakMin).setValue(fmtMinToHM_(wl.breakMinutes));
+      var hNet = sanitizeNetMinutes_(wl, 'holiday');
+      formSheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(hNet));
       // 区分
       var hMins = Number(req.approvedMinutes || 0);
       formSheet.getRange(PDF_MAP.kubun).setValue(hMins <= 240 ? '半日' : '1日');
@@ -465,8 +498,9 @@ function fillPdfTemplate_(sheet, reqData, requestId, workLogOverride) {
   if (endTime) sheet.getRange(PDF_MAP.endAt).setValue(endTime);
 
   // 休憩・実残業
-  sheet.getRange(PDF_MAP.breakMin).setValue(Number(wl.breakMinutes || 0));
-  sheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(wl.netMinutes));
+  sheet.getRange(PDF_MAP.breakMin).setValue(fmtMinToHM_(wl.breakMinutes));
+  var dNet = sanitizeNetMinutes_(wl, requestType);
+  sheet.getRange(PDF_MAP.netMin).setValue(fmtMinToHM_(dNet));
 
   // 明細行（最大3行）
   for (let i = 0; i < PDF_MAP.detail.length; i++) {
