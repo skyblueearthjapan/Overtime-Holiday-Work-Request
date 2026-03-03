@@ -135,6 +135,8 @@
       border:1px solid var(--line); background:#fff; color:var(--text);
     }
     .nav-link:hover{ background:var(--bg1); text-decoration:none; }
+    .portal-link{ background:var(--accent); color:#fff; border-color:var(--accent); }
+    .portal-link:hover{ background:#177a43; color:#fff; }
     .loading{ text-align:center; padding:30px; color:var(--muted); }
     .manual-input-area{
       display:none;
@@ -196,6 +198,7 @@
     <div class="row">
       <a href="<?= APP_URL ?>?page=approver" target="_top" class="nav-link">承認者画面</a>
       <a href="<?= APP_URL ?>?page=admin" target="_top" class="nav-link">総務部画面</a>
+      <a href="<?= PORTAL_URL ?>" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
     </div>
   </header>
 

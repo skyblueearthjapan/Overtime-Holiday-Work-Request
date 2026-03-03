@@ -535,6 +535,7 @@ function doGet(e) {
     if (!adminResult.ok) {
       const t = HtmlService.createTemplateFromFile('no_auth');
       t.APP_URL = appUrl;
+      t.PORTAL_URL = 'https://script.google.com/a/macros/lineworks-local.info/s/AKfycbx2eyJMOYP9o--GPBuhY-pj071IIR6Kqb_0xALwwNzdLQZux0dIAlL3P9EoCucnzXA/exec';
       t.message = '総務部（管理者）権限がありません。\n'
         + 'ApproverMap シートに role=admin で登録されているか、\n'
         + 'Settings シートの ADMIN_EMAILS にメールアドレスが含まれているか確認してください。\n'
@@ -558,6 +559,7 @@ function doGet(e) {
         if (!hasDept) {
           const t = HtmlService.createTemplateFromFile('no_auth');
           t.APP_URL = appUrl;
+          t.PORTAL_URL = 'https://script.google.com/a/macros/lineworks-local.info/s/AKfycbx2eyJMOYP9o--GPBuhY-pj071IIR6Kqb_0xALwwNzdLQZux0dIAlL3P9EoCucnzXA/exec';
           t.message = '承認者権限がありません。\nDeptApprovers または ApproverMap に登録されているか確認してください。\n（現在のアカウント: ' + email + '）';
           return t.evaluate().setTitle('権限エラー')
             .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
@@ -568,6 +570,7 @@ function doGet(e) {
 
   const t = HtmlService.createTemplateFromFile(safePage);
   t.APP_URL = appUrl;
+  t.PORTAL_URL = 'https://script.google.com/a/macros/lineworks-local.info/s/AKfycbx2eyJMOYP9o--GPBuhY-pj071IIR6Kqb_0xALwwNzdLQZux0dIAlL3P9EoCucnzXA/exec';
   t.DATE_PARAM = (e && e.parameter && e.parameter.date) ? e.parameter.date : '';
 
   return t.evaluate()
