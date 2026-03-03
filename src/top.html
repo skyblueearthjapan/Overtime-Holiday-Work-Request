@@ -475,7 +475,7 @@
           </div>
 
           <div class="req-field">
-            <label>業務内容（任意）</label>
+            <label>業務内容</label>
             <textarea id="reqWorkContent" placeholder="作業内容があれば入力してください"></textarea>
           </div>
         </div>
@@ -1393,6 +1393,18 @@ function loadHolidayDates(){
         var lbl = c.label;
         if(c.holidayName) lbl += ' (' + c.holidayName + ')';
         btn.textContent = lbl;
+        // 土曜=緑、日曜・祝日=青
+        var isSat = c.label.indexOf('(土)') >= 0;
+        var isSunOrHoliday = c.label.indexOf('(日)') >= 0 || c.type === 'holiday';
+        if(isSat){
+          btn.style.borderLeft = '4px solid var(--accent)';
+          btn.style.color = '#0b5a2b';
+          btn.style.background = '#f0fff6';
+        } else if(isSunOrHoliday){
+          btn.style.borderLeft = '4px solid var(--accent2)';
+          btn.style.color = '#0b2a5a';
+          btn.style.background = '#f0f7ff';
+        }
         btn.onclick = function(){ selectReqDate(c.date); };
         container.appendChild(btn);
       });
