@@ -641,6 +641,124 @@ function appendRequestRow_(obj) {
   sh.appendRow(row);
 }
 
+// ====== モーダル直接送信API（フォーム不要） ======
+// top.html のモーダルから google.script.run.api_submitRequest(data) で呼ばれる。
+// 既存ヘルパーを全て再利用し、Requestsシートに直接書き込む。
+
+function api_submitRequest(data) {
+  // --- バリデーション ---
+  var requestType = normalize_(data.requestType);   // 'overtime' or 'holiday'
+  var dept        = normalize_(data.dept);
+  var workerLabel = normalize_(data.workerLabel);
+  var targetDate  = normalize_(data.targetDate);
+  var workNo1     = normalize_(data.workNo1 || '');
+  var workNo2     = normalize_(data.workNo2 || '');
+  var workNo3     = normalize_(data.workNo3 || '');
+  var reason      = normalize_(data.reason || '');
+  var reasonDetail= normalize_(data.reasonDetail || '');
+  var workContent = normalize_(data.workContent || '');
+  var hours       = normalize_(data.hours || '');
+
+  if (requestType !== 'overtime' && requestType !== 'holiday') {
+    throw new Error('申請種別が不正です: ' + requestType);
+  }
+  if (!dept) throw new Error('部署が指定されていません。');
+  if (!workerLabel) throw new Error('作業員が指定されていません。');
+  if (!reason) throw new Error('理由を選択してください。');
+  if (reason.indexOf('その他') >= 0 && !reasonDetail) {
+    throw new Error('理由が「その他」の場合、補足理由が必須です。');
+  }
+  if (!hours) throw new Error('予定時間を選択してください。');
+
+  // 残業は本日自動、休日は必須
+  if (requestType === 'overtime') {
+    targetDate = fmtDate_(new Date(), 'yyyy-MM-dd');
+  } else {
+    if (!targetDate) throw new Error('作業実施日を選択してください。');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
+      throw new Error('作業実施日の形式が不正です: ' + targetDate);
+    }
+    var d = new Date(targetDate + 'T00:00:00+09:00');
+    if (isNaN(d.getTime())) throw new Error('作業実施日が無効です: ' + targetDate);
+  }
+
+  // --- 作業員解析 ---
+  var parsed = parseWorkerChoice_(workerLabel);
+  var workerCode = parsed.workerCode;
+  var workerName = parsed.workerName;
+  if (!workerCode) throw new Error('作業員コードが取得できません。');
+  var workerEmail = lookupWorkerEmail_(workerCode);
+
+  // --- 予定時間（分） ---
+  var approvedMinutes;
+  if (requestType === 'overtime') {
+    approvedMinutes = plannedMinutesFromOvertime_(hours);
+  } else {
+    approvedMinutes = plannedMinutesFromHoliday_(hours);
+  }
+
+  // --- 工番マスタ突合 ---
+  var enriched = enrichWorkNos_(workNo1, workNo2, workNo3);
+
+  // --- 排他制御＆書き込み ---
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var requestId = Utilities.getUuid();
+    var now = new Date();
+
+    appendRequestRow_({
+      requestId: requestId,
+      requestType: requestType,
+      status: 'submitted',
+      dept: dept,
+      workerCode: workerCode,
+      workerName: workerName,
+      workerEmail: workerEmail,
+      targetDate: targetDate,
+      submittedAt: now,
+      approvedAt: '',
+      approvedBy: '',
+      approvedMinutes: approvedMinutes,
+      reason: reason,
+      reasonDetail: reasonDetail,
+      workContent: workContent,
+      jobId1: '',
+      workNo1: workNo1,
+      orderNo1: enriched.orderNo1,
+      customer1: enriched.customer1,
+      product1: enriched.product1,
+      workNo2: workNo2,
+      orderNo2: enriched.orderNo2,
+      customer2: enriched.customer2,
+      product2: enriched.product2,
+      workNo3: workNo3,
+      orderNo3: enriched.orderNo3,
+      customer3: enriched.customer3,
+      product3: enriched.product3,
+      approvedBy2: '',
+      approvedAt2: '',
+      hrMailSentAt: '',
+      pdfGeneratedAt: '',
+      pdfFileId: '',
+      pdfFolderId: '',
+      exportError: enriched.errors.length > 0 ? enriched.errors.join(' / ') : '',
+    });
+
+    SpreadsheetApp.flush();
+
+    try {
+      ensureWorkLogRow_(requestId);
+    } catch (wlErr) {
+      console.warn('api_submitRequest ensureWorkLogRow_ 警告: ' + wlErr.message);
+    }
+
+    return { success: true, requestId: requestId };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 // ====== WorkLogs のプレースホルダ行を作る（無ければ追加） ======
 
 function ensureWorkLogRow_(requestId) {

@@ -178,6 +178,52 @@
     .order-item .order-code{ font-weight:700; }
     .order-item .order-detail{ color:var(--muted); font-size:12px; margin-top:2px; }
 
+    /* === 申請モーダル === */
+    .req-modal-overlay{
+      position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:300;
+    }
+    .req-modal{
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      z-index:301; max-width:520px; width:94%; padding:0;
+      max-height:90vh; display:flex; flex-direction:column;
+      background:#fff; border-radius:18px;
+      box-shadow:0 20px 60px rgba(10,40,80,.18);
+    }
+    .req-modal-header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:18px 20px 14px;
+      border-bottom:1px solid var(--line);
+    }
+    .req-modal-header h3{ margin:0; font-size:17px; font-weight:900; }
+    .req-modal-body{ padding:18px 20px; overflow-y:auto; flex:1; }
+    .req-modal-footer{
+      display:flex; gap:8px; justify-content:flex-end;
+      padding:14px 20px; border-top:1px solid var(--line);
+    }
+    .req-step-label{
+      font-size:12px; color:var(--accent2); font-weight:700;
+      margin-bottom:12px; letter-spacing:.04em;
+    }
+    .req-field{ margin-bottom:14px; }
+    .req-field label{ display:block; font-size:13px; font-weight:700; margin-bottom:4px; }
+    .req-field select, .req-field textarea, .req-field input[type="text"]{
+      width:100%; padding:10px 12px; border-radius:10px;
+      border:1px solid var(--line); font-size:14px;
+      box-sizing:border-box; font-family:inherit;
+    }
+    .req-field textarea{ resize:vertical; min-height:60px; }
+    .req-summary{
+      background:#f0f7ff; border:1px solid #b3d4ff; border-radius:10px;
+      padding:10px 14px; font-size:13px; margin-bottom:14px;
+    }
+    .req-date-btn{
+      width:100%; padding:12px; font-size:14px; border-radius:10px;
+      cursor:pointer; border:1px solid var(--line); background:#fff;
+      font-weight:700; transition:background .1s;
+    }
+    .req-date-btn:hover{ background:var(--bg1); }
+    .req-date-btn.selected{ border-color:var(--accent2); background:#f0f7ff; }
+
     @media (max-width:640px){
       header{ flex-direction:column; align-items:flex-start; gap:8px; }
       .wrap{ padding:12px 10px; }
@@ -342,6 +388,106 @@
     </div>
   </div>
 
+  <!-- ====== 申請モーダル（2ステップウィザード） ====== -->
+  <div id="requestModalWrap" style="display:none;">
+    <div class="req-modal-overlay" onclick="closeRequestModal()"></div>
+    <div class="req-modal card">
+      <div class="req-modal-header">
+        <h3 id="reqModalTitle">残業申請</h3>
+        <button class="ghost btn-sm" onclick="closeRequestModal()" style="font-size:18px; line-height:1;">&times;</button>
+      </div>
+      <div class="req-modal-body">
+
+        <!-- ステップ1: 日付 + 工番選択 -->
+        <div id="reqStep1">
+          <div class="req-step-label">STEP 1 / 2</div>
+
+          <!-- 日付表示（残業は自動、休日は選択） -->
+          <div class="req-field">
+            <label>作業実施日</label>
+            <div id="reqDateDisplay" style="font-weight:700; font-size:15px; padding:8px 0;"></div>
+            <div id="reqDatePicker" style="display:none;">
+              <div id="reqDateButtons" style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;"></div>
+              <div style="border-top:1px solid var(--line); margin-top:8px; padding-top:8px;">
+                <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">上記以外の日付：</div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <input type="date" id="reqManualDate" style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid var(--line); font-size:13px;" />
+                  <button class="ghost btn-sm" onclick="selectReqDate(document.getElementById('reqManualDate').value)">決定</button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 工番選択 -->
+          <div class="req-field">
+            <label>工番選択（任意・最大3件）</label>
+            <div class="sub" style="margin-bottom:6px;">間接業務の方は工番なしのまま「次へ」をお選びください</div>
+            <div id="reqOrderSlots" style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
+              <div class="order-slot" id="reqOrderSlot1" style="display:none;">
+                <span class="pill info" style="flex:1; text-align:left;"><b>1:</b> <span class="slot-label"></span></span>
+                <button class="ghost btn-sm" onclick="clearReqOrderSlot(0)" style="color:var(--danger);">&times;</button>
+              </div>
+              <div class="order-slot" id="reqOrderSlot2" style="display:none;">
+                <span class="pill info" style="flex:1; text-align:left;"><b>2:</b> <span class="slot-label"></span></span>
+                <button class="ghost btn-sm" onclick="clearReqOrderSlot(1)" style="color:var(--danger);">&times;</button>
+              </div>
+              <div class="order-slot" id="reqOrderSlot3" style="display:none;">
+                <span class="pill info" style="flex:1; text-align:left;"><b>3:</b> <span class="slot-label"></span></span>
+                <button class="ghost btn-sm" onclick="clearReqOrderSlot(2)" style="color:var(--danger);">&times;</button>
+              </div>
+            </div>
+            <input type="text" id="reqOrderSearch" placeholder="工番・品名・納入先で検索..."
+              style="width:100%; padding:10px 14px; border-radius:10px; border:1px solid var(--line); font-size:14px; box-sizing:border-box; margin-bottom:6px;"
+              oninput="filterReqOrders()" />
+            <div id="reqOrderResults" style="max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; background:#fff;">
+              <div class="muted" style="padding:14px; text-align:center;">工番・品名・納入先を入力して検索</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ステップ2: 理由・時間・業務内容 -->
+        <div id="reqStep2" style="display:none;">
+          <div class="req-step-label">STEP 2 / 2</div>
+
+          <!-- サマリー -->
+          <div class="req-summary" id="reqSummary"></div>
+
+          <div class="req-field">
+            <label>理由 <span style="color:var(--danger);">*</span></label>
+            <select id="reqReason" onchange="onReqReasonChange()">
+              <option value="">-- 選択してください --</option>
+            </select>
+          </div>
+
+          <div class="req-field" id="reqReasonDetailWrap" style="display:none;">
+            <label>補足理由 <span style="color:var(--danger);">*</span></label>
+            <input type="text" id="reqReasonDetail" placeholder="具体的な理由を入力してください" />
+          </div>
+
+          <div class="req-field">
+            <label>予定時間 <span style="color:var(--danger);">*</span></label>
+            <select id="reqHours">
+              <option value="">-- 選択してください --</option>
+            </select>
+          </div>
+
+          <div class="req-field">
+            <label>業務内容（任意）</label>
+            <textarea id="reqWorkContent" placeholder="作業内容があれば入力してください"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- フッターボタン -->
+      <div class="req-modal-footer">
+        <button class="ghost" id="reqBtnBack" style="display:none;" onclick="reqGoStep1()">&#8592; 戻る</button>
+        <button class="ghost" onclick="closeRequestModal()">キャンセル</button>
+        <button class="btn-blue" id="reqBtnNext" onclick="reqGoStep2()">次へ &#8594;</button>
+        <button id="reqBtnSubmit" style="display:none;" onclick="submitRequest()">申請送信</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 休日出勤：日付選択モーダル -->
   <div id="datePickerWrap" style="display:none;">
     <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:100;" onclick="closeDatePicker()"></div>
@@ -364,6 +510,10 @@
   </div>
 
 <script>
+var REASONS = <?!= REASONS_JSON ?>;
+var OT_HOURS_LIST = <?!= OT_HOURS_JSON ?>;
+var HD_HOURS_LIST = <?!= HD_HOURS_JSON ?>;
+
 var SELECTED_DEPT = '';
 var SELECTED_WORKER_CODE = '';
 
@@ -455,7 +605,7 @@ document.getElementById('workerSelect').addEventListener('change', function(){
   SELECTED_WORKER_CODE = wSel.value;
 });
 
-// ====== フォームURL取得（プリフィル付き） ======
+// ====== 申請ボタン → 新モーダルフロー ======
 function openForm(type){
   var dept = SELECTED_DEPT || document.getElementById('deptSelect').value;
   if(!dept){
@@ -473,14 +623,7 @@ function openForm(type){
     return;
   }
 
-  // 休日出勤 → 日付選択モーダル
-  if(type === 'holiday'){
-    showDatePicker(dept, workerLabel);
-    return;
-  }
-
-  // 残業 → 工番選択モーダル
-  showOrderPicker(type, dept, workerLabel, '');
+  showRequestModal(type, dept, workerLabel);
 }
 
 // ====== 休日日付選択モーダル ======
@@ -1146,6 +1289,312 @@ function doManualHolidayDone(requestId){
       loadDashboard();
     })
     .api_markHolidayDone(requestId, timeStr);
+}
+
+// ====== 申請モーダル制御 ======
+var REQ_CTX = { type:'', dept:'', workerLabel:'', targetDate:'', orders:['','',''] };
+
+function showRequestModal(type, dept, workerLabel){
+  REQ_CTX = { type:type, dept:dept, workerLabel:workerLabel, targetDate:'', orders:['','',''] };
+
+  // タイトル設定
+  var label = (type === 'overtime') ? '残業申請' : '休日出勤申請';
+  document.getElementById('reqModalTitle').textContent = label;
+
+  // ステップ1表示
+  document.getElementById('reqStep1').style.display = '';
+  document.getElementById('reqStep2').style.display = 'none';
+  document.getElementById('reqBtnNext').style.display = '';
+  document.getElementById('reqBtnSubmit').style.display = 'none';
+  document.getElementById('reqBtnBack').style.display = 'none';
+
+  // 日付設定
+  if(type === 'overtime'){
+    var today = new Date();
+    var yyyy = today.getFullYear();
+    var mm = String(today.getMonth()+1).padStart(2,'0');
+    var dd = String(today.getDate()).padStart(2,'0');
+    REQ_CTX.targetDate = yyyy + '-' + mm + '-' + dd;
+    document.getElementById('reqDateDisplay').textContent = REQ_CTX.targetDate + '（本日）';
+    document.getElementById('reqDateDisplay').style.display = '';
+    document.getElementById('reqDatePicker').style.display = 'none';
+  } else {
+    // 休日: 候補日を取得して表示
+    document.getElementById('reqDateDisplay').textContent = '日付を選択してください';
+    document.getElementById('reqDateDisplay').style.display = 'none';
+    document.getElementById('reqDatePicker').style.display = '';
+    loadHolidayDates();
+  }
+
+  // 工番リセット
+  REQ_CTX.orders = ['','',''];
+  updateReqOrderSlots();
+  document.getElementById('reqOrderSearch').value = '';
+  document.getElementById('reqOrderResults').innerHTML =
+    '<div class="muted" style="padding:14px; text-align:center;">工番・品名・納入先を入力して検索</div>';
+
+  // 理由・時間フォームリセット
+  document.getElementById('reqReason').innerHTML = '<option value="">-- 選択してください --</option>';
+  REASONS.forEach(function(r){
+    var opt = document.createElement('option');
+    opt.value = r; opt.textContent = r;
+    document.getElementById('reqReason').appendChild(opt);
+  });
+  document.getElementById('reqReasonDetailWrap').style.display = 'none';
+  document.getElementById('reqReasonDetail').value = '';
+  document.getElementById('reqWorkContent').value = '';
+
+  // 予定時間プルダウン
+  var hoursList = (type === 'overtime') ? OT_HOURS_LIST : HD_HOURS_LIST;
+  var hSel = document.getElementById('reqHours');
+  hSel.innerHTML = '<option value="">-- 選択してください --</option>';
+  hoursList.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h; opt.textContent = (type === 'overtime') ? h + ' 時間' : h;
+    hSel.appendChild(opt);
+  });
+
+  // 工番キャッシュがなければ取得
+  if(ORDER_CACHE.length === 0){
+    google.script.run
+      .withSuccessHandler(function(list){ ORDER_CACHE = list || []; })
+      .withFailureHandler(function(){})
+      .api_getOrderList();
+  }
+
+  document.getElementById('requestModalWrap').style.display = '';
+}
+
+function closeRequestModal(){
+  document.getElementById('requestModalWrap').style.display = 'none';
+  // ボタン状態をリセット（エラー後の再オープン対策）
+  var btn = document.getElementById('reqBtnSubmit');
+  btn.disabled = false;
+  btn.textContent = '申請送信';
+}
+
+// --- 休日候補日取得 ---
+function loadHolidayDates(){
+  var container = document.getElementById('reqDateButtons');
+  container.innerHTML = '<div class="loading" style="padding:10px;">候補日を取得中...</div>';
+  google.script.run
+    .withSuccessHandler(function(candidates){
+      container.innerHTML = '';
+      if(!candidates || candidates.length === 0){
+        container.innerHTML = '<div class="muted">候補日が見つかりませんでした</div>';
+        return;
+      }
+      candidates.forEach(function(c){
+        var btn = document.createElement('button');
+        btn.className = 'req-date-btn';
+        var lbl = c.label;
+        if(c.holidayName) lbl += ' (' + c.holidayName + ')';
+        btn.textContent = lbl;
+        btn.onclick = function(){ selectReqDate(c.date); };
+        container.appendChild(btn);
+      });
+    })
+    .withFailureHandler(function(err){
+      container.innerHTML = '<div class="muted">取得エラー: ' + escHtml(err.message || err) + '</div>';
+    })
+    .api_getHolidayCandidateDates();
+}
+
+function selectReqDate(dateStr){
+  if(!dateStr){ alert('日付を選択してください。'); return; }
+  REQ_CTX.targetDate = dateStr;
+  // 全ボタンのselected解除 + 選択中表示
+  var btns = document.querySelectorAll('#reqDateButtons .req-date-btn');
+  btns.forEach(function(b){ b.classList.remove('selected'); });
+  btns.forEach(function(b){
+    if(b.textContent.indexOf(dateStr) >= 0) b.classList.add('selected');
+  });
+  // 日付表示を更新
+  document.getElementById('reqDateDisplay').textContent = dateStr;
+  document.getElementById('reqDateDisplay').style.display = '';
+}
+
+// --- 工番選択（モーダル内） ---
+function filterReqOrders(){
+  var q = (document.getElementById('reqOrderSearch').value || '').toLowerCase().trim();
+  var container = document.getElementById('reqOrderResults');
+  if(!q){
+    container.innerHTML = '<div class="muted" style="padding:14px; text-align:center;">工番・品名・納入先を入力して検索</div>';
+    return;
+  }
+  var terms = q.split(/\s+/).filter(function(t){ return t.length > 0; });
+  var matched = ORDER_CACHE.filter(function(o){
+    var haystack = (o.code + ' ' + o.product + ' ' + o.dest).toLowerCase();
+    return terms.every(function(t){ return haystack.indexOf(t) >= 0; });
+  });
+  if(matched.length === 0){
+    container.innerHTML = '<div class="muted" style="padding:14px; text-align:center;">該当する工番がありません</div>';
+    return;
+  }
+  container.innerHTML = '';
+  var limit = Math.min(matched.length, 80);
+  for(var i = 0; i < limit; i++){
+    var o = matched[i];
+    var div = document.createElement('div');
+    div.className = 'order-item';
+    var codeDiv = document.createElement('div');
+    codeDiv.className = 'order-code';
+    codeDiv.textContent = o.code;
+    div.appendChild(codeDiv);
+    var detail = '';
+    if(o.product) detail += o.product;
+    if(o.product && o.dest) detail += ' ／ ';
+    if(o.dest) detail += o.dest;
+    if(detail){
+      var detDiv = document.createElement('div');
+      detDiv.className = 'order-detail';
+      detDiv.textContent = detail;
+      div.appendChild(detDiv);
+    }
+    (function(code){ div.onclick = function(){ selectReqOrder(code); }; })(o.code);
+    container.appendChild(div);
+  }
+  if(matched.length > 80){
+    var msg = document.createElement('div');
+    msg.className = 'muted';
+    msg.style.cssText = 'padding:8px; text-align:center;';
+    msg.textContent = '他 ' + (matched.length - 80) + ' 件…';
+    container.appendChild(msg);
+  }
+}
+
+function selectReqOrder(code){
+  for(var i = 0; i < 3; i++){
+    if(!REQ_CTX.orders[i]){
+      REQ_CTX.orders[i] = code;
+      updateReqOrderSlots();
+      return;
+    }
+  }
+  alert('工番は最大3件まで選択できます。\n不要な工番を×で削除してください。');
+}
+
+function clearReqOrderSlot(idx){
+  REQ_CTX.orders[idx] = '';
+  var compact = REQ_CTX.orders.filter(function(c){ return c !== ''; });
+  while(compact.length < 3) compact.push('');
+  REQ_CTX.orders = compact;
+  updateReqOrderSlots();
+}
+
+function updateReqOrderSlots(){
+  for(var i = 0; i < 3; i++){
+    var el = document.getElementById('reqOrderSlot' + (i+1));
+    if(REQ_CTX.orders[i]){
+      el.style.display = 'flex';
+      var info = ORDER_CACHE.find(function(o){ return o.code === REQ_CTX.orders[i]; });
+      var label = REQ_CTX.orders[i];
+      if(info){
+        if(info.product) label += ' ｜ ' + info.product;
+        if(info.dest) label += ' ／ ' + info.dest;
+      }
+      el.querySelector('.slot-label').textContent = label;
+    } else {
+      el.style.display = 'none';
+    }
+  }
+}
+
+// --- ステップ遷移 ---
+function reqGoStep2(){
+  // 休日出勤: 日付必須チェック
+  if(REQ_CTX.type === 'holiday' && !REQ_CTX.targetDate){
+    alert('作業実施日を選択してください。');
+    return;
+  }
+
+  // サマリー生成
+  var orderLabels = REQ_CTX.orders.filter(function(c){ return c !== ''; });
+  var summaryText = '日付: ' + REQ_CTX.targetDate;
+  if(orderLabels.length > 0){
+    summaryText += ' ／ 工番: ' + orderLabels.join(', ');
+  } else {
+    summaryText += ' ／ 工番: なし';
+  }
+  document.getElementById('reqSummary').textContent = summaryText;
+
+  document.getElementById('reqStep1').style.display = 'none';
+  document.getElementById('reqStep2').style.display = '';
+  document.getElementById('reqBtnNext').style.display = 'none';
+  document.getElementById('reqBtnSubmit').style.display = '';
+  document.getElementById('reqBtnBack').style.display = '';
+}
+
+function reqGoStep1(){
+  document.getElementById('reqStep1').style.display = '';
+  document.getElementById('reqStep2').style.display = 'none';
+  document.getElementById('reqBtnNext').style.display = '';
+  document.getElementById('reqBtnSubmit').style.display = 'none';
+  document.getElementById('reqBtnBack').style.display = 'none';
+}
+
+function onReqReasonChange(){
+  var val = document.getElementById('reqReason').value;
+  document.getElementById('reqReasonDetailWrap').style.display =
+    (val.indexOf('その他') >= 0) ? '' : 'none';
+}
+
+// --- 送信 ---
+function submitRequest(){
+  var reason = document.getElementById('reqReason').value;
+  var reasonDetail = document.getElementById('reqReasonDetail').value.trim();
+  var hours = document.getElementById('reqHours').value;
+  var workContent = document.getElementById('reqWorkContent').value.trim();
+
+  // クライアントバリデーション
+  if(!reason){ alert('理由を選択してください。'); return; }
+  if(reason.indexOf('その他') >= 0 && !reasonDetail){
+    alert('理由が「その他」の場合、補足理由を入力してください。');
+    return;
+  }
+  if(!hours){ alert('予定時間を選択してください。'); return; }
+
+  var label = (REQ_CTX.type === 'overtime') ? '残業' : '休日出勤';
+  if(!confirm(label + '申請を送信しますか？\n\n'
+    + '日付: ' + REQ_CTX.targetDate + '\n'
+    + '理由: ' + reason + '\n'
+    + '予定時間: ' + hours)){ return; }
+
+  // ボタン無効化
+  var btnSubmit = document.getElementById('reqBtnSubmit');
+  btnSubmit.disabled = true;
+  btnSubmit.textContent = '送信中...';
+
+  var payload = {
+    requestType: REQ_CTX.type,
+    dept: REQ_CTX.dept,
+    workerLabel: REQ_CTX.workerLabel,
+    targetDate: REQ_CTX.targetDate,
+    workNo1: REQ_CTX.orders[0] || '',
+    workNo2: REQ_CTX.orders[1] || '',
+    workNo3: REQ_CTX.orders[2] || '',
+    reason: reason,
+    reasonDetail: reasonDetail,
+    workContent: workContent,
+    hours: hours,
+  };
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      closeRequestModal();
+      if(res && res.success){
+        alert(label + '申請が完了しました。');
+        loadDashboard();
+      } else {
+        alert('申請に失敗しました。管理者に連絡してください。');
+      }
+    })
+    .withFailureHandler(function(err){
+      btnSubmit.disabled = false;
+      btnSubmit.textContent = '申請送信';
+      alert('送信エラー: ' + (err.message || err));
+    })
+    .api_submitRequest(payload);
 }
 </script>
 </body>

@@ -572,6 +572,9 @@ function doGet(e) {
   t.APP_URL = appUrl;
   t.PORTAL_URL = 'https://script.google.com/a/macros/lineworks-local.info/s/AKfycbx2eyJMOYP9o--GPBuhY-pj071IIR6Kqb_0xALwwNzdLQZux0dIAlL3P9EoCucnzXA/exec';
   t.DATE_PARAM = (e && e.parameter && e.parameter.date) ? e.parameter.date : '';
+  t.REASONS_JSON = JSON.stringify(REASONS);
+  t.OT_HOURS_JSON = JSON.stringify(OT_HOURS);
+  t.HD_HOURS_JSON = JSON.stringify(HD_HOURS);
 
   return t.evaluate()
     .setTitle('残業・休日出勤申請')
