@@ -219,7 +219,8 @@
     .req-date-btn{
       width:100%; padding:12px; font-size:14px; border-radius:10px;
       cursor:pointer; border:1px solid var(--line); background:#fff;
-      font-weight:700; transition:background .1s;
+      color:var(--text); font-weight:700; transition:background .1s;
+      box-shadow:0 2px 8px rgba(10,40,80,.06);
     }
     .req-date-btn:hover{ background:var(--bg1); }
     .req-date-btn.selected{ border-color:var(--accent2); background:#f0f7ff; }
@@ -237,14 +238,16 @@
 </head>
 <body>
   <header>
-    <div>
-      <div class="title">残業・休日出勤 申請TOP</div>
-      <div class="sub" id="headerSub">全社の本日残業 / 今週末休日出勤 一覧</div>
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div>
+        <div class="title">残業・休日出勤 申請TOP</div>
+        <div class="sub" id="headerSub">全社の本日残業 / 今週末休日出勤 一覧</div>
+      </div>
+      <a href="<?= PORTAL_URL ?>" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
     </div>
     <div class="row">
       <a href="<?= APP_URL ?>?page=approver" target="_top" class="nav-link">承認者画面</a>
       <a href="<?= APP_URL ?>?page=admin" target="_top" class="nav-link">総務部画面</a>
-      <a href="<?= PORTAL_URL ?>" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
     </div>
   </header>
 

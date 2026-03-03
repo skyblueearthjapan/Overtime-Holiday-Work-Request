@@ -167,15 +167,17 @@
 </head>
 <body>
   <header>
-    <div>
-      <div class="title">総務部管理</div>
-      <div class="sub">月次40h監視（実績net）／予測（ペース）／部署配分／年度推移／PDF未作成抽出</div>
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
+      <div>
+        <div class="title">総務部管理</div>
+        <div class="sub">月次40h監視（実績net）／予測（ペース）／部署配分／年度推移／PDF未作成抽出</div>
+      </div>
+      <a href="<?= PORTAL_URL ?>" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
     </div>
     <div class="row">
       <a href="<?= APP_URL ?>?page=top" target="_top" class="nav-link">トップへ</a>
       <a href="<?= APP_URL ?>?page=approver" target="_top" class="nav-link">承認者画面</a>
       <a href="<?= APP_URL ?>?page=approve2" target="_top" class="nav-link">二次承認</a>
-      <a href="<?= PORTAL_URL ?>" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
     </div>
   </header>
 
