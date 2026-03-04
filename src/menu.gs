@@ -21,7 +21,7 @@ function onOpen() {
     .addItem('診断：最新回答を手動処理', 'debugProcessLatest_')
     .addItem('全回答を一括処理（初回/リカバリ用）', 'reprocessAllResponses_')
     .addSeparator()
-    .addItem('社内カレンダーマスタ初期投入（2026年度）', 'setupCompanyCalendar2026_')
+    .addItem('社内カレンダーマスタ初期投入（2026年度）', 'setupCompanyCalendar2026')
     .addToUi();
 }
 
@@ -208,7 +208,7 @@ function setupAllTriggers_() {
 // ヘッダ: 日付, 区分(休日/祝日/出勤), 曜日, 備考
 // ※ 休日=会社休日（土日含む）, 祝日=国民の祝日, 出勤=稼働日
 
-function setupCompanyCalendar2026_() {
+function setupCompanyCalendar2026() {
   const ss = getDb_();
   const sheetName = SHEET.COMPANY_CALENDAR;
   let sh = ss.getSheetByName(sheetName);

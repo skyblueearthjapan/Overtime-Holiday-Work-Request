@@ -732,21 +732,24 @@ function countGeneratedPdfsForDate_(dateObj) {
 
 // ====== 朝メール送信（本文にテキストテーブル＋リンク） ======
 
-function sendMorningMail_() {
+function sendMorningMail_(targetDateObj) {
   const settings = getSettings_();
   const to = normalize_(settings['HR_MAIL_TO']);
   if (!to) throw new Error('Settingsに HR_MAIL_TO が未設定です。');
 
-  const now = new Date();
-  const dateLabel = fmtDate_(now, 'yyyy/MM/dd');
+  // 引数がなければ前日をデフォルトとする（手動実行時も前日分）
+  const targetDate = targetDateObj || (function() {
+    var d = new Date(); d.setDate(d.getDate() - 1); return d;
+  })();
+  const dateLabel = fmtDate_(targetDate, 'yyyy/MM/dd');
   const appUrl = normalize_(settings['APP_URL']) || '';
   const pdfFolderUrl = normalize_(settings['PDF_DRIVE_FOLDER_URL']) || 'https://drive.google.com/drive/folders/1Bs1FvgRvlCAkpARZ0XN3YkXJS9eoIN1B?usp=sharing';
   const accSsId = normalize_(settings['ACCUMULATION_SS_ID']);
   const accSsUrl = accSsId ? 'https://docs.google.com/spreadsheets/d/' + accSsId + '/edit' : '';
 
-  const items = listApprovedRequestsByDate_(now);
+  const items = listApprovedRequestsByDate_(targetDate);
   const workMap = buildWorkLogsMapByRequestId_();
-  const counts = countGeneratedPdfsForDate_(now);
+  const counts = countGeneratedPdfsForDate_(targetDate);
 
   const subject = `【残業・休日出勤】実績報告 ${dateLabel}`;
 
@@ -841,22 +844,24 @@ function sendMorningMail_() {
 // ====================================================================
 
 function morningBatch_() {
-  const today = new Date();
+  // 朝バッチは「前日分」の実績を対象とする
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
 
   // 1) 承認済み＆PDF未生成の申請をまとめてPDF化
-  const pdfResult = batchGeneratePdfs_(today);
+  const pdfResult = batchGeneratePdfs_(yesterday);
   Logger.log('morningBatch_ PDF: ok=' + pdfResult.ok + ' skip=' + pdfResult.skip + ' fail=' + pdfResult.fail);
 
   // 2) BatchLogsに記録
-  logBatchResult_('morningBatch', today, pdfResult);
+  logBatchResult_('morningBatch', yesterday, pdfResult);
 
   // 3) データ蓄積スプレッドシートに追記
   try {
-    appendToAccumulationSS_(today);
+    appendToAccumulationSS_(yesterday);
   } catch (e) {
     Logger.log('蓄積SSエラー: ' + e.message);
   }
 
-  // 4) 朝メール送信（本文にテキストテーブル＋リンク）
-  sendMorningMail_();
+  // 4) 朝メール送信（前日分）
+  sendMorningMail_(yesterday);
 }
