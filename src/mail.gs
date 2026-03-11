@@ -862,6 +862,26 @@ function morningBatch_() {
     Logger.log('蓄積SSエラー: ' + e.message);
   }
 
-  // 4) 朝メール送信（前日分）
-  sendMorningMail_(yesterday);
+  // 4) 朝メール送信（前日分）→ 統合メールに移行済み
+  // sendMorningMail_(yesterday);
+}
+
+/**
+ * メール送信なしの朝バッチ（PDF生成+データ蓄積のみ）
+ * 統合メール通知システム移行後に使用
+ */
+function morningBatchNoMail_() {
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+
+  const pdfResult = batchGeneratePdfs_(yesterday);
+  Logger.log('morningBatchNoMail_ PDF: ok=' + pdfResult.ok + ' skip=' + pdfResult.skip + ' fail=' + pdfResult.fail);
+
+  logBatchResult_('morningBatchNoMail', yesterday, pdfResult);
+
+  try {
+    appendToAccumulationSS_(yesterday);
+  } catch (e) {
+    Logger.log('蓄積SSエラー: ' + e.message);
+  }
 }

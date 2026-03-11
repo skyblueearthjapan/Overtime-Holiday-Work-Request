@@ -197,9 +197,23 @@ function setupAllTriggers_() {
   cleanupFormSubmitTriggers_(); // 旧フォーム個別トリガーを削除
   setupSyncTrigger_();          // マスタ転記（6:00）
   setupTriggers_();              // フォーム毎朝更新（6:30）
-  setupMailTriggers_();          // 夕方2回（16:45頃＋18:10）＋朝バッチ（7:10）
+  // メール送信は統合メール通知システムに移行済み
+  // setupMailTriggers_();       // 夕方2回＋朝バッチ → 統合メール側で管理
+  setupMorningBatchTrigger_();   // 朝バッチ（PDF生成+データ蓄積のみ、メール送信なし）
   setupFormPollTrigger_();       // フォーム回答ポーリング（1分間隔）
-  Logger.log('全トリガーをセットアップしました。');
+  Logger.log('全トリガーをセットアップしました（メールは統合メール側で管理）。');
+}
+
+// 朝バッチトリガー（PDF生成+データ蓄積のみ）
+function setupMorningBatchTrigger_() {
+  const triggers = ScriptApp.getProjectTriggers();
+  if (triggers.some(t => t.getHandlerFunction() === 'morningBatchNoMail_')) return;
+  ScriptApp.newTrigger('morningBatchNoMail_')
+    .timeBased()
+    .everyDays(1)
+    .atHour(6)
+    .nearMinute(50)
+    .create();
 }
 
 // ====== 社内カレンダーマスタ 初期投入（2026年度） ======
