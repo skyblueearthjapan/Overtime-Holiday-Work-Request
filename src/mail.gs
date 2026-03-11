@@ -341,8 +341,48 @@ function sendEveningMail_() {
 }
 
 // ====================================================================
-// データ蓄積スプレッドシート
+// データ蓄積スプレッドシート（総務確認用台帳）
 // ====================================================================
+
+/** 蓄積SSのヘッダ定義 */
+var ACC_HEADERS_ = [
+  '管理番号', '申請種別', '作業実施日', '曜日',
+  '部署', '作業員ID', '氏名',
+  '理由', '補足理由', '業務内容',
+  '承認時間(分)', '開始時刻', '終了時刻',
+  '実働(分)', '休憩(分)', '実残業/実働(分)',
+  '申請日', '1次承認日', '1次承認者', '2次承認日', '2次承認者',
+  '承認状態', 'PDF'
+];
+
+/** 蓄積SSの列幅 */
+var ACC_COL_WIDTHS_ = [
+  140, // 管理番号
+  80,  // 申請種別
+  100, // 作業実施日
+  50,  // 曜日
+  100, // 部署
+  90,  // 作業員ID
+  100, // 氏名
+  160, // 理由
+  160, // 補足理由
+  160, // 業務内容
+  80,  // 承認時間(分)
+  80,  // 開始時刻
+  80,  // 終了時刻
+  80,  // 実働(分)
+  80,  // 休憩(分)
+  80,  // 実残業/実働(分)
+  100, // 申請日
+  100, // 1次承認日
+  120, // 1次承認者
+  100, // 2次承認日
+  120, // 2次承認者
+  80,  // 承認状態
+  60   // PDF
+];
+
+var DOWS_ACC_ = ['日','月','火','水','木','金','土'];
 
 /**
  * 蓄積スプレッドシートを取得（なければ新規作成してSettingsに保存）。
@@ -363,9 +403,8 @@ function getAccumulationSS_() {
     }
   }
 
-  ss = SpreadsheetApp.create('残業・休日出勤 データ蓄積');
+  ss = SpreadsheetApp.create('残業・休日出勤 データ蓄積（総務確認用）');
   ssId = ss.getId();
-  // 指定フォルダに移動
   try {
     var file = DriveApp.getFileById(ssId);
     var folder = DriveApp.getFolderById(folderId);
@@ -374,11 +413,74 @@ function getAccumulationSS_() {
   } catch (e) {
     Logger.log('フォルダ移動スキップ: ' + e.message);
   }
-  // Settings に保存
   var settingsSh = requireSheet_('Settings');
   settingsSh.appendRow(['ACCUMULATION_SS_ID', ssId]);
   Logger.log('蓄積SS新規作成: ' + ssId);
   return ss;
+}
+
+/**
+ * 蓄積SSの年度シートを取得（なければ作成＋書式設定）
+ * @param {Spreadsheet} ss
+ * @param {string} sheetType - '残業' or '休日出勤'
+ * @param {number} fy - 年度
+ * @return {Sheet}
+ */
+function getAccFySheet_(ss, sheetType, fy) {
+  var sheetName = sheetType + '_' + fy + '年度';
+  var sh = ss.getSheetByName(sheetName);
+  if (sh) return sh;
+
+  sh = ss.insertSheet(sheetName, 0);
+  sh.getRange(1, 1, 1, ACC_HEADERS_.length).setValues([ACC_HEADERS_]);
+
+  // ヘッダ書式
+  var hr = sh.getRange(1, 1, 1, ACC_HEADERS_.length);
+  hr.setFontWeight('bold');
+  hr.setBackground('#1a365d');
+  hr.setFontColor('#ffffff');
+  hr.setFontSize(10);
+  hr.setHorizontalAlignment('center');
+  hr.setVerticalAlignment('middle');
+  sh.setFrozenRows(1);
+  sh.setRowHeight(1, 32);
+
+  // 列幅
+  for (var c = 0; c < ACC_COL_WIDTHS_.length; c++) {
+    sh.setColumnWidth(c + 1, ACC_COL_WIDTHS_[c]);
+  }
+
+  // _tmpシート（初回作成時のデフォルトシート）を削除
+  var tmp = ss.getSheetByName('Sheet1');
+  if (tmp) { try { ss.deleteSheet(tmp); } catch (e) {} }
+  tmp = ss.getSheetByName('シート1');
+  if (tmp) { try { ss.deleteSheet(tmp); } catch (e) {} }
+
+  Logger.log('蓄積年度シート作成: ' + sheetName);
+  return sh;
+}
+
+/**
+ * 年度算出（3/16始まり: 休暇届appと統一）
+ */
+function computeAccFiscalYear_(dateObj) {
+  var d = dateObj || new Date();
+  var year = d.getFullYear();
+  var month = d.getMonth() + 1;
+  var day = d.getDate();
+  if (month < 3 || (month === 3 && day < 16)) return year - 1;
+  return year;
+}
+
+/**
+ * 時刻文字列を抽出するヘルパー
+ */
+function extractTimeStr_(val) {
+  if (!val) return '';
+  if (val instanceof Date) return fmtDate_(val, 'HH:mm');
+  var s = String(val);
+  var m = s.match(/(\d{1,2}:\d{2})/);
+  return m ? m[1] : s.replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
 }
 
 /**
@@ -387,40 +489,19 @@ function getAccumulationSS_() {
  */
 function appendToAccumulationSS_(dateObj) {
   var ss = getAccumulationSS_();
-
   var ymd = fmtDate_(dateObj, 'yyyy/MM/dd');
   var items = listApprovedRequestsByDate_(dateObj);
   var workMap = buildWorkLogsMapByRequestId_();
+  var fy = computeAccFiscalYear_(dateObj);
 
-  var accHeader = ['日付', '部署', '氏名', '承認時間(分)', '開始', '終了', '実働(分)', '休憩(分)', '実残業/実働(分)', 'PDF', 'requestId'];
-
-  // 残業・休日出勤でそれぞれ分割
   var overtimeRows = [];
   var holidayRows = [];
 
   for (var i = 0; i < items.length; i++) {
     var it = items[i];
     var wl = workMap.get(it.requestId) || {};
-    var startStr = wl.actualStartAt || '';
-    var endStr = wl.actualEndAt || '';
-    if (startStr instanceof Date) startStr = fmtDate_(startStr, 'HH:mm');
-    else if (startStr) startStr = String(startStr).replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
-    if (endStr instanceof Date) endStr = fmtDate_(endStr, 'HH:mm');
-    else if (endStr) endStr = String(endStr).replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
-
-    var row = [
-      ymd,
-      it.dept,
-      it.workerName,
-      it.approvedMinutes,
-      startStr,
-      endStr,
-      wl.actualMinutes || 0,
-      wl.breakMinutes || 0,
-      wl.netMinutes || 0,
-      it.pdfFileId ? '作成済' : '未作成',
-      it.requestId,
-    ];
+    var d = dateObj instanceof Date ? dateObj : new Date(dateObj);
+    var row = buildAccRow_(it, wl, d);
 
     if (it.requestType === 'overtime') {
       overtimeRows.push(row);
@@ -429,104 +510,172 @@ function appendToAccumulationSS_(dateObj) {
     }
   }
 
-  // シートに書き込み
-  writeAccumulationSheet_(ss, '残業', accHeader, ymd, overtimeRows);
-  writeAccumulationSheet_(ss, '休日出勤', accHeader, ymd, holidayRows);
+  writeAccFySheet_(ss, '残業', fy, ymd, overtimeRows);
+  writeAccFySheet_(ss, '休日出勤', fy, ymd, holidayRows);
 }
 
 /**
- * 蓄積SSの指定シートに書き込む。同日データがあれば削除→再追記。
+ * 蓄積行データを構築
  */
-function writeAccumulationSheet_(ss, sheetName, header, ymd, rows) {
-  var sh = ss.getSheetByName(sheetName);
-  if (!sh) {
-    sh = ss.insertSheet(sheetName);
-    sh.appendRow(header);
+function buildAccRow_(req, wl, targetDate) {
+  var d = targetDate instanceof Date ? targetDate : new Date(targetDate);
+  var ymd = fmtDate_(d, 'yyyy/MM/dd');
+  var dow = DOWS_ACC_[d.getDay()];
+
+  // 作業員ID取得
+  var workerId = '';
+  if (req.workerCode) {
+    workerId = req.workerCode;
+  } else {
+    // Requestsシートから取得
+    try {
+      var reqInfo = getSheetHeaderIndex_('Requests', 1);
+      var reqSh = reqInfo.sh;
+      var reqIdx = reqInfo.idx;
+      var lastRow = reqSh.getLastRow();
+      if (lastRow >= 2) {
+        var vals = reqSh.getRange(2, 1, lastRow - 1, reqSh.getLastColumn()).getValues();
+        for (var r = 0; r < vals.length; r++) {
+          if (normalize_(vals[r][reqIdx['requestId']]) === req.requestId) {
+            workerId = normalize_(vals[r][reqIdx['workerCode']] || '');
+            break;
+          }
+        }
+      }
+    } catch (e) { /* ignore */ }
   }
 
-  // 既存の同日データを削除（日付列=1列目で判定、下から削除）
+  var startStr = extractTimeStr_(wl.actualStartAt);
+  var endStr = extractTimeStr_(wl.actualEndAt);
+
+  // 申請日
+  var submittedStr = '';
+  if (req.submittedAt) {
+    var sd = req.submittedAt instanceof Date ? req.submittedAt : new Date(req.submittedAt);
+    if (!isNaN(sd.getTime())) submittedStr = fmtDate_(sd, 'yyyy/MM/dd');
+  }
+
+  // 1次承認
+  var approved1Str = '';
+  if (req.approvedAt) {
+    var a1 = req.approvedAt instanceof Date ? req.approvedAt : new Date(req.approvedAt);
+    if (!isNaN(a1.getTime())) approved1Str = fmtDate_(a1, 'yyyy/MM/dd');
+  }
+  var approver1 = req.approvedBy || '';
+
+  // 2次承認
+  var approved2Str = '';
+  if (req.approvedAt2) {
+    var a2 = req.approvedAt2 instanceof Date ? req.approvedAt2 : new Date(req.approvedAt2);
+    if (!isNaN(a2.getTime())) approved2Str = fmtDate_(a2, 'yyyy/MM/dd');
+  }
+  var approver2 = req.approvedBy2 || '';
+
+  // 承認状態
+  var statusLabel = req.status || '';
+  if (statusLabel === 'approved') statusLabel = '承認済';
+  else if (statusLabel === 'submitted') statusLabel = '申請中';
+  else if (statusLabel === 'canceled') statusLabel = '取消';
+
+  // 申請種別ラベル
+  var typeLabel = req.requestType === 'overtime' ? '残業' : '休日出勤';
+
+  var pdfFileId = req.pdfFileId || '';
+
+  return [
+    req.requestId,
+    typeLabel,
+    ymd,
+    dow,
+    req.dept,
+    workerId,
+    req.workerName,
+    req.reason || '',
+    req.reasonDetail || '',
+    req.workContent || '',
+    Number(req.approvedMinutes || 0),
+    startStr,
+    endStr,
+    wl.actualMinutes || 0,
+    wl.breakMinutes || 0,
+    wl.netMinutes || 0,
+    submittedStr,
+    approved1Str,
+    approver1,
+    approved2Str,
+    approver2,
+    statusLabel,
+    pdfFileId  // 後でハイパーリンクに変換
+  ];
+}
+
+/**
+ * 年度シートに書き込み（同日データ削除→再追記）
+ */
+function writeAccFySheet_(ss, sheetType, fy, ymd, rows) {
+  var sh = getAccFySheet_(ss, sheetType, fy);
+
+  // 既存の同日データを削除（作業実施日=3列目で判定、下から削除）
   var lastRow = sh.getLastRow();
   if (lastRow >= 2) {
-    var existingValues = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+    var existingValues = sh.getRange(2, 3, lastRow - 1, 1).getValues();
     for (var i = existingValues.length - 1; i >= 0; i--) {
       var cellVal = existingValues[i][0];
       var cellYmd = '';
-      if (cellVal instanceof Date) {
-        cellYmd = fmtDate_(cellVal, 'yyyy/MM/dd');
-      } else {
-        cellYmd = String(cellVal);
-      }
-      if (cellYmd === ymd) {
-        sh.deleteRow(i + 2);
-      }
+      if (cellVal instanceof Date) cellYmd = fmtDate_(cellVal, 'yyyy/MM/dd');
+      else cellYmd = String(cellVal);
+      if (cellYmd === ymd) sh.deleteRow(i + 2);
     }
   }
 
-  // 追記
+  // 追記＋書式設定
   for (var j = 0; j < rows.length; j++) {
-    sh.appendRow(rows[j]);
+    var writeRow = sh.getLastRow() + 1;
+    sh.getRange(writeRow, 1, 1, rows[j].length).setValues([rows[j]]);
+    formatAccRow_(sh, writeRow, rows[j]);
   }
 }
 
 /**
- * 指定requestIdの申請データを蓄積SSにupsert（既存行があれば上書き、なければ追記）。
+ * 指定requestIdの申請データを蓄積SSにupsert。
  * 作業完了時・二次承認時にリアルタイムで呼び出す。
- * 失敗しても呼び出し元の処理には影響しない。
  */
 function upsertAccumulationRow_(requestId) {
   try {
     var req = getRequestById_(requestId);
     if (!req) { Logger.log('upsert蓄積: 申請が見つかりません: ' + requestId); return; }
 
+    // Requestsシートから追加情報を取得
+    var reqFull = getRequestFullData_(requestId);
+    if (reqFull) {
+      req.submittedAt = reqFull.submittedAt || req.submittedAt;
+      req.approvedAt2 = reqFull.approvedAt2 || '';
+      req.approvedBy2 = reqFull.approvedBy2 || '';
+      req.workerCode = reqFull.workerCode || '';
+    }
+
     var workMap = buildWorkLogsMapByRequestId_();
     var wl = workMap.get(requestId) || {};
 
     var ss = getAccumulationSS_();
 
-    // 日付フォーマット
     var d = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
-    var ymd = fmtDate_(d, 'yyyy/MM/dd');
+    var fy = computeAccFiscalYear_(d);
 
-    // 開始・終了の時刻部分を抽出
-    var startStr = wl.actualStartAt || '';
-    var endStr = wl.actualEndAt || '';
-    if (startStr instanceof Date) startStr = fmtDate_(startStr, 'HH:mm');
-    else if (startStr) startStr = String(startStr).replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
-    if (endStr instanceof Date) endStr = fmtDate_(endStr, 'HH:mm');
-    else if (endStr) endStr = String(endStr).replace(/^\d{4}-\d{2}-\d{2}\s?/, '').substring(0, 5);
-
-    // PDF状態を最新で再取得（generatePdf後にRequestsが更新されている可能性）
+    // PDF状態を最新で再取得
     var reqLatest = getRequestById_(requestId);
-    var pdfStatus = (reqLatest && reqLatest.pdfFileId) ? '作成済' : '未作成';
+    if (reqLatest) req.pdfFileId = reqLatest.pdfFileId || '';
 
-    var rowData = [
-      ymd,
-      req.dept,
-      req.workerName,
-      Number(req.approvedMinutes || 0),
-      startStr,
-      endStr,
-      wl.actualMinutes || 0,
-      wl.breakMinutes || 0,
-      wl.netMinutes || 0,
-      pdfStatus,
-      requestId,
-    ];
+    var rowData = buildAccRow_(req, wl, d);
 
-    var sheetName = req.requestType === 'overtime' ? '残業' : '休日出勤';
-    var accHeader = ['日付', '部署', '氏名', '承認時間(分)', '開始', '終了', '実働(分)', '休憩(分)', '実残業/実働(分)', 'PDF', 'requestId'];
+    var sheetType = req.requestType === 'overtime' ? '残業' : '休日出勤';
+    var sh = getAccFySheet_(ss, sheetType, fy);
 
-    var sh = ss.getSheetByName(sheetName);
-    if (!sh) {
-      sh = ss.insertSheet(sheetName);
-      sh.appendRow(accHeader);
-    }
-
-    // requestId列（11列目=インデックス10）で既存行を検索
+    // requestId（管理番号=1列目）で既存行を検索
     var lastRow = sh.getLastRow();
     var existingRowNo = -1;
     if (lastRow >= 2) {
-      var ridColValues = sh.getRange(2, accHeader.length, lastRow - 1, 1).getValues(); // requestId列
+      var ridColValues = sh.getRange(2, 1, lastRow - 1, 1).getValues();
       for (var i = 0; i < ridColValues.length; i++) {
         if (normalize_(ridColValues[i][0]) === requestId) {
           existingRowNo = i + 2;
@@ -535,17 +684,73 @@ function upsertAccumulationRow_(requestId) {
       }
     }
 
+    var writeRow;
     if (existingRowNo > 0) {
-      // 上書き
       sh.getRange(existingRowNo, 1, 1, rowData.length).setValues([rowData]);
+      writeRow = existingRowNo;
     } else {
-      // 追記
-      sh.appendRow(rowData);
+      writeRow = lastRow + 1;
+      sh.getRange(writeRow, 1, 1, rowData.length).setValues([rowData]);
     }
 
-    Logger.log('upsert蓄積完了: ' + requestId + ' → ' + sheetName + (existingRowNo > 0 ? '(上書き)' : '(追記)'));
+    formatAccRow_(sh, writeRow, rowData);
+
+    Logger.log('upsert蓄積完了: ' + requestId + ' → ' + sheetType + '_' + fy + '年度' + (existingRowNo > 0 ? '(上書き)' : '(追記)'));
   } catch (e) {
     Logger.log('upsert蓄積エラー（処理続行）: ' + e.message);
+  }
+}
+
+/**
+ * Requestsシートからフル情報を取得（getRequestById_では取れない列を補完）
+ */
+function getRequestFullData_(requestId) {
+  try {
+    var info = getSheetHeaderIndex_('Requests', 1);
+    var sh = info.sh;
+    var idx = info.idx;
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return null;
+
+    var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
+    for (var i = 0; i < values.length; i++) {
+      if (normalize_(values[i][idx['requestId']]) === requestId) {
+        var row = values[i];
+        return {
+          submittedAt: row[idx['submittedAt']] || '',
+          approvedAt2: idx['approvedAt2'] !== undefined ? row[idx['approvedAt2']] : '',
+          approvedBy2: idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '',
+          workerCode: idx['workerCode'] !== undefined ? normalize_(row[idx['workerCode']]) : '',
+        };
+      }
+    }
+  } catch (e) {
+    Logger.log('getRequestFullData_ エラー: ' + e.message);
+  }
+  return null;
+}
+
+/**
+ * 蓄積行の書式設定（偶数行背景色＋PDFハイパーリンク）
+ */
+function formatAccRow_(sh, rowNo, rowData) {
+  var colCount = ACC_HEADERS_.length;
+  var range = sh.getRange(rowNo, 1, 1, colCount);
+  range.setFontSize(10);
+  range.setVerticalAlignment('middle');
+
+  // 偶数行に薄い背景色
+  if ((rowNo % 2) === 0) {
+    range.setBackground('#f8fafc');
+  } else {
+    range.setBackground('#ffffff');
+  }
+
+  // PDF列（23列目）にハイパーリンク
+  var pdfFileId = rowData[22];
+  if (pdfFileId) {
+    var pdfUrl = 'https://drive.google.com/file/d/' + pdfFileId + '/view';
+    sh.getRange(rowNo, 23).setFormula('=HYPERLINK("' + pdfUrl + '","PDF")');
   }
 }
 
