@@ -189,16 +189,14 @@
 </head>
 <body>
   <header>
-    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-      <div>
-        <div class="title">承認者画面</div>
-        <div class="sub" id="approverSub">読込中...</div>
-      </div>
-      <a href="<?= PORTAL_URL ?>" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
+    <div>
+      <div class="title">承認者画面</div>
+      <div class="sub" id="approverSub">読込中...</div>
     </div>
     <div class="row">
       <a href="<?= APP_URL ?>?page=top" target="_top" class="nav-link">トップへ</a>
       <a href="<?= APP_URL ?>?page=admin" target="_top" class="nav-link">総務部画面</a>
+      <a href="<?= PORTAL_URL ?>" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
       <button class="ghost btn-sm" id="btnChangeDept" onclick="showApproverModal()" style="display:none;">承認者変更</button>
     </div>
   </header>
