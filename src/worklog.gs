@@ -621,10 +621,30 @@ function api_editRequest(requestId, patch) {
     sh.getRange(rowNo, modAtIdx + 1).setValue(fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'));
     sh.getRange(rowNo, modByIdx + 1).setValue(email);
 
-    // --- PDF が存在する場合は削除 ---
+    // --- PDF が存在する場合は削除→再生成 ---
     if (req.pdfFileId) {
       var row = sh.getRange(rowNo, 1, 1, sh.getLastColumn()).getValues()[0];
       clearExistingPdfForRegeneration_(sh, idx, row, rowNo);
+      SpreadsheetApp.flush();
+
+      // 最新データで即時再生成
+      try {
+        var useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
+        if (useDirect) {
+          generatePdfDirect_(requestId);
+        } else {
+          generatePdfForRequest_(requestId);
+        }
+      } catch (pdfErr) {
+        Logger.log('編集時PDF再生成警告: ' + pdfErr.message);
+      }
+
+      // 蓄積SSも更新
+      try {
+        upsertAccumulationRow_(requestId);
+      } catch (accErr) {
+        Logger.log('編集時蓄積SS更新警告: ' + accErr.message);
+      }
     }
 
     SpreadsheetApp.flush();
