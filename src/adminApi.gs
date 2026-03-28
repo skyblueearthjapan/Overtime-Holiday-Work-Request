@@ -392,7 +392,7 @@ function api_adminPendingWatch() {
 
   for (const row of values) {
     const status = normalize_(row[idx['status(submitted/approved/canceled)']]);
-    if (status !== 'submitted' && status !== 'modified') continue;
+    if (status !== 'submitted') continue;
 
     const submittedAt = new Date(row[idx['submittedAt']]);
     const hours = (now - submittedAt) / (1000*60*60);

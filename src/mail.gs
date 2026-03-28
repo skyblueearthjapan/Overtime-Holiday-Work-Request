@@ -575,7 +575,6 @@ function buildAccRow_(req, wl, targetDate) {
   var statusLabel = req.status || '';
   if (statusLabel === 'approved') statusLabel = '承認済';
   else if (statusLabel === 'submitted') statusLabel = '申請中';
-  else if (statusLabel === 'modified') statusLabel = '修正済';
   else if (statusLabel === 'canceled') statusLabel = '取消';
 
   // 申請種別ラベル

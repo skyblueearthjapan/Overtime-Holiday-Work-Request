@@ -468,10 +468,10 @@ function api_getDashboard() {
       // 二次承認状態を取得
       const approvedBy2 = idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '';
 
-      // 期限超過フラグ: 過去日 + 承認済み/修正済み + 未完了
+      // 期限超過フラグ: 過去日 + 承認済み + 未完了
       const isPastDate = targetDate < today;
       let isOverdue = false;
-      if (isPastDate && (status === 'approved' || status === 'modified') && targetDate >= overdueLimit) {
+      if (isPastDate && status === 'approved' && targetDate >= overdueLimit) {
         if (requestType === 'overtime' && !actualEndAt) {
           isOverdue = true;
         } else if (requestType === 'holiday' && (!actualStartAt || !actualEndAt)) {
@@ -549,7 +549,7 @@ function api_getDashboard() {
 // ====== 申請編集 API ======
 // TOP画面のダッシュボードから呼ばれる。
 // 残業: hours のみ変更可。休日: hours + targetDate 変更可。
-// approved → modified に変更。submitted はそのまま。
+// ステータスは変更しない（承認済みでも再承認不要）。
 
 function api_editRequest(requestId, patch) {
   var lock = LockService.getScriptLock();
@@ -601,12 +601,8 @@ function api_editRequest(requestId, patch) {
       newTargetDate = targetDate;
     }
 
-    // ステータス更新（approved → modified）
+    // ステータスは変更しない（再承認不要）
     var newStatus = req.status;
-    if (req.status === 'approved' || req.status === 'modified') {
-      newStatus = 'modified';
-      sh.getRange(rowNo, idx['status(submitted/approved/canceled)'] + 1).setValue('modified');
-    }
 
     // modifiedAt / modifiedBy を記録（列が無ければ自動追加）
     var now = new Date();

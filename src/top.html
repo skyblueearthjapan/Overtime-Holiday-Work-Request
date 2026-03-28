@@ -999,8 +999,6 @@ function renderDashboard(res){
 function buildOvertimeRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">承認待ち</span>'
-    : it.status === 'modified'
-    ? '<span class="pill info">修正済</span>'
     : '<span class="pill ok">承認済</span>';
 
   var pdfCell = buildPdfCell(it);
@@ -1032,8 +1030,6 @@ function buildOvertimeRow(it){
 function buildHolidayRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">承認待ち</span>'
-    : it.status === 'modified'
-    ? '<span class="pill info">修正済</span>'
     : '<span class="pill ok">承認済</span>';
 
   var pdfCell = buildPdfCell(it);
@@ -1409,7 +1405,6 @@ function saveEdit(){
 
   var msg = '申請内容を変更しますか？\n予定時間: ' + hours;
   if(patch.targetDate) msg += '\n作業実施日: ' + patch.targetDate;
-  if(EDIT_CTX.item.status === 'approved') msg += '\n\n※ 承認済みのため、ステータスが「修正済」に変わり再承認が必要になります。';
   if(!confirm(msg)) return;
 
   var btn = document.getElementById('editBtnSave');
