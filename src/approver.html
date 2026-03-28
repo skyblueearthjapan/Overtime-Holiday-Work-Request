@@ -574,7 +574,7 @@ function renderDashboard(res){
   var allItems = (res.overtime || []).concat(res.holiday || []);
   var submitted = 0, approved = 0;
   allItems.forEach(function(it){
-    if(it.status === 'submitted') submitted++;
+    if(it.status === 'submitted' || it.status === 'modified') submitted++;
     if(it.status === 'approved') approved++;
   });
   document.getElementById('kpiTotal').innerText = allItems.length;
@@ -607,6 +607,8 @@ function renderDashboard(res){
 function buildOvertimeRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">未承認</span>'
+    : it.status === 'modified'
+    ? '<span class="pill info">修正済</span>'
     : (it.status === 'canceled' ? '<span class="pill danger">却下</span>' : '<span class="pill ok">承認済</span>');
 
   var submittedTime = fmtTime(it.submittedAt);
@@ -635,6 +637,8 @@ function buildOvertimeRow(it){
 function buildHolidayRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">未承認</span>'
+    : it.status === 'modified'
+    ? '<span class="pill info">修正済</span>'
     : (it.status === 'canceled' ? '<span class="pill danger">却下</span>' : '<span class="pill ok">承認済</span>');
 
   var submittedTime = fmtTime(it.submittedAt);
@@ -670,7 +674,7 @@ function fmtTime(val){
 }
 
 function buildActionCell(it){
-  if(it.status === 'submitted'){
+  if(it.status === 'submitted' || it.status === 'modified'){
     return '<button class="btn-approve btn-sm" ' +
       'onclick="doApprove(\'' + it.requestId + '\',this)">承認</button>' +
       ' <button class="btn-sm" style="background:linear-gradient(135deg,var(--danger),#ff8a8e);" ' +
@@ -711,7 +715,7 @@ function updateRowToApproved(requestId) {
 function updateKpiCounters() {
   var submitted = 0, approved = 0, canceled = 0;
   ALL_ITEMS.forEach(function(it) {
-    if (it.status === 'submitted') submitted++;
+    if (it.status === 'submitted' || it.status === 'modified') submitted++;
     if (it.status === 'approved') approved++;
     if (it.status === 'canceled') canceled++;
   });

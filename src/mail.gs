@@ -575,6 +575,7 @@ function buildAccRow_(req, wl, targetDate) {
   var statusLabel = req.status || '';
   if (statusLabel === 'approved') statusLabel = '承認済';
   else if (statusLabel === 'submitted') statusLabel = '申請中';
+  else if (statusLabel === 'modified') statusLabel = '修正済';
   else if (statusLabel === 'canceled') statusLabel = '取消';
 
   // 申請種別ラベル
@@ -698,6 +699,37 @@ function upsertAccumulationRow_(requestId) {
     Logger.log('upsert蓄積完了: ' + requestId + ' → ' + sheetType + '_' + fy + '年度' + (existingRowNo > 0 ? '(上書き)' : '(追記)'));
   } catch (e) {
     Logger.log('upsert蓄積エラー（処理続行）: ' + e.message);
+  }
+}
+
+/**
+ * 蓄積SSから指定requestIdの行を削除する。
+ * 申請キャンセル時に呼ばれる。エラー時はログ出力のみ（処理続行）。
+ */
+function removeAccumulationRow_(requestId, requestType, targetDate) {
+  try {
+    var ss = getAccumulationSS_();
+    var d = targetDate instanceof Date ? targetDate : new Date(targetDate);
+    var fy = computeAccFiscalYear_(d);
+    var sheetType = requestType === 'overtime' ? '残業' : '休日出勤';
+    var sh = ss.getSheetByName(sheetType + '_' + fy + '年度');
+    if (!sh) return; // シートが無ければ何もしない
+
+    var lastRow = sh.getLastRow();
+    if (lastRow < 2) return;
+
+    // requestId（1列目）で行を検索（下から削除で行番号ずれ防止）
+    var ridColValues = sh.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = ridColValues.length - 1; i >= 0; i--) {
+      if (normalize_(ridColValues[i][0]) === requestId) {
+        sh.deleteRow(i + 2);
+        Logger.log('蓄積SS行削除完了: ' + requestId + ' → ' + sheetType + '_' + fy + '年度 行' + (i + 2));
+        return;
+      }
+    }
+    Logger.log('蓄積SS行削除: 該当行なし（' + requestId + '）');
+  } catch (e) {
+    Logger.log('removeAccumulationRow_ エラー（処理続行）: ' + e.message);
   }
 }
 

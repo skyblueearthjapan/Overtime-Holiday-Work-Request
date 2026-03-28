@@ -217,8 +217,8 @@ function api_getApproverDashboard(deptsOrDept) {
       };
 
       if (requestType === 'overtime') {
-        if (status === 'submitted') {
-          // 未処理: targetDateが今日以前なら全て表示（過去分はアラーム）
+        if (status === 'submitted' || status === 'modified') {
+          // 未処理/修正済: targetDateが今日以前なら全て表示（過去分はアラーム）
           if (targetDate <= today) {
             if (targetDate < today) {
               item.isOverdue = true;
@@ -232,7 +232,7 @@ function api_getApproverDashboard(deptsOrDept) {
           }
         }
       } else if (requestType === 'holiday') {
-        if (status === 'submitted') {
+        if (status === 'submitted' || status === 'modified') {
           // 未処理: targetDateが今日以前 or 今週末範囲なら表示
           if (targetDate <= today) {
             if (targetDate < today) {
@@ -261,11 +261,12 @@ function api_getApproverDashboard(deptsOrDept) {
       }
     }
 
-    // ソート：未承認を先頭、次に部署→名前
+    // ソート：未承認/修正済を先頭、次に部署→名前
+    var isPending = function(s){ return s === 'submitted' || s === 'modified'; };
     const sortFn = function(a, b) {
       if (a.status !== b.status) {
-        if (a.status === 'submitted') return -1;
-        if (b.status === 'submitted') return 1;
+        if (isPending(a.status)) return -1;
+        if (isPending(b.status)) return 1;
       }
       if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
       return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
@@ -273,8 +274,8 @@ function api_getApproverDashboard(deptsOrDept) {
     overtime.sort(sortFn);
     holiday.sort(function(a, b) {
       if (a.status !== b.status) {
-        if (a.status === 'submitted') return -1;
-        if (b.status === 'submitted') return 1;
+        if (isPending(a.status)) return -1;
+        if (isPending(b.status)) return 1;
       }
       if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
       if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
@@ -361,7 +362,7 @@ function api_rejectRequest(requestId) {
     }
     if (rowNo === -1) throw new Error('requestIdが見つかりません。');
     if (!canApproveDept_(email, dept)) throw new Error('この申請の承認権限がありません。');
-    if (status !== 'submitted') throw new Error('未承認状態でのみ却下可能です（現在: ' + status + '）。');
+    if (status !== 'submitted' && status !== 'modified') throw new Error('未承認状態でのみ却下可能です（現在: ' + status + '）。');
 
     var now = new Date();
     sh.getRange(rowNo, idx['status(submitted/approved/canceled)'] + 1).setValue('canceled');

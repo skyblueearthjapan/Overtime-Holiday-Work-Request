@@ -468,10 +468,10 @@ function api_getDashboard() {
       // 二次承認状態を取得
       const approvedBy2 = idx['approvedBy2'] !== undefined ? normalize_(row[idx['approvedBy2']]) : '';
 
-      // 期限超過フラグ: 過去日 + 承認済み + 未完了
+      // 期限超過フラグ: 過去日 + 承認済み/修正済み + 未完了
       const isPastDate = targetDate < today;
       let isOverdue = false;
-      if (isPastDate && status === 'approved' && targetDate >= overdueLimit) {
+      if (isPastDate && (status === 'approved' || status === 'modified') && targetDate >= overdueLimit) {
         if (requestType === 'overtime' && !actualEndAt) {
           isOverdue = true;
         } else if (requestType === 'holiday' && (!actualStartAt || !actualEndAt)) {
@@ -497,6 +497,7 @@ function api_getDashboard() {
         pdfFileId: normalize_(row[idx['pdfFileId']]) || '',
         approvedBy2: approvedBy2,
         isOverdue: isOverdue,
+        reason: idx['reason'] !== undefined ? String(row[idx['reason']] || '') : '',
       };
 
       // 完了+二次承認済み → 当日中は表示維持、翌日以降は非表示
@@ -542,5 +543,143 @@ function api_getDashboard() {
     console.error('api_getDashboard エラー: ' + err.message + '\n' + err.stack);
     return { today: '', weekendStart: '', weekendEnd: '',
              overtime: [], holiday: [], error: err.message };
+  }
+}
+
+// ====== 申請編集 API ======
+// TOP画面のダッシュボードから呼ばれる。
+// 残業: hours のみ変更可。休日: hours + targetDate 変更可。
+// approved → modified に変更。submitted はそのまま。
+
+function api_editRequest(requestId, patch) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var hours      = normalize_(patch.hours || '');
+    var targetDate = normalize_(patch.targetDate || '');
+
+    // --- 申請取得 ---
+    var req = getRequestById_(requestId);
+    if (!req) throw new Error('申請が見つかりません。');
+    if (req.status === 'canceled') throw new Error('キャンセル済みの申請は編集できません。');
+
+    // --- 完了済みチェック（WorkLogs に actualEndAt があれば不可） ---
+    var wlMap = buildWorkLogsMapByRequestId_();
+    var wl = wlMap.get(requestId) || {};
+    if (wl.actualEndAt) throw new Error('作業完了済みの申請は編集できません。');
+
+    // --- バリデーション ---
+    var newMinutes;
+    if (req.requestType === 'overtime') {
+      if (!hours) throw new Error('予定時間を指定してください。');
+      if (OT_HOURS.indexOf(hours) < 0) throw new Error('予定時間が不正です: ' + hours);
+      newMinutes = plannedMinutesFromOvertime_(hours);
+    } else {
+      if (!hours) throw new Error('予定時間を指定してください。');
+      if (HD_HOURS.indexOf(hours) < 0) throw new Error('予定時間が不正です: ' + hours);
+      newMinutes = plannedMinutesFromHoliday_(hours);
+      if (targetDate) {
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) throw new Error('作業実施日の形式が不正です: ' + targetDate);
+        var d = new Date(targetDate + 'T00:00:00+09:00');
+        if (isNaN(d.getTime())) throw new Error('作業実施日が無効です: ' + targetDate);
+      }
+    }
+
+    // --- Requests シートを直接更新 ---
+    var info = getSheetHeaderIndex_('Requests', 1);
+    var sh = info.sh;
+    var idx = info.idx;
+    var rowNo = req.rowNo;
+
+    // approvedMinutes 更新
+    sh.getRange(rowNo, idx['approvedMinutes'] + 1).setValue(newMinutes);
+
+    // targetDate 更新（休日のみ、指定がある場合）
+    var newTargetDate = '';
+    if (req.requestType === 'holiday' && targetDate) {
+      sh.getRange(rowNo, idx['targetDate'] + 1).setValue(targetDate);
+      newTargetDate = targetDate;
+    }
+
+    // ステータス更新（approved → modified）
+    var newStatus = req.status;
+    if (req.status === 'approved' || req.status === 'modified') {
+      newStatus = 'modified';
+      sh.getRange(rowNo, idx['status(submitted/approved/canceled)'] + 1).setValue('modified');
+    }
+
+    // modifiedAt / modifiedBy を記録（列が無ければ自動追加）
+    var now = new Date();
+    var email = Session.getActiveUser().getEmail() || 'unknown';
+    var header = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(function(h){ return normalize_(h); });
+    var modAtIdx = header.indexOf('modifiedAt');
+    var modByIdx = header.indexOf('modifiedBy');
+    if (modAtIdx < 0) {
+      modAtIdx = header.length;
+      sh.getRange(1, modAtIdx + 1).setValue('modifiedAt');
+    }
+    if (modByIdx < 0) {
+      modByIdx = modAtIdx + 1;
+      sh.getRange(1, modByIdx + 1).setValue('modifiedBy');
+    }
+    sh.getRange(rowNo, modAtIdx + 1).setValue(fmtDate_(now, 'yyyy-MM-dd HH:mm:ss'));
+    sh.getRange(rowNo, modByIdx + 1).setValue(email);
+
+    // --- PDF が存在する場合は削除 ---
+    if (req.pdfFileId) {
+      var row = sh.getRange(rowNo, 1, 1, sh.getLastColumn()).getValues()[0];
+      clearExistingPdfForRegeneration_(sh, idx, row, rowNo);
+    }
+
+    SpreadsheetApp.flush();
+
+    return {
+      ok: true,
+      newStatus: newStatus,
+      newMinutes: newMinutes,
+      newTargetDate: newTargetDate || undefined,
+    };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// ====== 申請削除（キャンセル）API ======
+// status を canceled に変更し、PDF削除＋蓄積SS行削除。
+
+function api_deleteRequest(requestId) {
+  var lock = LockService.getScriptLock();
+  lock.waitLock(20000);
+  try {
+    var req = getRequestById_(requestId);
+    if (!req) throw new Error('申請が見つかりません。');
+    if (req.status === 'canceled') throw new Error('既にキャンセル済みです。');
+
+    var info = getSheetHeaderIndex_('Requests', 1);
+    var sh = info.sh;
+    var idx = info.idx;
+    var rowNo = req.rowNo;
+
+    // ステータスを canceled に変更
+    sh.getRange(rowNo, idx['status(submitted/approved/canceled)'] + 1).setValue('canceled');
+
+    // PDF が存在する場合は削除
+    if (req.pdfFileId) {
+      var row = sh.getRange(rowNo, 1, 1, sh.getLastColumn()).getValues()[0];
+      clearExistingPdfForRegeneration_(sh, idx, row, rowNo);
+    }
+
+    SpreadsheetApp.flush();
+
+    // 蓄積SSから行を削除（エラーでも処理続行）
+    try {
+      removeAccumulationRow_(requestId, req.requestType, req.targetDate);
+    } catch (e) {
+      Logger.log('蓄積SS行削除エラー（処理続行）: ' + e.message);
+    }
+
+    return { ok: true };
+  } finally {
+    lock.releaseLock();
   }
 }

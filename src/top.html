@@ -510,6 +510,36 @@
     </div>
   </div>
 
+  <!-- ====== 編集モーダル ====== -->
+  <div id="editModalWrap" style="display:none;">
+    <div class="req-modal-overlay" onclick="closeEditModal()"></div>
+    <div class="req-modal card">
+      <div class="req-modal-header">
+        <h3 id="editModalTitle">申請 編集</h3>
+        <button class="ghost btn-sm" onclick="closeEditModal()" style="font-size:18px; line-height:1;">&times;</button>
+      </div>
+      <div class="req-modal-body">
+        <div class="req-field">
+          <label>対象者</label>
+          <div id="editInfo" style="font-weight:700; font-size:14px; padding:4px 0;"></div>
+        </div>
+        <div class="req-field">
+          <label>予定時間 <span style="color:var(--danger);">*</span></label>
+          <select id="editHours" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); font-size:14px;">
+          </select>
+        </div>
+        <div class="req-field" id="editDateWrap" style="display:none;">
+          <label>作業実施日</label>
+          <input type="date" id="editTargetDate" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); font-size:14px; box-sizing:border-box;" />
+        </div>
+      </div>
+      <div class="req-modal-footer">
+        <button class="ghost" onclick="closeEditModal()">キャンセル</button>
+        <button class="btn-blue" id="editBtnSave" onclick="saveEdit()">保存</button>
+      </div>
+    </div>
+  </div>
+
 <script>
 var REASONS = <?!= REASONS_JSON ?>;
 var OT_HOURS_LIST = <?!= OT_HOURS_JSON ?>;
@@ -894,6 +924,9 @@ function loadDashboard(){
 
 // ====== ダッシュボード描画 ======
 function renderDashboard(res){
+  // 編集モーダル用にデータをキャッシュ
+  DASHBOARD_DATA = { overtime: res.overtime || [], holiday: res.holiday || [] };
+
   document.getElementById('todayDate').innerText = res.today;
   document.getElementById('weekendRange').innerText = res.weekendStart + ' ～ ' + res.weekendEnd;
 
@@ -966,6 +999,8 @@ function renderDashboard(res){
 function buildOvertimeRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">承認待ち</span>'
+    : it.status === 'modified'
+    ? '<span class="pill info">修正済</span>'
     : '<span class="pill ok">承認済</span>';
 
   var pdfCell = buildPdfCell(it);
@@ -997,6 +1032,8 @@ function buildOvertimeRow(it){
 function buildHolidayRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">承認待ち</span>'
+    : it.status === 'modified'
+    ? '<span class="pill info">修正済</span>'
     : '<span class="pill ok">承認済</span>';
 
   var pdfCell = buildPdfCell(it);
@@ -1057,13 +1094,19 @@ function check4hAlert(it){
 }
 
 // ====== 操作ボタン構築 ======
+function buildEditDeleteBtns(it){
+  var rid = it.requestId;
+  return ' <button class="ghost btn-sm" onclick="openEditModal(\'' + rid + '\')" style="font-size:11px;">編集</button>' +
+    ' <button class="ghost btn-sm" onclick="confirmDelete(\'' + rid + '\')" style="font-size:11px; color:var(--danger);">削除</button>';
+}
+
 function buildActionCell(it){
   var alert4h = check4hAlert(it);
   var rid = it.requestId;
   var overdueBadge = '';
 
   if(it.status === 'submitted'){
-    return '<span class="muted">承認待ち</span>';
+    return '<span class="muted">承認待ち</span>' + buildEditDeleteBtns(it);
   }
 
   if(it.requestType === 'overtime'){
@@ -1074,6 +1117,7 @@ function buildActionCell(it){
     return overdueBadge +
       '<button class="btn-blue btn-sm" onclick="doOvertimeDone(\'' + rid + '\',this)">残業完了</button>' +
       ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'ot-end\')">手入力</button>' +
+      buildEditDeleteBtns(it) +
       alert4h +
       '<div class="manual-input-area" id="manual-area-' + rid + '">' +
         '<span style="font-size:12px;">終了時刻：</span>' +
@@ -1091,6 +1135,7 @@ function buildActionCell(it){
       return overdueBadge +
         '<button class="btn-sm" onclick="doHolidayDone(\'' + rid + '\',this)">休日完了</button>' +
         ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'hd-end\')">手入力</button>' +
+        buildEditDeleteBtns(it) +
         alert4h +
         '<div class="manual-input-area" id="manual-area-' + rid + '">' +
           '<span style="font-size:12px;">終了時刻：</span>' +
@@ -1102,6 +1147,7 @@ function buildActionCell(it){
     return overdueBadge +
       '<button class="btn-warn btn-sm" onclick="doHolidayStart(\'' + rid + '\',this)">開始</button>' +
       ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'hd-start\')">手入力</button>' +
+      buildEditDeleteBtns(it) +
       '<div class="manual-input-area" id="manual-area-' + rid + '">' +
         '<span style="font-size:12px;">開始時刻：</span>' +
         buildTimeSelect('manual-start-' + rid, 'hd-start', it.isOverdue ? '08:00' : '') +
@@ -1290,6 +1336,125 @@ function doManualHolidayDone(requestId){
       loadDashboard();
     })
     .api_markHolidayDone(requestId, timeStr);
+}
+
+// ====== ダッシュボードデータキャッシュ（編集モーダル用） ======
+var DASHBOARD_DATA = { overtime:[], holiday:[] };
+
+// ====== 編集モーダル ======
+var EDIT_CTX = {};
+
+function openEditModal(requestId){
+  var item = null;
+  DASHBOARD_DATA.overtime.forEach(function(it){ if(it.requestId === requestId) item = it; });
+  if(!item) DASHBOARD_DATA.holiday.forEach(function(it){ if(it.requestId === requestId) item = it; });
+  if(!item){ alert('申請データが見つかりません。画面を更新してください。'); return; }
+
+  EDIT_CTX = { requestId: requestId, requestType: item.requestType, item: item };
+
+  var label = (item.requestType === 'overtime') ? '残業申請 編集' : '休日出勤申請 編集';
+  document.getElementById('editModalTitle').textContent = label;
+
+  // 対象者表示
+  document.getElementById('editInfo').textContent = item.dept + ' ／ ' + item.workerName;
+
+  // 予定時間プルダウン
+  var hoursList = (item.requestType === 'overtime') ? OT_HOURS_LIST : HD_HOURS_LIST;
+  var hSel = document.getElementById('editHours');
+  hSel.innerHTML = '';
+  hoursList.forEach(function(h){
+    var opt = document.createElement('option');
+    opt.value = h;
+    opt.textContent = (item.requestType === 'overtime') ? h + ' 時間' : h;
+    hSel.appendChild(opt);
+  });
+  // 現在の値を選択（approvedMinutes → hours ラベルに逆変換）
+  if(item.requestType === 'overtime'){
+    var curHours = (item.approvedMinutes / 60).toFixed(1);
+    hSel.value = curHours;
+  } else {
+    hSel.value = (item.approvedMinutes >= 480) ? '1日' : '半日';
+  }
+
+  // 作業実施日（休日のみ表示）
+  var dateWrap = document.getElementById('editDateWrap');
+  if(item.requestType === 'holiday'){
+    dateWrap.style.display = '';
+    document.getElementById('editTargetDate').value = item.targetDate;
+  } else {
+    dateWrap.style.display = 'none';
+  }
+
+  // ボタンリセット
+  var btn = document.getElementById('editBtnSave');
+  btn.disabled = false;
+  btn.textContent = '保存';
+
+  document.getElementById('editModalWrap').style.display = '';
+}
+
+function closeEditModal(){
+  document.getElementById('editModalWrap').style.display = 'none';
+}
+
+function saveEdit(){
+  var hours = document.getElementById('editHours').value;
+  if(!hours){ alert('予定時間を選択してください。'); return; }
+
+  var patch = { hours: hours };
+  if(EDIT_CTX.requestType === 'holiday'){
+    var td = document.getElementById('editTargetDate').value;
+    if(td) patch.targetDate = td;
+  }
+
+  var msg = '申請内容を変更しますか？\n予定時間: ' + hours;
+  if(patch.targetDate) msg += '\n作業実施日: ' + patch.targetDate;
+  if(EDIT_CTX.item.status === 'approved') msg += '\n\n※ 承認済みのため、ステータスが「修正済」に変わり再承認が必要になります。';
+  if(!confirm(msg)) return;
+
+  var btn = document.getElementById('editBtnSave');
+  btn.disabled = true;
+  btn.textContent = '保存中...';
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      closeEditModal();
+      if(res && res.ok){
+        alert('申請を更新しました。');
+        loadDashboard();
+      } else {
+        alert('更新に失敗しました。');
+      }
+    })
+    .withFailureHandler(function(err){
+      btn.disabled = false;
+      btn.textContent = '保存';
+      alert('エラー: ' + (err.message || err));
+    })
+    .api_editRequest(EDIT_CTX.requestId, patch);
+}
+
+function confirmDelete(requestId){
+  var item = null;
+  DASHBOARD_DATA.overtime.forEach(function(it){ if(it.requestId === requestId) item = it; });
+  if(!item) DASHBOARD_DATA.holiday.forEach(function(it){ if(it.requestId === requestId) item = it; });
+
+  var label = item ? (item.workerName + ' の' + (item.requestType === 'overtime' ? '残業' : '休日出勤') + '申請') : '選択した申請';
+  if(!confirm(label + 'を削除しますか？\n\nこの操作は取り消せません。')) return;
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(res && res.ok){
+        alert('申請を削除しました。');
+        loadDashboard();
+      } else {
+        alert('削除に失敗しました。');
+      }
+    })
+    .withFailureHandler(function(err){
+      alert('削除エラー: ' + (err.message || err));
+    })
+    .api_deleteRequest(requestId);
 }
 
 // ====== 申請モーダル制御 ======
