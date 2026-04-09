@@ -22,6 +22,8 @@ function onOpen() {
     .addItem('全回答を一括処理（初回/リカバリ用）', 'reprocessAllResponses_')
     .addSeparator()
     .addItem('社内カレンダーマスタ初期投入（2026年度）', 'setupCompanyCalendar2026')
+    .addSeparator()
+    .addItem('蓄積SS：時間表記列を追加（マイグレーション）', 'migrateAccumulationTimeColumns')
     .addToUi();
 }
 

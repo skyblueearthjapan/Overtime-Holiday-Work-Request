@@ -349,8 +349,8 @@ var ACC_HEADERS_ = [
   '管理番号', '申請種別', '作業実施日', '曜日',
   '部署', '作業員ID', '氏名',
   '理由', '補足理由', '業務内容',
-  '承認時間(分)', '開始時刻', '終了時刻',
-  '実働(分)', '休憩(分)', '実残業/実働(分)',
+  '承認時間(分)', '承認時間', '開始時刻', '終了時刻',
+  '実働(分)', '実働', '休憩(分)', '休憩', '実残業/実働(分)', '実残業/実働',
   '申請日', '1次承認日', '1次承認者', '2次承認日', '2次承認者',
   '承認状態', 'PDF'
 ];
@@ -368,11 +368,15 @@ var ACC_COL_WIDTHS_ = [
   160, // 補足理由
   160, // 業務内容
   80,  // 承認時間(分)
+  100, // 承認時間
   80,  // 開始時刻
   80,  // 終了時刻
   80,  // 実働(分)
+  100, // 実働
   80,  // 休憩(分)
+  100, // 休憩
   80,  // 実残業/実働(分)
+  100, // 実残業/実働
   100, // 申請日
   100, // 1次承認日
   120, // 1次承認者
@@ -582,6 +586,11 @@ function buildAccRow_(req, wl, targetDate) {
 
   var pdfFileId = req.pdfFileId || '';
 
+  var approvedMin = Number(req.approvedMinutes || 0);
+  var actualMin = wl.actualMinutes || 0;
+  var breakMin = wl.breakMinutes || 0;
+  var netMin = wl.netMinutes || 0;
+
   return [
     req.requestId,
     typeLabel,
@@ -593,12 +602,16 @@ function buildAccRow_(req, wl, targetDate) {
     req.reason || '',
     req.reasonDetail || '',
     req.workContent || '',
-    Number(req.approvedMinutes || 0),
+    approvedMin,
+    fmtMinutesJa_(approvedMin),
     startStr,
     endStr,
-    wl.actualMinutes || 0,
-    wl.breakMinutes || 0,
-    wl.netMinutes || 0,
+    actualMin,
+    fmtMinutesJa_(actualMin),
+    breakMin,
+    fmtMinutesJa_(breakMin),
+    netMin,
+    fmtMinutesJa_(netMin),
     submittedStr,
     approved1Str,
     approver1,
@@ -777,12 +790,148 @@ function formatAccRow_(sh, rowNo, rowData) {
     range.setBackground('#ffffff');
   }
 
-  // PDF列（23列目）にハイパーリンク
-  var pdfFileId = rowData[22];
+  // PDF列（27列目＝ACC_HEADERS_の最終列）にハイパーリンク
+  var pdfColIdx = ACC_HEADERS_.indexOf('PDF');
+  var pdfFileId = rowData[pdfColIdx];
   if (pdfFileId) {
     var pdfUrl = 'https://drive.google.com/file/d/' + pdfFileId + '/view';
-    sh.getRange(rowNo, 23).setFormula('=HYPERLINK("' + pdfUrl + '","PDF")');
+    sh.getRange(rowNo, pdfColIdx + 1).setFormula('=HYPERLINK("' + pdfUrl + '","PDF")');
   }
+}
+
+// ====================================================================
+// 蓄積SSマイグレーション：既存シートに時間表記列を追加
+// ====================================================================
+
+/**
+ * 既存の蓄積スプレッドシート全シートに時間表記列（承認時間/実働/休憩/実残業）を追加し、
+ * 既存行の分データから「X時間Y分」形式を一括生成する。
+ * メニューから手動実行する想定。
+ */
+function migrateAccumulationTimeColumns() {
+  var ss;
+  try {
+    ss = getAccumulationSS_();
+  } catch (e) {
+    Logger.log('蓄積SSが見つかりません: ' + e.message);
+    SpreadsheetApp.getUi().alert('蓄積スプレッドシートが見つかりません。');
+    return;
+  }
+
+  var sheets = ss.getSheets();
+  var migratedCount = 0;
+
+  for (var s = 0; s < sheets.length; s++) {
+    var sh = sheets[s];
+    var sheetName = sh.getName();
+    // 残業_XXXX年度 or 休日出勤_XXXX年度 のみ対象
+    if (!/^(残業|休日出勤)_\d{4}年度$/.test(sheetName)) continue;
+
+    var lastRow = sh.getLastRow();
+    var lastCol = sh.getLastColumn();
+    if (lastRow < 1 || lastCol < 1) continue;
+
+    var header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h).trim(); });
+
+    // 既にマイグレーション済みかチェック（「承認時間」列が存在するか）
+    if (header.indexOf('承認時間') >= 0) {
+      Logger.log(sheetName + ': マイグレーション済みのためスキップ');
+      continue;
+    }
+
+    // 旧ヘッダの列位置を特定
+    var oldApprovedMinCol = header.indexOf('承認時間(分)');   // 旧10列目(0-indexed)
+    var oldActualMinCol   = header.indexOf('実働(分)');       // 旧13列目
+    var oldBreakMinCol    = header.indexOf('休憩(分)');       // 旧14列目
+    var oldNetMinCol      = header.indexOf('実残業/実働(分)'); // 旧15列目
+
+    if (oldApprovedMinCol < 0) {
+      Logger.log(sheetName + ': 承認時間(分)列が見つかりません、スキップ');
+      continue;
+    }
+
+    // 新列を挿入（後ろから挿入してインデックスずれを防ぐ）
+    // 挿入位置: 各(分)列の直後に1列ずつ挿入
+    // 逆順に挿入: netMin → breakMin → actualMin → approvedMin
+    var insertions = [
+      { afterCol: oldNetMinCol,      newHeader: '実残業/実働' },
+      { afterCol: oldBreakMinCol,    newHeader: '休憩' },
+      { afterCol: oldActualMinCol,   newHeader: '実働' },
+      { afterCol: oldApprovedMinCol, newHeader: '承認時間' },
+    ];
+
+    for (var ins = 0; ins < insertions.length; ins++) {
+      var colPos = insertions[ins].afterCol + 1; // 1-indexed, 挿入先は直後
+      // 前の挿入で列がずれた分を補正
+      for (var prev = ins + 1; prev < insertions.length; prev++) {
+        // 自分より前（左）に挿入された列数分だけ右にずらす
+      }
+      // 逆順挿入なので、既に右側で挿入した列数を加算
+      var offset = 0;
+      for (var k = 0; k < ins; k++) {
+        if (insertions[k].afterCol > insertions[ins].afterCol) offset++;
+      }
+      sh.insertColumnAfter(colPos + 1 + offset); // afterCol は 0-indexed → +1 で 1-indexed
+      sh.getRange(1, colPos + 2 + offset).setValue(insertions[ins].newHeader);
+    }
+
+    // 再読み込み: 挿入後の最新ヘッダを取得
+    lastCol = sh.getLastColumn();
+    header = sh.getRange(1, 1, 1, lastCol).getValues()[0].map(function(h) { return String(h).trim(); });
+
+    // 新しい列位置を取得
+    var newApprovedHmCol = header.indexOf('承認時間');
+    var newActualHmCol   = header.indexOf('実働');
+    var newBreakHmCol    = header.indexOf('休憩');
+    var newNetHmCol      = header.indexOf('実残業/実働');
+
+    // 分列の新位置（挿入後にずれているため再取得）
+    var minApprovedCol = header.indexOf('承認時間(分)');
+    var minActualCol   = header.indexOf('実働(分)');
+    var minBreakCol    = header.indexOf('休憩(分)');
+    var minNetCol      = header.indexOf('実残業/実働(分)');
+
+    // 既存データ行を一括変換
+    if (lastRow >= 2) {
+      var data = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
+      var updates = []; // [[row, col, value], ...]
+
+      for (var r = 0; r < data.length; r++) {
+        var rowNum = r + 2;
+        updates.push([rowNum, newApprovedHmCol + 1, fmtMinutesJa_(data[r][minApprovedCol])]);
+        updates.push([rowNum, newActualHmCol + 1,   fmtMinutesJa_(data[r][minActualCol])]);
+        updates.push([rowNum, newBreakHmCol + 1,    fmtMinutesJa_(data[r][minBreakCol])]);
+        updates.push([rowNum, newNetHmCol + 1,      fmtMinutesJa_(data[r][minNetCol])]);
+      }
+
+      // 一括書き込み
+      for (var u = 0; u < updates.length; u++) {
+        sh.getRange(updates[u][0], updates[u][1]).setValue(updates[u][2]);
+      }
+    }
+
+    // 列幅設定
+    if (newApprovedHmCol >= 0) sh.setColumnWidth(newApprovedHmCol + 1, 100);
+    if (newActualHmCol >= 0)   sh.setColumnWidth(newActualHmCol + 1, 100);
+    if (newBreakHmCol >= 0)    sh.setColumnWidth(newBreakHmCol + 1, 100);
+    if (newNetHmCol >= 0)      sh.setColumnWidth(newNetHmCol + 1, 100);
+
+    // ヘッダ書式を再適用
+    var hr = sh.getRange(1, 1, 1, lastCol);
+    hr.setFontWeight('bold');
+    hr.setBackground('#1a365d');
+    hr.setFontColor('#ffffff');
+    hr.setFontSize(10);
+    hr.setHorizontalAlignment('center');
+
+    SpreadsheetApp.flush();
+    migratedCount++;
+    Logger.log(sheetName + ': マイグレーション完了（' + (lastRow - 1) + '行変換）');
+  }
+
+  var msg = 'マイグレーション完了: ' + migratedCount + 'シートを更新しました。';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { /* trigger実行時はUI不可 */ }
 }
 
 // ====================================================================
@@ -870,7 +1019,9 @@ function buildMorningReportRows_(dateObj) {
     '開始',
     '終了',
     '実働(分)',
+    '実働',
     '休憩(分)',
+    '休憩',
     '実残業/実働(分)',
     '実残業/実働',
     'PDF作成',
@@ -902,7 +1053,9 @@ function buildMorningReportRows_(dateObj) {
       start,
       end,
       actualMin,
+      fmtMinutesJa_(actualMin),
       breakMin,
+      fmtMinutesJa_(breakMin),
       netMin,
       fmtMinutesJa_(netMin),
       pdfDone,
