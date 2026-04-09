@@ -790,7 +790,7 @@ function formatAccRow_(sh, rowNo, rowData) {
     range.setBackground('#ffffff');
   }
 
-  // PDF列（27列目＝ACC_HEADERS_の最終列）にハイパーリンク
+  // PDF列にハイパーリンク（動的取得）
   var pdfColIdx = ACC_HEADERS_.indexOf('PDF');
   var pdfFileId = rowData[pdfColIdx];
   if (pdfFileId) {
@@ -861,18 +861,15 @@ function migrateAccumulationTimeColumns() {
     ];
 
     for (var ins = 0; ins < insertions.length; ins++) {
-      var colPos = insertions[ins].afterCol + 1; // 1-indexed, 挿入先は直後
-      // 前の挿入で列がずれた分を補正
-      for (var prev = ins + 1; prev < insertions.length; prev++) {
-        // 自分より前（左）に挿入された列数分だけ右にずらす
-      }
-      // 逆順挿入なので、既に右側で挿入した列数を加算
+      // afterCol は 0-indexed → +1 で 1-indexed
+      var col1based = insertions[ins].afterCol + 1;
+      // 逆順挿入なので、既に右側（自分より後ろ）で挿入した列数を加算
       var offset = 0;
       for (var k = 0; k < ins; k++) {
         if (insertions[k].afterCol > insertions[ins].afterCol) offset++;
       }
-      sh.insertColumnAfter(colPos + 1 + offset); // afterCol は 0-indexed → +1 で 1-indexed
-      sh.getRange(1, colPos + 2 + offset).setValue(insertions[ins].newHeader);
+      sh.insertColumnAfter(col1based + offset);
+      sh.getRange(1, col1based + 1 + offset).setValue(insertions[ins].newHeader);
     }
 
     // 再読み込み: 挿入後の最新ヘッダを取得
@@ -891,23 +888,27 @@ function migrateAccumulationTimeColumns() {
     var minBreakCol    = header.indexOf('休憩(分)');
     var minNetCol      = header.indexOf('実残業/実働(分)');
 
-    // 既存データ行を一括変換
+    // 既存データ行を一括変換（列単位で一括書き込み）
     if (lastRow >= 2) {
-      var data = sh.getRange(2, 1, lastRow - 1, lastCol).getValues();
-      var updates = []; // [[row, col, value], ...]
+      var dataRows = lastRow - 1;
+      var data = sh.getRange(2, 1, dataRows, lastCol).getValues();
 
-      for (var r = 0; r < data.length; r++) {
-        var rowNum = r + 2;
-        updates.push([rowNum, newApprovedHmCol + 1, fmtMinutesJa_(data[r][minApprovedCol])]);
-        updates.push([rowNum, newActualHmCol + 1,   fmtMinutesJa_(data[r][minActualCol])]);
-        updates.push([rowNum, newBreakHmCol + 1,    fmtMinutesJa_(data[r][minBreakCol])]);
-        updates.push([rowNum, newNetHmCol + 1,      fmtMinutesJa_(data[r][minNetCol])]);
+      var approvedHmVals = [];
+      var actualHmVals = [];
+      var breakHmVals = [];
+      var netHmVals = [];
+
+      for (var r = 0; r < dataRows; r++) {
+        approvedHmVals.push([fmtMinutesJa_(data[r][minApprovedCol])]);
+        actualHmVals.push([fmtMinutesJa_(data[r][minActualCol])]);
+        breakHmVals.push([fmtMinutesJa_(data[r][minBreakCol])]);
+        netHmVals.push([fmtMinutesJa_(data[r][minNetCol])]);
       }
 
-      // 一括書き込み
-      for (var u = 0; u < updates.length; u++) {
-        sh.getRange(updates[u][0], updates[u][1]).setValue(updates[u][2]);
-      }
+      sh.getRange(2, newApprovedHmCol + 1, dataRows, 1).setValues(approvedHmVals);
+      sh.getRange(2, newActualHmCol + 1, dataRows, 1).setValues(actualHmVals);
+      sh.getRange(2, newBreakHmCol + 1, dataRows, 1).setValues(breakHmVals);
+      sh.getRange(2, newNetHmCol + 1, dataRows, 1).setValues(netHmVals);
     }
 
     // 列幅設定
