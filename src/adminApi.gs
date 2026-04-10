@@ -397,12 +397,23 @@ function api_adminPendingWatch() {
     const submittedAt = new Date(row[idx['submittedAt']]);
     const hours = (now - submittedAt) / (1000*60*60);
 
+    // targetDate を yyyy-MM-dd 化（遡及フラグ算出のため）
+    var _tdv = row[idx['targetDate']];
+    var _tdYmd = '';
+    try {
+      _tdYmd = _tdv instanceof Date ? fmtDate_(_tdv, 'yyyy-MM-dd') : fmtDate_(new Date(_tdv), 'yyyy-MM-dd');
+    } catch (_e) { _tdYmd = ''; }
+    var _todayYmd = fmtDate_(now, 'yyyy-MM-dd');
+
     result.push({
       dept: normalize_(row[idx['dept']]),
       workerName: normalize_(row[idx['workerName']]),
       submittedAt: fmtDate_(submittedAt, 'yyyy-MM-dd HH:mm:ss'),
       hoursPending: Math.floor(hours),
-      isOver48h: hours >= 48
+      isOver48h: hours >= 48,
+      targetDate: _tdYmd,
+      isRetroactive: computeIsRetroactive_(submittedAt, _tdYmd),
+      daysAgo: computeDaysAgo_(_tdYmd, _todayYmd),
     });
   }
 
@@ -423,7 +434,7 @@ function api_adminManualComplete(requestId, endTimeStr, startTimeStr) {
   try {
     const req = getRequestById_(requestId);
     if (!req) throw new Error('申請が見つかりません。');
-    if (req.status !== 'approved') throw new Error('承認済みの申請のみ手動入力できます。');
+    if (req.status === 'canceled') throw new Error('キャンセル済みの申請には入力できません。');
 
     // targetDateのJST日付文字列を取得
     const d = req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate);
@@ -473,7 +484,7 @@ function api_adminManualComplete(requestId, endTimeStr, startTimeStr) {
     });
     SpreadsheetApp.flush();
 
-    // PDF生成
+    // PDF生成（承認済みの場合のみ）
     const wlOverride = {
       actualStartAt: fmtDate_(start, 'yyyy-MM-dd HH:mm:ss'),
       actualEndAt:   fmtDate_(end,   'yyyy-MM-dd HH:mm:ss'),
@@ -481,15 +492,17 @@ function api_adminManualComplete(requestId, endTimeStr, startTimeStr) {
       breakMinutes:  breakMinutes,
       netMinutes:    netMinutes,
     };
-    try {
-      const useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
-      if (useDirect) {
-        generatePdfDirect_(requestId, wlOverride);
-      } else {
-        generatePdfForRequest_(requestId, wlOverride);
+    if (req.status === 'approved') {
+      try {
+        const useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
+        if (useDirect) {
+          generatePdfDirect_(requestId, wlOverride);
+        } else {
+          generatePdfForRequest_(requestId, wlOverride);
+        }
+      } catch (pdfErr) {
+        Logger.log('手動入力PDF生成警告: ' + pdfErr.message);
       }
-    } catch (pdfErr) {
-      Logger.log('手動入力PDF生成警告: ' + pdfErr.message);
     }
 
     // 蓄積SS更新

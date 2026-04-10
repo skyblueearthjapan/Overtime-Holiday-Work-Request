@@ -312,7 +312,11 @@ function api_getApproverDashboard(deptsOrDept) {
 
 function api_approveRequest(requestId) {
   const email = Session.getActiveUser().getEmail() || 'unknown';
-  const lock = LockService.getScriptLock();
+  var approvedAtStr = '';
+  var hasWorkDone = false;
+
+  // ---- Phase 1: 承認書き込み（ロック内） ----
+  var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
     const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
@@ -339,32 +343,37 @@ function api_approveRequest(requestId) {
     if (status === 'canceled') throw new Error('キャンセル済みです。');
 
     const now = new Date();
+    approvedAtStr = fmtDate_(now, 'yyyy-MM-dd HH:mm:ss');
     sh.getRange(rowNo, idx['status(submitted/approved/canceled)']+1).setValue('approved');
     if (idx['approvedAt'] !== undefined) sh.getRange(rowNo, idx['approvedAt']+1).setValue(now);
     if (idx['approvedBy'] !== undefined) sh.getRange(rowNo, idx['approvedBy']+1).setValue(email);
+
+    // 作業完了済みかチェック（ロック内で判定のみ）
+    var wlMap = buildWorkLogsMapByRequestId_();
+    var wl = wlMap.get(requestId) || {};
+    hasWorkDone = !!wl.actualEndAt;
+
     SpreadsheetApp.flush();
-
-    // 作業完了済み（actualEndAt有り）ならPDF生成＋蓄積SS更新
-    try {
-      var wlMap = buildWorkLogsMapByRequestId_();
-      var wl = wlMap.get(requestId) || {};
-      if (wl.actualEndAt) {
-        var useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
-        if (useDirect) {
-          generatePdfDirect_(requestId);
-        } else {
-          generatePdfForRequest_(requestId);
-        }
-        upsertAccumulationRow_(requestId);
-      }
-    } catch (pdfErr) {
-      console.warn('承認時PDF生成警告: ' + pdfErr.message);
-    }
-
-    return { ok: true, requestId, approvedBy: email, approvedAt: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') };
   } finally {
     lock.releaseLock();
   }
+
+  // ---- Phase 2: 作業完了済みならPDF生成＋蓄積SS更新（ロック外） ----
+  if (hasWorkDone) {
+    try {
+      var useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
+      if (useDirect) {
+        generatePdfDirect_(requestId);
+      } else {
+        generatePdfForRequest_(requestId);
+      }
+      upsertAccumulationRow_(requestId);
+    } catch (pdfErr) {
+      console.warn('承認時PDF生成警告: ' + pdfErr.message);
+    }
+  }
+
+  return { ok: true, requestId, approvedBy: email, approvedAt: approvedAtStr };
 }
 
 // ====== 却下API ======
@@ -414,7 +423,11 @@ function api_approveRequestsBatch(requestIds) {
   if (requestIds.length > 50) throw new Error('一括承認は50件までです。');
 
   const email = Session.getActiveUser().getEmail() || 'unknown';
-  const lock = LockService.getScriptLock();
+  var results = [];
+  var pdfTargetIds = [];
+
+  // ---- Phase 1: 承認書き込み（ロック内） ----
+  var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
     const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
@@ -424,11 +437,9 @@ function api_approveRequestsBatch(requestIds) {
     const numCols = sh.getLastColumn();
     const values = sh.getRange(2, 1, lastRow-1, numCols).getValues();
     const now = new Date();
-    const results = [];
     const targetSet = {};
     for (var k = 0; k < requestIds.length; k++) targetSet[requestIds[k]] = true;
 
-    // 一括書き込み用：{ rowNo → { colIdx → value } }
     const pendingWrites = [];
 
     for (var i = 0; i < values.length; i++) {
@@ -449,7 +460,6 @@ function api_approveRequestsBatch(requestIds) {
       delete targetSet[rid];
     }
 
-    // setValues一括書き込み（行ごとにまとめて1回のsetValueで処理）
     var statusCol = idx['status(submitted/approved/canceled)'] + 1;
     var atCol = idx['approvedAt'] !== undefined ? idx['approvedAt'] + 1 : -1;
     var byCol = idx['approvedBy'] !== undefined ? idx['approvedBy'] + 1 : -1;
@@ -461,34 +471,41 @@ function api_approveRequestsBatch(requestIds) {
     }
     if (pendingWrites.length > 0) SpreadsheetApp.flush();
 
-    // 作業完了済みの申請についてPDF生成＋蓄積SS更新
+    // 作業完了済みのrequestIdを収集（ロック内で判定のみ）
     if (pendingWrites.length > 0) {
-      try {
-        var wlMap = buildWorkLogsMapByRequestId_();
-        var useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
-        for (var p = 0; p < results.length; p++) {
-          if (!results[p].ok || results[p].message) continue; // スキップ or 既承認
-          var wl = wlMap.get(results[p].requestId) || {};
-          if (!wl.actualEndAt) continue;
-          try {
-            if (useDirect) {
-              generatePdfDirect_(results[p].requestId);
-            } else {
-              generatePdfForRequest_(results[p].requestId);
-            }
-            upsertAccumulationRow_(results[p].requestId);
-          } catch (pdfErr) {
-            console.warn('一括承認時PDF生成警告(' + results[p].requestId + '): ' + pdfErr.message);
-          }
-        }
-      } catch (e) {
-        console.warn('一括承認時PDF生成エラー: ' + e.message);
+      var wlMap = buildWorkLogsMapByRequestId_();
+      for (var p = 0; p < results.length; p++) {
+        if (!results[p].ok || results[p].message) continue;
+        var wl = wlMap.get(results[p].requestId) || {};
+        if (wl.actualEndAt) pdfTargetIds.push(results[p].requestId);
       }
     }
 
     for (var missing in targetSet) results.push({requestId:missing,ok:false,error:'見つかりません'});
-    return { ok: true, results: results };
   } finally { lock.releaseLock(); }
+
+  // ---- Phase 2: 作業完了済みの申請についてPDF生成＋蓄積SS更新（ロック外） ----
+  if (pdfTargetIds.length > 0) {
+    try {
+      var useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
+      for (var t = 0; t < pdfTargetIds.length; t++) {
+        try {
+          if (useDirect) {
+            generatePdfDirect_(pdfTargetIds[t]);
+          } else {
+            generatePdfForRequest_(pdfTargetIds[t]);
+          }
+          upsertAccumulationRow_(pdfTargetIds[t]);
+        } catch (pdfErr) {
+          console.warn('一括承認時PDF生成警告(' + pdfTargetIds[t] + '): ' + pdfErr.message);
+        }
+      }
+    } catch (e) {
+      console.warn('一括承認時PDF生成エラー: ' + e.message);
+    }
+  }
+
+  return { ok: true, results: results };
 }
 
 // ====== 承認者向け月次サマリーAPI ======

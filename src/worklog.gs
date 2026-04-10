@@ -685,6 +685,19 @@ function api_deleteRequest(requestId) {
       clearExistingPdfForRegeneration_(sh, idx, row, rowNo);
     }
 
+    // WorkLogsの実績データをクリア（孤児データ防止）
+    if (findWorkLogRowNo_(requestId) !== -1) {
+      updateWorkLog_(requestId, {
+        actualStartAt: '',
+        actualEndAt: '',
+        actualMinutes: '',
+        breakMinutes: '',
+        netMinutes: '',
+        updatedAt: fmtDate_(new Date(), 'yyyy-MM-dd HH:mm:ss'),
+        updatedBy: Session.getActiveUser().getEmail() || 'delete',
+      });
+    }
+
     SpreadsheetApp.flush();
 
     // 蓄積SSから行を削除（エラーでも処理続行）

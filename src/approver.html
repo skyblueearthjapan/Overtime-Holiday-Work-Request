@@ -604,6 +604,14 @@ function renderDashboard(res){
   }
 }
 
+// 過去申請バッジHTML生成（approver/admin共用の軽量版）
+function buildRetroactiveBadge_(it){
+  if(!it || it.isRetroactive !== true) return '';
+  var days = (typeof it.daysAgo === 'number' && it.daysAgo >= 0) ? it.daysAgo : null;
+  var daysLabel = (days !== null) ? ' <span style="color:#7a1b1b;font-size:10px;font-weight:700;">(' + days + '日前)</span>' : '';
+  return ' <span class="pill" style="background:#ffe5e5;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;font-weight:800;">&#128281; 過去申請</span>' + daysLabel;
+}
+
 function buildOvertimeRow(it){
   var statusPill = it.status === 'submitted'
     ? '<span class="pill warn">未承認</span>'
@@ -616,11 +624,17 @@ function buildOvertimeRow(it){
   if(it.isOverdue){
     nameCell += ' <span style="color:var(--danger);font-size:11px;font-weight:700;">&#9888; 未処理</span>';
   }
+  // 過去申請バッジ
+  nameCell += buildRetroactiveBadge_(it);
 
   var tr = document.createElement('tr');
   tr.setAttribute('data-request-id', it.requestId);
   if(it.isOverdue){
     tr.style.background = 'rgba(255,90,95,0.06)';
+  }
+  // 過去申請は薄い黄色でハイライト（未処理ハイライトより優先）
+  if(it.isRetroactive === true){
+    tr.style.background = 'rgba(255,235,150,0.35)';
   }
   tr.innerHTML =
     '<td>' + escHtml(it.dept) + '</td>' +
@@ -644,11 +658,16 @@ function buildHolidayRow(it){
   if(it.isOverdue){
     nameCell += ' <span style="color:var(--danger);font-size:11px;font-weight:700;">&#9888; 未処理</span>';
   }
+  // 過去申請バッジ
+  nameCell += buildRetroactiveBadge_(it);
 
   var tr = document.createElement('tr');
   tr.setAttribute('data-request-id', it.requestId);
   if(it.isOverdue){
     tr.style.background = 'rgba(255,90,95,0.06)';
+  }
+  if(it.isRetroactive === true){
+    tr.style.background = 'rgba(255,235,150,0.35)';
   }
   tr.innerHTML =
     '<td>' + escHtml(it.targetDateLabel || it.targetDate) + '</td>' +
@@ -724,10 +743,13 @@ function updateKpiCounters() {
 function doApprove(requestId, btn){
   if(!confirm('この申請を承認しますか？')) return;
   btn.disabled = true;
+  btn.textContent = '承認中…';
   updateRowToApproved(requestId);  // 即時反映
 
   google.script.run
-    .withSuccessHandler(function(){})  // 成功時: 何もしない（既に反映済み）
+    .withSuccessHandler(function(){
+      btn.textContent = '承認済';
+    })
     .withFailureHandler(function(err){
       alert('エラー: ' + (err.message || err));
       loadDashboard();  // 失敗時のみ全件リロードで復元
@@ -787,7 +809,7 @@ function approveAllInTable(type){
   });
   if(pending.length === 0){ alert('未承認の申請はありません。'); return; }
   var label = type === 'overtime' ? '残業' : '休日出勤';
-  if(!confirm(label + ' ' + pending.length + '件を一括承認しますか？')) return;
+  if(!confirm(label + ' ' + pending.length + '件を一括承認しますか？\n（完了済みの申請がある場合、PDF生成に時間がかかることがあります）')) return;
 
   // 即時: 全行を承認済みに更新
   var requestIds = [];
@@ -796,9 +818,14 @@ function approveAllInTable(type){
     updateRowToApproved(it.requestId);
   });
 
+  // ローディング表示
+  var batchBtn = document.querySelector('[onclick*="approveAllInTable(\'' + type + '\')"]');
+  if (batchBtn) { batchBtn.disabled = true; batchBtn.textContent = '承認処理中…'; }
+
   // 1回のAPI呼出しで一括承認
   google.script.run
     .withSuccessHandler(function(res){
+      if (batchBtn) { batchBtn.textContent = '一括承認完了'; }
       var errors = [];
       if(res && res.results){
         res.results.forEach(function(r){
@@ -811,6 +838,7 @@ function approveAllInTable(type){
       }
     })
     .withFailureHandler(function(err){
+      if (batchBtn) { batchBtn.disabled = false; batchBtn.textContent = '一括承認'; }
       alert('一括承認エラー: ' + (err.message || err));
       loadDashboard();
     })
