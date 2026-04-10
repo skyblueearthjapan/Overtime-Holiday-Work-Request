@@ -86,6 +86,7 @@ function api_getTodayRequestsForDept(dept) {
   const values = sh.getDataRange().getValues();
 
   const today = fmtDate_(new Date(), 'yyyy-MM-dd');
+  const fyStartStr = fmtDate_(getFiscalYearStartDate_(new Date()), 'yyyy-MM-dd');
   const out = [];
 
   for (let r=1; r<values.length; r++) {
@@ -98,8 +99,16 @@ function api_getTodayRequestsForDept(dept) {
 
     const targetDateVal = row[idx['targetDate']];
     const targetDate = targetDateVal instanceof Date ? fmtDate_(targetDateVal,'yyyy-MM-dd') : fmtDate_(new Date(targetDateVal),'yyyy-MM-dd');
-    if (targetDate !== today) continue;
+    // 本日 + 未承認の過去日（年度内）を表示
+    if (targetDate === today) {
+      // OK
+    } else if (status === 'submitted' && targetDate < today && targetDate >= fyStartStr) {
+      // 未承認の過去日（年度内）
+    } else {
+      continue;
+    }
 
+    const submittedAtVal = row[idx['submittedAt']];
     out.push({
       requestId: row[idx['requestId']],
       requestType: row[idx['requestType(overtime/holiday)']],
@@ -109,8 +118,10 @@ function api_getTodayRequestsForDept(dept) {
       workerEmail: row[idx['workerEmail']],
       targetDate,
       approvedMinutes: row[idx['approvedMinutes']],
-      submittedAt: row[idx['submittedAt']],
+      submittedAt: submittedAtVal,
       approvedAt: row[idx['approvedAt']],
+      isRetroactive: computeIsRetroactive_(submittedAtVal, targetDate),
+      daysAgo: computeDaysAgo_(targetDate, today),
     });
   }
   return { today, dept: normDept, items: out };
@@ -214,6 +225,10 @@ function api_getApproverDashboard(deptsOrDept) {
         approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
         submittedAt: submittedAt,
         isOverdue: false,
+        // 過去日遡及申請フラグ（submittedAtの日付 > targetDate）
+        isRetroactive: computeIsRetroactive_(submittedAtRaw, targetDate),
+        // 遡及日数（今日 - targetDate、非過去なら0）
+        daysAgo: computeDaysAgo_(targetDate, today),
       };
 
       if (requestType === 'overtime') {
@@ -327,6 +342,24 @@ function api_approveRequest(requestId) {
     sh.getRange(rowNo, idx['status(submitted/approved/canceled)']+1).setValue('approved');
     if (idx['approvedAt'] !== undefined) sh.getRange(rowNo, idx['approvedAt']+1).setValue(now);
     if (idx['approvedBy'] !== undefined) sh.getRange(rowNo, idx['approvedBy']+1).setValue(email);
+    SpreadsheetApp.flush();
+
+    // 作業完了済み（actualEndAt有り）ならPDF生成＋蓄積SS更新
+    try {
+      var wlMap = buildWorkLogsMapByRequestId_();
+      var wl = wlMap.get(requestId) || {};
+      if (wl.actualEndAt) {
+        var useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
+        if (useDirect) {
+          generatePdfDirect_(requestId);
+        } else {
+          generatePdfForRequest_(requestId);
+        }
+        upsertAccumulationRow_(requestId);
+      }
+    } catch (pdfErr) {
+      console.warn('承認時PDF生成警告: ' + pdfErr.message);
+    }
 
     return { ok: true, requestId, approvedBy: email, approvedAt: fmtDate_(now, 'yyyy-MM-dd HH:mm:ss') };
   } finally {
@@ -427,6 +460,31 @@ function api_approveRequestsBatch(requestIds) {
       if (byCol > 0) sh.getRange(rn, byCol).setValue(email);
     }
     if (pendingWrites.length > 0) SpreadsheetApp.flush();
+
+    // 作業完了済みの申請についてPDF生成＋蓄積SS更新
+    if (pendingWrites.length > 0) {
+      try {
+        var wlMap = buildWorkLogsMapByRequestId_();
+        var useDirect = normalize_(getSettings_()['PDF_MODE']).indexOf('direct') >= 0;
+        for (var p = 0; p < results.length; p++) {
+          if (!results[p].ok || results[p].message) continue; // スキップ or 既承認
+          var wl = wlMap.get(results[p].requestId) || {};
+          if (!wl.actualEndAt) continue;
+          try {
+            if (useDirect) {
+              generatePdfDirect_(results[p].requestId);
+            } else {
+              generatePdfForRequest_(results[p].requestId);
+            }
+            upsertAccumulationRow_(results[p].requestId);
+          } catch (pdfErr) {
+            console.warn('一括承認時PDF生成警告(' + results[p].requestId + '): ' + pdfErr.message);
+          }
+        }
+      } catch (e) {
+        console.warn('一括承認時PDF生成エラー: ' + e.message);
+      }
+    }
 
     for (var missing in targetSet) results.push({requestId:missing,ok:false,error:'見つかりません'});
     return { ok: true, results: results };
@@ -621,6 +679,9 @@ function api_getSecondaryApprovalList(dateYmd) {
       approvedBy2: approvedBy2Val,
       approvedAt2: approvedAt2,
       pdfFileId: idx['pdfFileId'] !== undefined ? normalize_(row[idx['pdfFileId']]) : '',
+      // 過去日遡及申請フラグと日数
+      isRetroactive: computeIsRetroactive_(submittedAtRaw, targetYmd),
+      daysAgo: computeDaysAgo_(targetYmd, fmtDate_(new Date(), 'yyyy-MM-dd')),
     });
   }
 

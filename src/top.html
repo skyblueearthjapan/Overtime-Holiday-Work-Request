@@ -225,6 +225,75 @@
     .req-date-btn:hover{ background:var(--bg1); }
     .req-date-btn.selected{ border-color:var(--accent2); background:#f0f7ff; }
 
+    /* === 過去申請カレンダー === */
+    .retro-toggle{
+      display:flex; align-items:center; gap:6px;
+      width:100%; padding:10px 12px; margin-top:10px;
+      background:#fffaf0; border:1px dashed #e6c38a; color:#7a4a0b;
+      border-radius:10px; font-size:13px; font-weight:700;
+      cursor:pointer; text-align:left; transition:background .15s;
+    }
+    .retro-toggle:hover{ background:#fff3dd; }
+    .retro-toggle .retro-arrow{ margin-left:auto; font-size:11px; transition:transform .2s; }
+    .retro-toggle.open .retro-arrow{ transform:rotate(90deg); }
+    .retro-panel-wrap{
+      max-height:0; overflow:hidden;
+      transition:max-height .25s ease;
+    }
+    .retro-panel-wrap.open{ max-height:560px; }
+    .retro-panel{
+      margin-top:8px; padding:12px 14px;
+      background:#fffdf7; border:1px solid #e6c38a; border-radius:12px;
+    }
+    .retro-warn{
+      background:#fff6eb; border:1px solid #ffd29e; border-radius:8px;
+      padding:8px 10px; margin-bottom:10px;
+      font-size:12px; font-weight:700; color:#7a4a0b;
+      display:flex; gap:6px; align-items:flex-start;
+    }
+    .retro-nav{
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:8px;
+    }
+    .retro-nav button{
+      background:#fff; border:1px solid var(--line);
+      border-radius:8px; padding:4px 10px; font-size:14px;
+      cursor:pointer; font-weight:700; color:var(--text);
+    }
+    .retro-nav button:disabled{ opacity:.35; cursor:not-allowed; }
+    .retro-nav .retro-ym{ font-weight:900; font-size:14px; color:var(--text); }
+    .retro-grid{
+      display:grid; grid-template-columns:repeat(7,1fr); gap:3px;
+      font-size:12px;
+    }
+    .retro-grid .retro-dow{
+      text-align:center; padding:4px 0; font-weight:700; color:var(--muted);
+    }
+    .retro-grid .retro-dow.sun{ color:var(--danger); }
+    .retro-grid .retro-dow.sat{ color:var(--accent2); }
+    .retro-cell{
+      text-align:center; padding:8px 0; border-radius:6px;
+      background:#fff; border:1px solid transparent;
+      cursor:pointer; font-weight:700; color:var(--text);
+      transition:background .1s;
+    }
+    .retro-cell:hover:not(.disabled):not(.selected){ background:#fff3dd; }
+    .retro-cell.disabled{ color:#cbd5e1; background:#f7f9fc; cursor:not-allowed; font-weight:400; }
+    .retro-cell.other-month{ visibility:hidden; }
+    .retro-cell.today{ border-color:var(--accent2); }
+    .retro-cell.selected{
+      background:#ffb020; color:#fff; border-color:#d89000;
+    }
+    .retro-selected-label{
+      margin-top:10px; font-size:13px; font-weight:700; color:#7a4a0b;
+      text-align:center;
+    }
+    .retro-clear-btn{
+      margin-top:6px; background:none; border:none; color:var(--muted);
+      font-size:12px; cursor:pointer; text-decoration:underline;
+      display:block; margin-left:auto; margin-right:auto;
+    }
+
     @media (max-width:640px){
       header{ flex-direction:column; align-items:flex-start; gap:8px; }
       .wrap{ padding:12px 10px; }
@@ -415,6 +484,29 @@
                   <input type="date" id="reqManualDate" style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid var(--line); font-size:13px;" />
                   <button class="ghost btn-sm" onclick="selectReqDate(document.getElementById('reqManualDate').value)">決定</button>
                 </div>
+              </div>
+            </div>
+
+            <!-- 過去申請カレンダー（折りたたみ式） -->
+            <button type="button" class="retro-toggle" id="retroToggleBtn" onclick="toggleRetroPanel()" style="margin-top:10px;">
+              <span>&#128197;</span>
+              <span>過去日に申請する場合はこちら</span>
+              <span class="retro-arrow">&#9654;</span>
+            </button>
+            <div class="retro-panel-wrap" id="retroPanelWrap">
+              <div class="retro-panel">
+                <div class="retro-warn">
+                  <span>&#9888;</span>
+                  <span>過去申請をされる場合は、必ず事前に承認者および総務へご連絡ください。</span>
+                </div>
+                <div class="retro-nav">
+                  <button type="button" id="retroPrevBtn" onclick="retroPrevMonth()">&#9664;</button>
+                  <div class="retro-ym" id="retroYmLabel">-</div>
+                  <button type="button" id="retroNextBtn" onclick="retroNextMonth()">&#9654;</button>
+                </div>
+                <div class="retro-grid" id="retroGrid"></div>
+                <div class="retro-selected-label" id="retroSelectedLabel">選択中: （未選択）</div>
+                <button type="button" class="retro-clear-btn" onclick="clearRetroSelection()">選択を解除</button>
               </div>
             </div>
           </div>
@@ -1101,16 +1193,15 @@ function buildActionCell(it){
   var rid = it.requestId;
   var overdueBadge = '';
 
-  if(it.status === 'submitted'){
-    return '<span class="muted">承認待ち</span>' + buildEditDeleteBtns(it);
-  }
+  var pendingLabel = (it.status === 'submitted') ? '<span class="pill warn">承認待ち</span> ' : '';
 
   if(it.requestType === 'overtime'){
     if(it.actualEndAt){
+      if(it.status === 'submitted') return '<span class="pill warn">承認待ち</span> <span class="pill ok">完了済</span>';
       return '<span class="pill ok">完了済</span>';
     }
     if(it.isOverdue) overdueBadge = '<span class="pill danger">&#9888; 期限超過</span> ';
-    return overdueBadge +
+    return pendingLabel + overdueBadge +
       '<button class="btn-blue btn-sm" onclick="doOvertimeDone(\'' + rid + '\',this)">残業完了</button>' +
       ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'ot-end\')">手入力</button>' +
       buildEditDeleteBtns(it) +
@@ -1124,11 +1215,12 @@ function buildActionCell(it){
 
   if(it.requestType === 'holiday'){
     if(it.actualEndAt){
+      if(it.status === 'submitted') return '<span class="pill warn">承認待ち</span> <span class="pill ok">完了済</span>';
       return '<span class="pill ok">完了済</span>';
     }
     if(it.actualStartAt){
       if(it.isOverdue) overdueBadge = '<span class="pill danger">&#9888; 期限超過</span> ';
-      return overdueBadge +
+      return pendingLabel + overdueBadge +
         '<button class="btn-sm" onclick="doHolidayDone(\'' + rid + '\',this)">休日完了</button>' +
         ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'hd-end\')">手入力</button>' +
         buildEditDeleteBtns(it) +
@@ -1140,7 +1232,7 @@ function buildActionCell(it){
         '</div>';
     }
     if(it.isOverdue) overdueBadge = '<span class="pill danger">&#9888; 未開始</span> ';
-    return overdueBadge +
+    return pendingLabel + overdueBadge +
       '<button class="btn-warn btn-sm" onclick="doHolidayStart(\'' + rid + '\',this)">開始</button>' +
       ' <button class="ghost btn-sm" onclick="toggleManualInput(\'' + rid + '\',\'hd-start\')">手入力</button>' +
       buildEditDeleteBtns(it) +
@@ -1455,6 +1547,154 @@ function confirmDelete(requestId){
 // ====== 申請モーダル制御 ======
 var REQ_CTX = { type:'', dept:'', workerLabel:'', targetDate:'', orders:['','',''] };
 
+// ====== 過去申請カレンダー 状態 ======
+// 選択範囲: 現在の年度開始日（3/16） 〜 今日
+// バックエンドの getFiscalYearStartDate_ と同じロジックで動的算出する。
+function retroGetFyStart_(){
+  var t = new Date();
+  var y = t.getFullYear(), m = t.getMonth()+1, d = t.getDate();
+  // 3/16以降ならその年の3/16、それ以前なら前年の3/16
+  var sy = (m > 3 || (m === 3 && d >= 16)) ? y : (y - 1);
+  return new Date(sy, 2, 16); // 月は0始まり
+}
+var selectedRetroactiveDate = null; // 'yyyy-MM-dd' or null
+var retroViewYear = 0;   // カレンダー表示中の年
+var retroViewMonth = 0;  // カレンダー表示中の月 (0-11)
+
+function retroToday_(){
+  var t = new Date();
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate());
+}
+function retroFmtYmd_(d){
+  var y = d.getFullYear();
+  var m = String(d.getMonth()+1).padStart(2,'0');
+  var dd = String(d.getDate()).padStart(2,'0');
+  return y + '-' + m + '-' + dd;
+}
+function retroParseYmd_(s){
+  if(!s) return null;
+  var p = s.split('-');
+  return new Date(Number(p[0]), Number(p[1])-1, Number(p[2]));
+}
+
+function toggleRetroPanel(){
+  var wrap = document.getElementById('retroPanelWrap');
+  var btn  = document.getElementById('retroToggleBtn');
+  var open = wrap.classList.toggle('open');
+  btn.classList.toggle('open', open);
+  if(open){
+    // 初回展開時、今日を含む月を表示
+    var t = retroToday_();
+    if(retroViewYear === 0){
+      retroViewYear = t.getFullYear();
+      retroViewMonth = t.getMonth();
+    }
+    renderRetroCalendar();
+  }
+}
+
+function resetRetroCalendar_(){
+  selectedRetroactiveDate = null;
+  var wrap = document.getElementById('retroPanelWrap');
+  var btn  = document.getElementById('retroToggleBtn');
+  if(wrap) wrap.classList.remove('open');
+  if(btn) btn.classList.remove('open');
+  var lbl = document.getElementById('retroSelectedLabel');
+  if(lbl) lbl.textContent = '選択中: （未選択）';
+  var t = retroToday_();
+  retroViewYear = t.getFullYear();
+  retroViewMonth = t.getMonth();
+}
+
+function clearRetroSelection(){
+  selectedRetroactiveDate = null;
+  document.getElementById('retroSelectedLabel').textContent = '選択中: （未選択）';
+  renderRetroCalendar();
+}
+
+function retroPrevMonth(){
+  var m = retroViewMonth - 1;
+  var y = retroViewYear;
+  if(m < 0){ m = 11; y -= 1; }
+  retroViewYear = y; retroViewMonth = m;
+  renderRetroCalendar();
+}
+function retroNextMonth(){
+  var m = retroViewMonth + 1;
+  var y = retroViewYear;
+  if(m > 11){ m = 0; y += 1; }
+  retroViewYear = y; retroViewMonth = m;
+  renderRetroCalendar();
+}
+
+function renderRetroCalendar(){
+  var today = retroToday_();
+  var minD  = retroGetFyStart_();
+
+  // ラベル
+  document.getElementById('retroYmLabel').textContent =
+    retroViewYear + '年 ' + (retroViewMonth + 1) + '月';
+
+  // ◀▶ 活性/非活性判定
+  // 前月: 表示中の月の1日が 年度開始月 より前の月ならdisable
+  var firstOfView = new Date(retroViewYear, retroViewMonth, 1);
+  var firstOfMin  = new Date(minD.getFullYear(), minD.getMonth(), 1);
+  document.getElementById('retroPrevBtn').disabled = (firstOfView <= firstOfMin);
+  // 翌月: 表示中の月が今日の月以降ならdisable
+  var firstOfToday = new Date(today.getFullYear(), today.getMonth(), 1);
+  document.getElementById('retroNextBtn').disabled = (firstOfView >= firstOfToday);
+
+  // グリッド描画
+  var grid = document.getElementById('retroGrid');
+  grid.innerHTML = '';
+  var dowLabels = ['日','月','火','水','木','金','土'];
+  for(var i=0; i<7; i++){
+    var dowEl = document.createElement('div');
+    dowEl.className = 'retro-dow' + (i===0?' sun':'') + (i===6?' sat':'');
+    dowEl.textContent = dowLabels[i];
+    grid.appendChild(dowEl);
+  }
+
+  // 1日の曜日
+  var first = new Date(retroViewYear, retroViewMonth, 1);
+  var startDow = first.getDay();
+  // 月末日
+  var lastDate = new Date(retroViewYear, retroViewMonth + 1, 0).getDate();
+
+  // 6行x7列 = 42マス
+  for(var c=0; c<42; c++){
+    var cell = document.createElement('div');
+    var dayNum = c - startDow + 1;
+    if(dayNum < 1 || dayNum > lastDate){
+      cell.className = 'retro-cell other-month';
+      cell.textContent = '';
+      grid.appendChild(cell);
+      continue;
+    }
+    var cellDate = new Date(retroViewYear, retroViewMonth, dayNum);
+    var ymd = retroFmtYmd_(cellDate);
+    var disabled = (cellDate < minD) || (cellDate > today);
+    var cls = 'retro-cell';
+    if(disabled) cls += ' disabled';
+    if(ymd === retroFmtYmd_(today)) cls += ' today';
+    if(selectedRetroactiveDate === ymd) cls += ' selected';
+    cell.className = cls;
+    cell.textContent = String(dayNum);
+    if(!disabled){
+      (function(ds){
+        cell.onclick = function(){ selectRetroDate(ds); };
+      })(ymd);
+    }
+    grid.appendChild(cell);
+  }
+}
+
+function selectRetroDate(ymd){
+  selectedRetroactiveDate = ymd;
+  document.getElementById('retroSelectedLabel').textContent = '選択中: ' + ymd;
+  renderRetroCalendar();
+}
+
 function showRequestModal(type, dept, workerLabel){
   REQ_CTX = { type:type, dept:dept, workerLabel:workerLabel, targetDate:'', orders:['','',''] };
 
@@ -1522,6 +1762,9 @@ function showRequestModal(type, dept, workerLabel){
       .withFailureHandler(function(){})
       .api_getOrderList();
   }
+
+  // 過去申請カレンダーを初期化（閉じた状態・選択解除）
+  resetRetroCalendar_();
 
   document.getElementById('requestModalWrap').style.display = '';
 }
@@ -1728,10 +1971,19 @@ function submitRequest(){
   if(!hours){ alert('予定時間を選択してください。'); return; }
 
   var label = (REQ_CTX.type === 'overtime') ? '残業' : '休日出勤';
-  if(!confirm(label + '申請を送信しますか？\n\n'
-    + '日付: ' + REQ_CTX.targetDate + '\n'
+
+  // 過去申請判定：カレンダーで日付選択されていれば上書き
+  var isRetro = !!selectedRetroactiveDate;
+  var finalTargetDate = isRetro ? selectedRetroactiveDate : REQ_CTX.targetDate;
+
+  var confirmMsg = label + '申請を送信しますか？\n\n'
+    + '日付: ' + finalTargetDate + (isRetro ? '（過去申請）' : '') + '\n'
     + '理由: ' + reason + '\n'
-    + '予定時間: ' + hours)){ return; }
+    + '予定時間: ' + hours;
+  if(isRetro){
+    confirmMsg += '\n\n⚠ 過去日の申請です。承認者・総務への事前連絡はお済みでしょうか？';
+  }
+  if(!confirm(confirmMsg)){ return; }
 
   // ボタン無効化
   var btnSubmit = document.getElementById('reqBtnSubmit');
@@ -1742,7 +1994,7 @@ function submitRequest(){
     requestType: REQ_CTX.type,
     dept: REQ_CTX.dept,
     workerLabel: REQ_CTX.workerLabel,
-    targetDate: REQ_CTX.targetDate,
+    targetDate: finalTargetDate,
     workNo1: REQ_CTX.orders[0] || '',
     workNo2: REQ_CTX.orders[1] || '',
     workNo3: REQ_CTX.orders[2] || '',
@@ -1750,17 +2002,24 @@ function submitRequest(){
     reasonDetail: reasonDetail,
     workContent: workContent,
     hours: hours,
+    isRetroactive: isRetro,
   };
 
   google.script.run
     .withSuccessHandler(function(res){
-      closeRequestModal();
-      if(res && res.success){
+      // 正常系判定: success または ok が true の場合のみ成功扱い
+      var isOk = res && (res.success === true || res.ok === true);
+      if(isOk){
+        closeRequestModal();
         alert(label + '申請が完了しました。');
         loadDashboard();
-      } else {
-        alert('申請に失敗しました。管理者に連絡してください。');
+        return;
       }
+      // バリデーション失敗など: モーダルは閉じずにエラー表示し、ボタンを再活性化
+      btnSubmit.disabled = false;
+      btnSubmit.textContent = '申請送信';
+      var errMsg = (res && res.error) ? res.error : '申請に失敗しました。管理者に連絡してください。';
+      alert(errMsg);
     })
     .withFailureHandler(function(err){
       btnSubmit.disabled = false;
