@@ -620,10 +620,21 @@ function loadDaily(){
         action = '<span class="pill ok">完了</span>';
       }
 
+      // 過去申請バッジ
+      var retroBadge = '';
+      if(it.isRetroactive === true){
+        var days = (typeof it.daysAgo === 'number' && it.daysAgo >= 0) ? it.daysAgo : null;
+        var daysLabel = (days !== null) ? ' <span style="color:#7a1b1b;font-size:10px;font-weight:700;">('+days+'日前)</span>' : '';
+        retroBadge = ' <span class="pill" style="background:#ffe5e5;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;font-weight:800;">&#128281; 過去申請</span>' + daysLabel;
+      }
+
       var tr=document.createElement('tr');
+      if(it.isRetroactive === true){
+        tr.style.background = 'rgba(255,235,150,0.35)';
+      }
       tr.innerHTML=
         '<td>'+escHtml(it.dept)+'</td>'+
-        '<td><b>'+escHtml(it.workerName)+'</b></td>'+
+        '<td><b>'+escHtml(it.workerName)+'</b>'+retroBadge+'</td>'+
         '<td>'+typeJa+'</td>'+
         '<td>'+fmtMin(it.approvedMinutes)+'</td>'+
         '<td>'+fmtMin(it.actualMinutes)+'</td>'+

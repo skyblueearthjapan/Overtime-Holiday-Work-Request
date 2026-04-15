@@ -468,6 +468,36 @@ function handleFormSubmit_(e) {
     if (!targetDateObj || isNaN(targetDateObj.getTime())) throw new Error(`作業実施日が不正です: ${targetDateRaw}`);
     const targetDate = fmtDate_(targetDateObj, 'yyyy-MM-dd');
 
+    // 過去日遡及申請チェック（Google Forms経由）
+    // 今は警告ログのみ（Forms側の設定変更は行わない）
+    // 残業: 年度内かつ今日以前のみ想定。休日出勤: 未来日も通常運用として許可。
+    try {
+      if (requestType === 'overtime') {
+        const _fyCheck = isWithinCurrentFiscalYear_(targetDate);
+        if (!_fyCheck.ok) {
+          console.warn('handleFormSubmit_: 年度外/未来日の残業申請を検出（受付は継続）: ' + _fyCheck.error);
+        } else {
+          const _todayYmd = fmtDate_(new Date(), 'yyyy-MM-dd');
+          if (targetDate < _todayYmd) {
+            console.warn('handleFormSubmit_: 過去日遡及の残業申請を検出（Forms経由・受付は継続）: targetDate=' + targetDate);
+          }
+        }
+      } else {
+        // holiday: 未来日を許可。isRetroactive 情報は Forms 経由では分からないので遡及推論のみ行う。
+        const _hdCheck = isHolidayDateValid_(targetDate, false);
+        if (!_hdCheck.ok) {
+          console.warn('handleFormSubmit_: 年度外の休日出勤申請を検出（受付は継続）: ' + _hdCheck.error);
+        } else {
+          const _todayYmd = fmtDate_(new Date(), 'yyyy-MM-dd');
+          if (targetDate < _todayYmd) {
+            console.warn('handleFormSubmit_: 過去日遡及の休日出勤申請を検出（Forms経由・受付は継続）: targetDate=' + targetDate);
+          }
+        }
+      }
+    } catch (_fyErr) {
+      console.warn('handleFormSubmit_: 年度チェックで例外: ' + _fyErr.message);
+    }
+
     // 業務内容（任意）
     const workContent = normalize_(ans.get(Q.WORK_CONTENT) || '');
 
@@ -658,28 +688,50 @@ function api_submitRequest(data) {
   var reasonDetail= normalize_(data.reasonDetail || '');
   var workContent = normalize_(data.workContent || '');
   var hours       = normalize_(data.hours || '');
+  // 過去日遡及申請フラグ（true の場合 targetDate は年度内＆今日以前なら任意日OK）
+  var isRetroactive = (data.isRetroactive === true || String(data.isRetroactive).toLowerCase() === 'true');
 
   if (requestType !== 'overtime' && requestType !== 'holiday') {
-    throw new Error('申請種別が不正です: ' + requestType);
+    return { ok: false, error: '申請種別が不正です: ' + requestType };
   }
-  if (!dept) throw new Error('部署が指定されていません。');
-  if (!workerLabel) throw new Error('作業員が指定されていません。');
-  if (!reason) throw new Error('理由を選択してください。');
+  if (!dept) return { ok: false, error: '部署が指定されていません。' };
+  if (!workerLabel) return { ok: false, error: '作業員が指定されていません。' };
+  if (!reason) return { ok: false, error: '理由を選択してください。' };
   if (reason.indexOf('その他') >= 0 && !reasonDetail) {
-    throw new Error('理由が「その他」の場合、補足理由が必須です。');
+    return { ok: false, error: '理由が「その他」の場合、補足理由が必須です。' };
   }
-  if (!hours) throw new Error('予定時間を選択してください。');
+  if (!hours) return { ok: false, error: '予定時間を選択してください。' };
 
-  // 残業は本日自動、休日は必須
-  if (requestType === 'overtime') {
+  // 日付決定ロジック
+  //  - 残業 通常: 本日自動
+  //  - 残業 遡及: payload.targetDate を使用（年度内かつ今日以前）
+  //  - 休日出勤 通常: payload.targetDate を使用（未来日も許可：今週末・来週末への先出し申請）
+  //  - 休日出勤 遡及: payload.targetDate を使用（年度内かつ今日以前）
+  if (requestType === 'overtime' && !isRetroactive) {
     targetDate = fmtDate_(new Date(), 'yyyy-MM-dd');
   } else {
-    if (!targetDate) throw new Error('作業実施日を選択してください。');
+    if (!targetDate) return { ok: false, error: '作業実施日を選択してください。' };
     if (!/^\d{4}-\d{2}-\d{2}$/.test(targetDate)) {
-      throw new Error('作業実施日の形式が不正です: ' + targetDate);
+      return { ok: false, error: '作業実施日の形式が不正です: ' + targetDate };
     }
     var d = new Date(targetDate + 'T00:00:00+09:00');
-    if (isNaN(d.getTime())) throw new Error('作業実施日が無効です: ' + targetDate);
+    if (isNaN(d.getTime())) return { ok: false, error: '作業実施日が無効です: ' + targetDate };
+  }
+
+  // バリデーション分岐
+  //  - 残業: 従来どおり「年度内かつ今日以前」。本日固定フローでもチェック可（副作用なし）。
+  //  - 休日出勤: 未来日許可。isHolidayDateValid_ で isRetroactive に応じて判定。
+  if (requestType === 'overtime') {
+    var fyCheck = isWithinCurrentFiscalYear_(targetDate);
+    if (!fyCheck.ok) {
+      return { ok: false, error: fyCheck.error };
+    }
+  } else {
+    // holiday
+    var hdCheck = isHolidayDateValid_(targetDate, isRetroactive);
+    if (!hdCheck.ok) {
+      return { ok: false, error: hdCheck.error };
+    }
   }
 
   // --- 作業員解析 ---
@@ -753,7 +805,7 @@ function api_submitRequest(data) {
       console.warn('api_submitRequest ensureWorkLogRow_ 警告: ' + wlErr.message);
     }
 
-    return { success: true, requestId: requestId };
+    return { ok: true, success: true, requestId: requestId };
   } finally {
     lock.releaseLock();
   }
