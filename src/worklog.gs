@@ -395,7 +395,7 @@ function api_getTodayRequestsForWorker(workerCode) {
   return { today, items: out };
 }
 
-// ====== 全社ダッシュボード（残業=本日 / 休日=今週末） ======
+// ====== 全社ダッシュボード（残業=本日 / 休日=未承認は全件、承認済みは当日） ======
 // 全社員の申請を取得し、残業と休日に分けて返す。
 
 function api_getDashboard() {
@@ -406,32 +406,6 @@ function api_getDashboard() {
 
     const now = new Date();
     const today = fmtDate_(now, 'yyyy-MM-dd');
-
-    // 今週末の日付範囲を算出（土〜日＋振替月曜まで）
-    const dow = now.getDay();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
-    monday.setHours(0, 0, 0, 0);
-    const saturday = new Date(monday);
-    saturday.setDate(monday.getDate() + 5);
-    const nextMonday = new Date(monday);
-    nextMonday.setDate(monday.getDate() + 7);
-
-    // 来週金曜まで祝日を含めて weekendEnd を拡張（隣接していなくても表示）
-    const nextFriday = new Date(monday);
-    nextFriday.setDate(monday.getDate() + 11); // 来週金曜
-    const calId = 'ja.japanese#holiday@group.v.calendar.google.com';
-    var hldays = getHolidaysFromCalendar_(calId, nextMonday, nextFriday);
-    if (hldays.length === 0) {
-      hldays = getKnownJapaneseHolidays_(nextMonday, nextFriday);
-    }
-    // 祝日が1つでもあれば来週金曜まで表示範囲を拡張
-    const weekendEndDate = hldays.length > 0
-      ? new Date(nextFriday.getTime() + 86400000) // nextFriday翌日（金曜を含むため+1日）
-      : nextMonday;
-
-    const weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
-    const weekendEnd = fmtDate_(weekendEndDate, 'yyyy-MM-dd');
 
     const dayNames = ['日','月','火','水','木','金','土'];
     const overtime = [];
@@ -517,10 +491,18 @@ function api_getDashboard() {
 
       if (requestType === 'overtime' && targetDate === today) {
         overtime.push(item);
-      } else if (requestType === 'holiday' && targetDate >= (today < weekendStart ? today : weekendStart) && targetDate <= weekendEnd) {
-        const d = new Date(targetDate + 'T00:00:00');
-        item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
-        holiday.push(item);
+      } else if (requestType === 'holiday') {
+        if (status === 'submitted') {
+          // 未承認は targetDate に関係なく全件表示（承認漏れ防止）
+          const d = new Date(targetDate + 'T00:00:00');
+          item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+          holiday.push(item);
+        } else if (status === 'approved' && targetDate === today) {
+          // 承認済みは当日のみ表示
+          const d = new Date(targetDate + 'T00:00:00');
+          item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+          holiday.push(item);
+        }
       }
     }
 
@@ -536,12 +518,12 @@ function api_getDashboard() {
     });
 
     return {
-      today: today, weekendStart: weekendStart, weekendEnd: weekendEnd,
+      today: today,
       overtime: overtime, holiday: holiday,
     };
   } catch (err) {
     console.error('api_getDashboard エラー: ' + err.message + '\n' + err.stack);
-    return { today: '', weekendStart: '', weekendEnd: '',
+    return { today: '',
              overtime: [], holiday: [], error: err.message };
   }
 }

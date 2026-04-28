@@ -309,7 +309,7 @@
   <header>
     <div>
       <div class="title">残業・休日出勤 申請TOP</div>
-      <div class="sub" id="headerSub">全社の本日残業 / 今週末休日出勤 一覧</div>
+      <div class="sub" id="headerSub">全社の本日残業 / 休日出勤申請 一覧</div>
     </div>
     <div class="row">
       <a href="<?= APP_URL ?>?page=approver" target="_top" class="nav-link">承認者画面</a>
@@ -379,11 +379,11 @@
       </table>
     </div>
 
-    <!-- 休日出勤セクション（今週末） -->
+    <!-- 休日出勤セクション（未承認＋当日承認済み） -->
     <div class="card">
       <div class="sectionTitle">
         <div>
-          今週末の休日出勤申請（<span id="weekendRange">-</span>）
+          休日出勤申請（未承認＋当日承認済み）
           <span class="section-count" id="hdCount"></span>
         </div>
       </div>
@@ -1020,7 +1020,6 @@ function renderDashboard(res){
   DASHBOARD_DATA = { overtime: res.overtime || [], holiday: res.holiday || [] };
 
   document.getElementById('todayDate').innerText = res.today;
-  document.getElementById('weekendRange').innerText = res.weekendStart + ' ～ ' + res.weekendEnd;
 
   // 残業テーブル
   var otTb = document.querySelector('#tblOvertime tbody');
@@ -1081,7 +1080,7 @@ function renderDashboard(res){
   if(!res.holiday || res.holiday.length === 0){
     hdTb.innerHTML =
       '<tr><td colspan="10" class="muted" style="text-align:center;padding:24px">' +
-      '今週末の休日出勤申請はありません</td></tr>';
+      '休日出勤申請はありません</td></tr>';
   } else {
     res.holiday.forEach(function(it){ hdTb.appendChild(buildHolidayRow(it)); });
   }

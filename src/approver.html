@@ -252,7 +252,7 @@
     <div class="card">
       <div class="sectionTitle">
         <div>
-          今週末の休日出勤申請（<span id="weekendRange">-</span>）
+          休日出勤申請（未承認＋当日承認済み）
           <span class="section-count" id="hdCount"></span>
         </div>
         <button class="ghost btn-sm" onclick="approveAllInTable('holiday')">休日 全件承認</button>
@@ -568,7 +568,6 @@ function loadDashboard(){
 
 function renderDashboard(res){
   document.getElementById('todayDate').innerText = res.today;
-  document.getElementById('weekendRange').innerText = res.weekendStart + ' ～ ' + res.weekendEnd;
 
   // KPI
   var allItems = (res.overtime || []).concat(res.holiday || []);
@@ -598,7 +597,7 @@ function renderDashboard(res){
   document.getElementById('hdCount').innerText = (res.holiday || []).length + '名';
 
   if(!res.holiday || res.holiday.length === 0){
-    hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">今週末の休日出勤申請はありません</td></tr>';
+    hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">休日出勤申請はありません</td></tr>';
   } else {
     res.holiday.forEach(function(it){ hdTb.appendChild(buildHolidayRow(it)); });
   }

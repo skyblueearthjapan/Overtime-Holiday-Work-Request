@@ -135,7 +135,7 @@ function api_getApproverDashboard(deptsOrDept) {
     const admin = !email || isAdmin_(email);
 
     if (!deptsOrDept || (Array.isArray(deptsOrDept) && deptsOrDept.length === 0)) {
-      return { today: '', weekendStart: '', weekendEnd: '',
+      return { today: '',
                overtime: [], holiday: [], isAdmin: admin,
                error: '部署が指定されていません。' };
     }
@@ -149,7 +149,7 @@ function api_getApproverDashboard(deptsOrDept) {
     if (!admin) {
       for (var i = 0; i < deptList.length; i++) {
         if (!canApproveDept_(email, deptList[i])) {
-          return { today: '', weekendStart: '', weekendEnd: '',
+          return { today: '',
                    overtime: [], holiday: [], isAdmin: false,
                    error: '部署「' + deptList[i] + '」の承認権限がありません。' };
         }
@@ -163,18 +163,6 @@ function api_getApproverDashboard(deptsOrDept) {
 
     const now = new Date();
     const today = fmtDate_(now, 'yyyy-MM-dd');
-
-    // 今週末の日付範囲
-    const dow = now.getDay();
-    const monday = new Date(now);
-    monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
-    monday.setHours(0, 0, 0, 0);
-    const saturday = new Date(monday);
-    saturday.setDate(monday.getDate() + 5);
-    const nextMonday = new Date(monday);
-    nextMonday.setDate(monday.getDate() + 7);
-    const weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
-    const weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
 
     const dayNames = ['日','月','火','水','木','金','土'];
     const overtime = [];
@@ -248,26 +236,16 @@ function api_getApproverDashboard(deptsOrDept) {
         }
       } else if (requestType === 'holiday') {
         if (status === 'submitted') {
-          // 未処理: targetDateが今日以前 or 今週末範囲なら表示
-          if (targetDate <= today) {
-            if (targetDate < today) {
-              item.isOverdue = true;
-            }
-            const d = new Date(targetDate + 'T00:00:00');
-            item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
-            holiday.push(item);
-          } else if (targetDate >= weekendStart && targetDate <= weekendEnd) {
-            const d = new Date(targetDate + 'T00:00:00');
-            item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
-            holiday.push(item);
+          // 未処理: targetDateに関係なく全件表示（承認漏れ防止）
+          if (targetDate < today) {
+            item.isOverdue = true;
           }
+          const d = new Date(targetDate + 'T00:00:00');
+          item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
+          holiday.push(item);
         } else {
-          // approved/canceled: 当日 or 今週末範囲で当日のみ
+          // approved/canceled: 当日のみ表示
           if (targetDate === today) {
-            const d = new Date(targetDate + 'T00:00:00');
-            item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
-            holiday.push(item);
-          } else if (targetDate >= weekendStart && targetDate <= weekendEnd) {
             const d = new Date(targetDate + 'T00:00:00');
             item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
             holiday.push(item);
@@ -296,13 +274,13 @@ function api_getApproverDashboard(deptsOrDept) {
       return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
     });
 
-    return { today: today, weekendStart: weekendStart, weekendEnd: weekendEnd,
+    return { today: today,
              overtime: overtime, holiday: holiday, isAdmin: admin,
              selectedDepts: deptList };
   } catch (err) {
     // エラーをクライアントに伝えるため、エラー情報を含むオブジェクトを返す
     console.error('api_getApproverDashboard エラー: ' + err.message + '\n' + err.stack);
-    return { today: '', weekendStart: '', weekendEnd: '',
+    return { today: '',
              overtime: [], holiday: [], isAdmin: true,
              error: err.message };
   }

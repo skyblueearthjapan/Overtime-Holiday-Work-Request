@@ -167,26 +167,14 @@ function fmtMinutesJa_(mins) {
 // 夕方メール（17–18 / 18–19）— 承認時間（予定）を報告
 // ====================================================================
 
-// ====== 今週末〜の休日出勤申請を取得 ======
+// ====== 休日出勤申請を取得（未承認=全件 / 承認済み=当日のみ） ======
 
 function listHolidayRequestsForWeekend_(dateObj) {
   var { sh, idx } = getSheetHeaderIndex_('Requests', 1);
   var lastRow = sh.getLastRow();
   if (lastRow < 2) return [];
 
-  // 今週末の日付範囲を算出（api_getDashboardと同じロジック）
-  var now = dateObj;
-  var dow = now.getDay();
-  var monday = new Date(now);
-  monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
-  monday.setHours(0, 0, 0, 0);
-  var saturday = new Date(monday);
-  saturday.setDate(monday.getDate() + 5);
-  var nextMonday = new Date(monday);
-  nextMonday.setDate(monday.getDate() + 7);
-
-  var weekendStart = fmtDate_(saturday, 'yyyy-MM-dd');
-  var weekendEnd = fmtDate_(nextMonday, 'yyyy-MM-dd');
+  var todayStr = fmtDate_(dateObj, 'yyyy-MM-dd');
 
   var values = sh.getRange(2, 1, lastRow - 1, sh.getLastColumn()).getValues();
   var out = [];
@@ -207,7 +195,14 @@ function listHolidayRequestsForWeekend_(dateObj) {
         : fmtDate_(new Date(targetDateVal), 'yyyy-MM-dd');
     } catch (e) { continue; }
 
-    if (targetYmd < weekendStart || targetYmd > weekendEnd) continue;
+    // 未承認は全件、承認済みは当日のみ表示
+    if (status === 'submitted') {
+      // 全件対象
+    } else if (status === 'approved') {
+      if (targetYmd !== todayStr) continue;
+    } else {
+      continue;
+    }
 
     var dayNames = ['日','月','火','水','木','金','土'];
     var d = new Date(targetYmd + 'T00:00:00');
@@ -246,7 +241,7 @@ function buildEveningMailBody_(dateObj) {
   const allItems = listAllRequestsByDate_(dateObj);
   const overtimeItems = allItems.filter(function(it) { return it.requestType === 'overtime'; });
 
-  // 休日: 今週末〜の範囲
+  // 休日: 未承認は全件、承認済みは当日のみ
   const holidayItems = listHolidayRequestsForWeekend_(dateObj);
 
   const dateLabel = fmtDate_(dateObj, 'yyyy/MM/dd');
@@ -256,7 +251,7 @@ function buildEveningMailBody_(dateObj) {
     return [
       `【残業・休日出勤 申請状況報告】${dateLabel}`,
       '',
-      '本日分の残業申請および今週末の休日出勤申請はありません。',
+      '本日分の残業申請および休日出勤申請（未承認）はありません。',
       '',
       appUrl ? `詳細（アプリ）：${appUrl}` : '',
     ].filter(Boolean).join('\n');
@@ -292,7 +287,7 @@ function buildEveningMailBody_(dateObj) {
 
   // 休日セクション
   if (holidayItems.length > 0) {
-    lines.push('【今週末の休日出勤申請】');
+    lines.push('【休日出勤申請（未承認＋当日承認済み）】');
     lines.push('');
     const hdGroups = new Map();
     for (const it of holidayItems) {
