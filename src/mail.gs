@@ -857,14 +857,10 @@ function migrateAccumulationTimeColumns() {
 
     for (var ins = 0; ins < insertions.length; ins++) {
       // afterCol は 0-indexed → +1 で 1-indexed
+      // 逆順挿入なので、既に右側で行われた挿入は左側の位置に影響しない（offset補正は不要）
       var col1based = insertions[ins].afterCol + 1;
-      // 逆順挿入なので、既に右側（自分より後ろ）で挿入した列数を加算
-      var offset = 0;
-      for (var k = 0; k < ins; k++) {
-        if (insertions[k].afterCol > insertions[ins].afterCol) offset++;
-      }
-      sh.insertColumnAfter(col1based + offset);
-      sh.getRange(1, col1based + 1 + offset).setValue(insertions[ins].newHeader);
+      sh.insertColumnAfter(col1based);
+      sh.getRange(1, col1based + 1).setValue(insertions[ins].newHeader);
     }
 
     // 再読み込み: 挿入後の最新ヘッダを取得
@@ -926,6 +922,206 @@ function migrateAccumulationTimeColumns() {
   }
 
   var msg = 'マイグレーション完了: ' + migratedCount + 'シートを更新しました。';
+  Logger.log(msg);
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) { /* trigger実行時はUI不可 */ }
+}
+
+// ====================================================================
+// 蓄積SS 完全再構築（バックアップ保持版）
+// ====================================================================
+/**
+ * 既存の年度シート（残業_YYYY年度 / 休日出勤_YYYY年度）を
+ * "_backup_yyyyMMdd_HHmmss" 接尾辞でリネームしてバックアップ化し、
+ * Requests + WorkLogs から正しい列順 (ACC_HEADERS_) で再構築する。
+ *
+ * - 古いデータは消えずバックアップシートとして残る
+ * - 新シートは ACC_HEADERS_ の正しい列順
+ * - 列順ズレ＆「1分休憩」誤データの修復に使用
+ *
+ * メニューから手動実行を想定。
+ */
+function rebuildAccumulationSS() {
+  var t0 = Date.now();
+  var ss;
+  try {
+    ss = getAccumulationSS_();
+  } catch (e) {
+    Logger.log('蓄積SS取得失敗: ' + e.message);
+    try { SpreadsheetApp.getUi().alert('蓄積スプレッドシートが取得できません: ' + e.message); } catch (e2) {}
+    return;
+  }
+
+  var timestamp = Utilities.formatDate(new Date(), TZ, 'yyyyMMdd_HHmmss');
+
+  // 1) 既存年度シートをバックアップ化（リネーム）
+  var sheets = ss.getSheets();
+  var backupRenamed = [];
+  for (var i = 0; i < sheets.length; i++) {
+    var name = sheets[i].getName();
+    if (/^(残業|休日出勤)_\d{4}年度$/.test(name)) {
+      var newName = name + '_backup_' + timestamp;
+      try {
+        sheets[i].setName(newName);
+        backupRenamed.push(newName);
+      } catch (e) {
+        Logger.log('バックアップ化失敗: ' + name + ' → ' + e.message);
+      }
+    }
+  }
+  Logger.log('[rebuild] step1 backup done: ' + backupRenamed.length + ' sheets (' + (Date.now() - t0) + 'ms)');
+
+  // 2) Requests を1回だけスキャン
+  var reqInfo = getSheetHeaderIndex_('Requests', 1);
+  var reqSh = reqInfo.sh;
+  var reqIdx = reqInfo.idx;
+  var reqLastRow = reqSh.getLastRow();
+  if (reqLastRow < 2) {
+    try { SpreadsheetApp.getUi().alert('Requests シートが空のため再構築をスキップしました。'); } catch (e) {}
+    return;
+  }
+  var reqValues = reqSh.getRange(2, 1, reqLastRow - 1, reqSh.getLastColumn()).getValues();
+  Logger.log('[rebuild] step2 requests read: ' + reqValues.length + ' rows (' + (Date.now() - t0) + 'ms)');
+
+  // 3) WorkLogs を1回だけスキャン → map
+  var wlMap = buildWorkLogsMapByRequestId_();
+  Logger.log('[rebuild] step3 worklogs map built (' + (Date.now() - t0) + 'ms)');
+
+  // 4) 申請を年度・種別ごとにグループ化して、行データ配列を構築
+  var statusKey = reqIdx['status(submitted/approved/canceled)'] !== undefined
+    ? 'status(submitted/approved/canceled)'
+    : 'status';
+  var typeKey = reqIdx['requestType(overtime/holiday)'] !== undefined
+    ? 'requestType(overtime/holiday)'
+    : 'requestType';
+
+  var groups = {}; // key = sheetType+'_'+fy → {sheetType, fy, items: [{rowData, ymd}]}
+  var processed = 0;
+  for (var r = 0; r < reqValues.length; r++) {
+    var row = reqValues[r];
+    var status = normalize_(row[reqIdx[statusKey]]);
+    if (status === 'canceled') continue;
+
+    var requestType = normalize_(row[reqIdx[typeKey]]);
+    var requestId = normalize_(row[reqIdx['requestId']]);
+    var dept = normalize_(row[reqIdx['dept']]);
+    var workerCode = reqIdx['workerCode'] !== undefined ? normalize_(row[reqIdx['workerCode']] || '') : '';
+    var workerName = row[reqIdx['workerName']];
+    var targetDateRaw = row[reqIdx['targetDate']];
+    var d = targetDateRaw instanceof Date ? targetDateRaw : new Date(targetDateRaw);
+    if (isNaN(d.getTime())) continue;
+
+    var fy = computeAccFiscalYear_(d);
+    var sheetType = requestType === 'overtime' ? '残業' : '休日出勤';
+    var typeLabel = sheetType;
+    var ymd = fmtDate_(d, 'yyyy/MM/dd');
+    var dow = DOWS_ACC_[d.getDay()];
+    var wl = wlMap.get(requestId) || {};
+    var startStr = extractTimeStr_(wl.actualStartAt);
+    var endStr = extractTimeStr_(wl.actualEndAt);
+
+    var submittedStr = '';
+    var submittedRaw = reqIdx['submittedAt'] !== undefined ? row[reqIdx['submittedAt']] : '';
+    if (submittedRaw) {
+      var sd = submittedRaw instanceof Date ? submittedRaw : new Date(submittedRaw);
+      if (!isNaN(sd.getTime())) submittedStr = fmtDate_(sd, 'yyyy/MM/dd');
+    }
+
+    var approved1Str = '';
+    var approved1Raw = reqIdx['approvedAt'] !== undefined ? row[reqIdx['approvedAt']] : '';
+    if (approved1Raw) {
+      var a1 = approved1Raw instanceof Date ? approved1Raw : new Date(approved1Raw);
+      if (!isNaN(a1.getTime())) approved1Str = fmtDate_(a1, 'yyyy/MM/dd');
+    }
+    var approver1 = reqIdx['approvedBy'] !== undefined ? normalize_(row[reqIdx['approvedBy']] || '') : '';
+
+    var approved2Str = '';
+    if (reqIdx['approvedAt2'] !== undefined) {
+      var a2raw = row[reqIdx['approvedAt2']];
+      if (a2raw) {
+        var a2 = a2raw instanceof Date ? a2raw : new Date(a2raw);
+        if (!isNaN(a2.getTime())) approved2Str = fmtDate_(a2, 'yyyy/MM/dd');
+      }
+    }
+    var approver2 = reqIdx['approvedBy2'] !== undefined ? normalize_(row[reqIdx['approvedBy2']] || '') : '';
+
+    var statusLabel = status;
+    if (statusLabel === 'approved') statusLabel = '承認済';
+    else if (statusLabel === 'submitted') statusLabel = '申請中';
+    else if (statusLabel === 'canceled') statusLabel = '取消';
+
+    var pdfFileId = reqIdx['pdfFileId'] !== undefined ? normalize_(row[reqIdx['pdfFileId']] || '') : '';
+
+    var approvedMin = reqIdx['approvedMinutes'] !== undefined ? Number(row[reqIdx['approvedMinutes']] || 0) : 0;
+    var actualMin = Number(wl.actualMinutes || 0);
+    var breakMin = Number(wl.breakMinutes || 0);
+    var netMin = Number(wl.netMinutes || 0);
+
+    var rowData = [
+      requestId,
+      typeLabel,
+      ymd,
+      dow,
+      dept,
+      workerCode,
+      workerName,
+      reqIdx['reason'] !== undefined ? (row[reqIdx['reason']] || '') : '',
+      reqIdx['reasonDetail'] !== undefined ? (row[reqIdx['reasonDetail']] || '') : '',
+      reqIdx['workContent'] !== undefined ? (row[reqIdx['workContent']] || '') : '',
+      approvedMin,
+      fmtMinutesJa_(approvedMin),
+      startStr,
+      endStr,
+      actualMin,
+      fmtMinutesJa_(actualMin),
+      breakMin,
+      fmtMinutesJa_(breakMin),
+      netMin,
+      fmtMinutesJa_(netMin),
+      submittedStr,
+      approved1Str,
+      approver1,
+      approved2Str,
+      approver2,
+      statusLabel,
+      pdfFileId,
+    ];
+
+    var key = sheetType + '_' + fy;
+    if (!groups[key]) groups[key] = { sheetType: sheetType, fy: fy, items: [] };
+    groups[key].items.push({ rowData: rowData, ymd: ymd });
+    processed++;
+  }
+  Logger.log('[rebuild] step4 rows built: ' + processed + ' rows (' + (Date.now() - t0) + 'ms)');
+
+  // 5) 年度シート毎に一括書き込み
+  var sheetCount = 0;
+  var totalWritten = 0;
+  for (var key in groups) {
+    var grp = groups[key];
+    // 作業実施日でソート
+    grp.items.sort(function (a, b) { return a.ymd.localeCompare(b.ymd); });
+    var sortedRows = grp.items.map(function (x) { return x.rowData; });
+    if (sortedRows.length === 0) continue;
+
+    var sh = getAccFySheet_(ss, grp.sheetType, grp.fy);
+    // 一括書き込み
+    sh.getRange(2, 1, sortedRows.length, ACC_HEADERS_.length).setValues(sortedRows);
+
+    // 書式（偶数行背景＋PDFハイパーリンク）
+    for (var rr = 0; rr < sortedRows.length; rr++) {
+      formatAccRow_(sh, rr + 2, sortedRows[rr]);
+    }
+    sheetCount++;
+    totalWritten += sortedRows.length;
+  }
+  SpreadsheetApp.flush();
+  Logger.log('[rebuild] step5 sheets written: ' + sheetCount + ' sheets / ' + totalWritten + ' rows (' + (Date.now() - t0) + 'ms)');
+
+  var msg = '蓄積SS 再構築完了\n'
+    + '処理行数: ' + processed + '\n'
+    + '年度シート: ' + sheetCount + ' 枚\n'
+    + 'バックアップ: ' + backupRenamed.length + ' 枚\n'
+    + '所要時間: ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒';
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) { /* trigger実行時はUI不可 */ }
 }

@@ -115,12 +115,15 @@ function calcBreakByClockTime_(startDate, endDate) {
   const workStartMin = parseInt(startStr.substr(11, 2)) * 60 + parseInt(startStr.substr(14, 2));
   const workEndMin   = parseInt(endStr.substr(11, 2))   * 60 + parseInt(endStr.substr(14, 2));
 
+  // 勤務時間帯が休憩窓を完全に内包する場合のみ、その休憩窓の全長を計上する。
+  // 部分的な重複（例: 19:20-19:30 の窓に対して 19:21 終了→1分重複）は休憩を取っていないとみなし0分。
   let totalBreak = 0;
   for (const w of BREAK_WINDOWS) {
     const bStart = w.startH * 60 + w.startM;
     const bEnd   = w.endH   * 60 + w.endM;
-    const overlap = Math.max(0, Math.min(workEndMin, bEnd) - Math.max(workStartMin, bStart));
-    totalBreak += overlap;
+    if (workStartMin <= bStart && workEndMin >= bEnd) {
+      totalBreak += (bEnd - bStart);
+    }
   }
   return totalBreak;
 }
@@ -693,4 +696,110 @@ function api_deleteRequest(requestId) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// ====================================================================
+// WorkLogs 休憩分・実残業分の一括再計算（休憩窓ロジック変更後の修復用）
+// ====================================================================
+/**
+ * WorkLogs 全行について、actualStartAt/actualEndAt をもとに
+ * breakMinutes / netMinutes を再計算して上書きする。
+ * 「完全包含のみカウント」の新ロジックに合わせて、過去の部分重複ぶんの
+ * 誤った休憩分（例：1分/2分/3分）を 0 に正してくれる。
+ * メニューから手動実行を想定。
+ */
+function recalcWorkLogsBreakMinutes() {
+  var sh = requireSheet_('WorkLogs');
+  var lastRow = sh.getLastRow();
+  if (lastRow < 3) {
+    Logger.log('WorkLogs にデータがありません');
+    try { SpreadsheetApp.getUi().alert('WorkLogs にデータがありません。'); } catch (e) {}
+    return;
+  }
+
+  // WorkLogs はヘッダが2行目（1行目は注釈）
+  var header = sh.getRange(2, 1, 1, sh.getLastColumn()).getValues()[0].map(function (h) {
+    return normalize_(h);
+  });
+  var idx = buildHeaderIndex_(header);
+
+  if (idx['requestId'] === undefined || idx['actualStartAt'] === undefined
+      || idx['actualEndAt'] === undefined || idx['breakMinutes'] === undefined
+      || idx['netMinutes'] === undefined) {
+    throw new Error('WorkLogs のヘッダが不正です（requestId/actualStartAt/actualEndAt/breakMinutes/netMinutes 必須）');
+  }
+
+  var ssTz = getSafeTimeZone_(sh);
+  var dataRows = lastRow - 2;
+  var values = sh.getRange(3, 1, dataRows, sh.getLastColumn()).getValues();
+  var changed = [];
+
+  for (var r = 0; r < values.length; r++) {
+    var row = values[r];
+    var startRaw = row[idx['actualStartAt']];
+    var endRaw = row[idx['actualEndAt']];
+    if (!startRaw || !endRaw) continue;
+
+    var start, end;
+    try {
+      if (startRaw instanceof Date) {
+        var startStr = Utilities.formatDate(startRaw, ssTz, "yyyy-MM-dd'T'HH:mm:ss");
+        start = new Date(startStr + '+09:00');
+      } else {
+        start = new Date(String(startRaw).replace(' ', 'T') + '+09:00');
+      }
+      if (endRaw instanceof Date) {
+        var endStr = Utilities.formatDate(endRaw, ssTz, "yyyy-MM-dd'T'HH:mm:ss");
+        end = new Date(endStr + '+09:00');
+      } else {
+        end = new Date(String(endRaw).replace(' ', 'T') + '+09:00');
+      }
+    } catch (e) {
+      continue;
+    }
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) continue;
+    if (end <= start) continue;
+
+    var actualMin = idx['actualMinutes'] !== undefined ? Number(row[idx['actualMinutes']] || 0) : 0;
+    if (!actualMin) {
+      actualMin = Math.max(0, Math.round((end.getTime() - start.getTime()) / 60000));
+    }
+    var newBreak = calcBreakByClockTime_(start, end);
+    var newNet = Math.max(0, actualMin - newBreak);
+
+    var oldBreak = Number(row[idx['breakMinutes']] || 0);
+    var oldNet = Number(row[idx['netMinutes']] || 0);
+
+    if (newBreak !== oldBreak || newNet !== oldNet) {
+      changed.push({
+        rowNo: r + 3,
+        requestId: normalize_(row[idx['requestId']]),
+        oldBreak: oldBreak,
+        newBreak: newBreak,
+        oldNet: oldNet,
+        newNet: newNet,
+      });
+    }
+  }
+
+  // 一括更新
+  var now = fmtDate_(new Date(), 'yyyy-MM-dd HH:mm:ss');
+  var actor = Session.getActiveUser().getEmail() || 'break-recalc';
+  for (var k = 0; k < changed.length; k++) {
+    var c = changed[k];
+    sh.getRange(c.rowNo, idx['breakMinutes'] + 1).setValue(c.newBreak);
+    sh.getRange(c.rowNo, idx['netMinutes'] + 1).setValue(c.newNet);
+    if (idx['updatedAt'] !== undefined) sh.getRange(c.rowNo, idx['updatedAt'] + 1).setValue(now);
+    if (idx['updatedBy'] !== undefined) sh.getRange(c.rowNo, idx['updatedBy'] + 1).setValue(actor);
+  }
+  SpreadsheetApp.flush();
+
+  Logger.log('WorkLogs 再計算完了: ' + changed.length + '行更新 / 対象 ' + values.length + '行');
+  for (var m = 0; m < changed.length; m++) {
+    var ch = changed[m];
+    Logger.log('  ' + ch.requestId + ' : break ' + ch.oldBreak + '→' + ch.newBreak
+      + ' / net ' + ch.oldNet + '→' + ch.newNet);
+  }
+  var msg = 'WorkLogs 休憩分再計算完了\n更新: ' + changed.length + ' 行 / 走査: ' + values.length + ' 行';
+  try { SpreadsheetApp.getUi().alert(msg); } catch (e) {}
 }

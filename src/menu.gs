@@ -24,6 +24,8 @@ function onOpen() {
     .addItem('社内カレンダーマスタ初期投入（2026年度）', 'setupCompanyCalendar2026')
     .addSeparator()
     .addItem('蓄積SS：時間表記列を追加（マイグレーション）', 'migrateAccumulationTimeColumns')
+    .addItem('WorkLogs：休憩分を再計算（1分バグ修復）', 'recalcWorkLogsBreakMinutes')
+    .addItem('蓄積SS：完全再構築（バックアップ付き）', 'rebuildAccumulationSS')
     .addToUi();
 }
 
