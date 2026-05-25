@@ -109,6 +109,9 @@ function sebastian_markOvertimeDone_(requestId) {
       }
     }
 
+    // 蓄積SSにリアルタイム書き込み（失敗しても処理続行）
+    upsertAccumulationRow_(requestId);
+
     return {
       ok: true,
       requestId: requestId,
@@ -231,6 +234,9 @@ function sebastian_markHolidayDone_(requestId, manualEndTime) {
         pdf = { error: String(e.message || e) };
       }
     }
+
+    // 蓄積SSにリアルタイム書き込み（失敗しても処理続行）
+    upsertAccumulationRow_(requestId);
 
     return {
       ok: true,
