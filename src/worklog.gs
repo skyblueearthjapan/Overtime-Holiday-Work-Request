@@ -500,8 +500,9 @@ function api_getDashboard() {
           const d = new Date(targetDate + 'T00:00:00');
           item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
           holiday.push(item);
-        } else if (status === 'approved' && targetDate === today) {
-          // 承認済みは当日のみ表示
+        } else if (status === 'approved') {
+          // 承認済みは対象日に関係なく表示（当日・未来日・過去日すべて）
+          // ※ 完了済み＋二次承認済みで当日でないものは上部(481行)で既に除外済み
           const d = new Date(targetDate + 'T00:00:00');
           item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
           holiday.push(item);
