@@ -9,9 +9,12 @@
  *   転記先は config.gs の SHEET 定数を参照。
  */
 const SYNC_MAP = [
-  { src: '作業員マスタ',   dst: SHEET.WORKERS, maxRows: 81 },  // ヘッダ+80人
-  { src: '業務NO.マスタ',  dst: SHEET.JOBS    },
-  { src: '工番マスタ',     dst: SHEET.ORDERS  },
+  { src: '作業員マスタ',       dst: SHEET.WORKERS, maxRows: 81 },  // ヘッダ+80人
+  { src: '業務NO.マスタ',      dst: SHEET.JOBS    },
+  { src: '工番マスタ',         dst: SHEET.ORDERS  },
+  // 年度カレンダー（休日/祝日/出勤土曜）。元シート名は「LW／作業日報_全従業員用」側の
+  // 実際のカレンダーシート名に合わせること（異なる場合は src を修正）。
+  { src: '社内カレンダーマスタ', dst: SHEET.COMPANY_CALENDAR },
 ];
 
 /**

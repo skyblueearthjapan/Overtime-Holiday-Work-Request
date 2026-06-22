@@ -1,0 +1,5 @@
+# oh-my-claudecode の作業状態（コミット対象外）
+.omc/
+
+# clasp 認証情報
+.clasprc.json
