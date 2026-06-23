@@ -63,6 +63,10 @@ function syncAllMasters() {
           data = data.slice(0, m.maxRows);
         }
 
+        // Date セルを TZ 非依存の文字列へ正規化（元/先のファイルTZ違いによる
+        // 日付1日ズレを防止）。下の通常置換・再作成フォールバック双方で使う。
+        data = normalizeDatesForWrite_(data);
+
         // 通常の置換を試行、失敗時はシート再作成で回避
         try {
           replaceMasterData_(dstSh, data);
@@ -180,6 +184,33 @@ function replaceMasterData_(sh, values) {
 
   // 値貼り付け
   sh.getRange(1, 1, rows, cols).setValues(values);
+}
+
+/**
+ * Date 型セルをタイムゾーン非依存の文字列へ正規化する。
+ *
+ * getValues() で読んだ日付セルは「ある瞬間（UTC基準の Date）」として返り、
+ * setValues() で書き戻すと “転記先スプレッドシートのファイル側TZ設定” で
+ * 再解釈される。元（マスタ）と転記先（DB）のファイルTZが異なると、ここで
+ * 日付が1日ずれる（例: 元=東京 / 先=GMT だと 04-04 → 04-03）。
+ * これは appsscript.json のスクリプトTZ(Asia/Tokyo)とは独立に発生する。
+ *
+ * 書き込み前にスクリプトTZ(TZ=Asia/Tokyo)基準の文字列へ固定することで、
+ * 両ファイルのTZ設定に依存せず日付を保つ。
+ *   - 時刻が 00:00:00(JST) の Date → 'yyyy-MM-dd'（日付のみ。例: 社内カレンダーの日付）
+ *   - それ以外の Date          → 'yyyy-MM-dd HH:mm:ss'（日時。例: 工番マスタの取込日時）
+ * Date 以外（文字列/数値/空セル）はそのまま返す。
+ */
+function normalizeDatesForWrite_(values) {
+  return values.map(function (row) {
+    return row.map(function (v) {
+      if (!(v instanceof Date) || isNaN(v.getTime())) return v;
+      var hms = fmtDate_(v, 'HH:mm:ss');
+      return hms === '00:00:00'
+        ? fmtDate_(v, 'yyyy-MM-dd')
+        : fmtDate_(v, 'yyyy-MM-dd HH:mm:ss');
+    });
+  });
 }
 
 /**
