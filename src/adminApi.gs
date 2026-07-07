@@ -538,7 +538,7 @@ function doGet(e) {
   }
 
   // ページ名のホワイトリスト（ここ以外は top に落とす）
-  const allowed = new Set(['top', 'approver', 'admin', 'approve2']);
+  const allowed = new Set(['top', 'approver', 'admin', 'approve2', 'staffSummary']);
   const safePage = allowed.has(page) ? page : 'top';
 
   // admin / approve2 は権限チェック（エラー時はフレンドリーな画面を返す）
