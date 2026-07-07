@@ -148,6 +148,8 @@
   th{ font-size:11px; color:var(--muted); font-weight:800; letter-spacing:.04em; text-transform:uppercase; }
   td.num, th.num{ text-align:right; font-variant-numeric: tabular-nums; }
   tbody tr:hover{ background:color-mix(in srgb, var(--accent2) 6%, transparent); }
+  tr.rowlink{ cursor:pointer; }
+  tr.rowlink:hover{ background:color-mix(in srgb, var(--accent2) 10%, transparent); }
   .typeChip{ font-size:11px; font-weight:800; padding:3px 9px; border-radius:8px; display:inline-block; }
   .typeChip.ot{ color:var(--accent2); background:var(--pill-info-bg); border:1px solid var(--pill-info-bd); }
   .typeChip.hol{ color:var(--accent); background:var(--pill-ok-bg); border:1px solid var(--pill-ok-bd); }
@@ -402,7 +404,7 @@
                : (p.totalNet>meta.limit40 ? '<span class="pill warn">40時間超</span>'
                : '<span class="pill ok">上限内</span>');
       flag += ' <span class="yrcnt">年'+p.annualOver+'/6</span>';
-      return '<tr>'+
+      return '<tr class="rowlink" data-dept="'+esc(p.dept)+'" data-code="'+esc(p.workerCode)+'" data-name="'+esc(p.workerName)+'" title="クリックで個人詳細を表示">'+
         '<td><div class="rowname">'+esc(p.workerName)+'</div><div class="rowdept">'+esc(p.dept)+'</div></td>'+
         '<td class="num tabnum">'+hm(p.otNet)+'</td>'+
         '<td class="num tabnum">'+hm(p.holNet)+'</td>'+
@@ -431,10 +433,38 @@
         '<td></td>'+
       '</tr></tfoot>'+
     '</table></div>'+
-    '<div class="hint" style="margin-top:12px">💡 部署を選び、上のプルダウンでスタッフを指定すると、その人の日別明細が開きます。</div>';
+    '<div class="hint" style="margin-top:12px">💡 行をクリックすると、その人の部署・氏名に絞り込みが切り替わり、個人詳細（日別明細）が開きます。</div>';
+  }
+
+  // 一覧の行クリック → その人の部署・氏名に切替えて個人詳細へ
+  function openPerson(dept, code, name){
+    state.dept = dept || '';
+    deptSel.value = state.dept;
+    if(!state.dept){ state.staff=''; render(); return; }
+    google.script.run
+      .withSuccessHandler(function(list){
+        list = list || [];
+        var tok = '';
+        for(var i=0;i<list.length;i++){
+          var t = String(list[i]); var c = t.split(/\s+/)[0];
+          if((code && c === code) || (!code && name && t.indexOf(name) >= 0)){ tok = t; break; }
+        }
+        state.staff = tok;
+        renderStaffOptions(list);
+        render();
+        try { window.scrollTo({ top:0, behavior:'smooth' }); } catch(e){ window.scrollTo(0,0); }
+      })
+      .withFailureHandler(function(){ state.staff=''; renderStaffOptions([]); render(); })
+      .api_getWorkersByDept(state.dept);
   }
 
   // ---- イベント ----
+  resultBody.addEventListener('click', function(e){
+    var el = e.target;
+    var tr = (el && el.closest) ? el.closest('tr.rowlink') : null;
+    if(!tr) return;
+    openPerson(tr.getAttribute('data-dept'), tr.getAttribute('data-code'), tr.getAttribute('data-name'));
+  });
   document.getElementById('prevM').addEventListener('click', function(){ state.ym = addMonth(state.ym,-1); render(); });
   document.getElementById('nextM').addEventListener('click', function(){ var n = addMonth(state.ym,1); if(!isFuture(n)){ state.ym = n; render(); } });
   deptSel.addEventListener('change', function(){ state.dept = deptSel.value; loadStaff(function(){ render(); }); });
