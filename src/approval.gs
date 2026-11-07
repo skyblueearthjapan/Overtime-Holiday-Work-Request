@@ -164,7 +164,6 @@ function api_getApproverDashboard(deptsOrDept) {
     const now = new Date();
     const today = fmtDate_(now, 'yyyy-MM-dd');
 
-    const dayNames = ['日','月','火','水','木','金','土'];
     const overtime = [];
     const holiday = [];
 
@@ -209,7 +208,8 @@ function api_getApproverDashboard(deptsOrDept) {
         dept: rowDept || '',
         workerName: normalize_(row[idx['workerName']]) || '',
         targetDate: targetDate || '',
-        targetDateLabel: '',
+        // 残業・休日とも対象日ラベルを付ける（承認漏れ時に「いつの申請か」分かるように）
+        targetDateLabel: fmtDateLabelJa_(targetDate, today),
         approvedMinutes: Number(row[idx['approvedMinutes']] || 0),
         submittedAt: submittedAt,
         isOverdue: false,
@@ -240,31 +240,18 @@ function api_getApproverDashboard(deptsOrDept) {
           if (targetDate < today) {
             item.isOverdue = true;
           }
-          const d = new Date(targetDate + 'T00:00:00');
-          item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
           holiday.push(item);
         } else {
           // approved/canceled: 当日のみ表示
           if (targetDate === today) {
-            const d = new Date(targetDate + 'T00:00:00');
-            item.targetDateLabel = (d.getMonth()+1) + '/' + d.getDate() + '(' + dayNames[d.getDay()] + ')';
             holiday.push(item);
           }
         }
       }
     }
 
-    // ソート：未承認を先頭、次に部署→名前
+    // ソート：未承認を先頭、次に対象日（古い順）→部署→名前
     const sortFn = function(a, b) {
-      if (a.status !== b.status) {
-        if (a.status === 'submitted') return -1;
-        if (b.status === 'submitted') return 1;
-      }
-      if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
-      return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
-    };
-    overtime.sort(sortFn);
-    holiday.sort(function(a, b) {
       if (a.status !== b.status) {
         if (a.status === 'submitted') return -1;
         if (b.status === 'submitted') return 1;
@@ -272,7 +259,9 @@ function api_getApproverDashboard(deptsOrDept) {
       if (a.targetDate !== b.targetDate) return a.targetDate < b.targetDate ? -1 : 1;
       if (a.dept !== b.dept) return a.dept < b.dept ? -1 : 1;
       return a.workerName < b.workerName ? -1 : a.workerName > b.workerName ? 1 : 0;
-    });
+    };
+    overtime.sort(sortFn);
+    holiday.sort(sortFn);
 
     return { today: today,
              overtime: overtime, holiday: holiday, isAdmin: admin,

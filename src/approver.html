@@ -223,7 +223,7 @@
     <div class="card" style="margin-bottom:12px;">
       <div class="sectionTitle">
         <div>
-          本日の残業申請（<span id="todayDate">-</span>）
+          残業申請（本日分＋未承認）（<span id="todayDate">-</span>）
           <span class="section-count" id="otCount"></span>
         </div>
         <div class="row" style="gap:6px;">
@@ -234,6 +234,7 @@
       <table id="tblOvertime">
         <thead>
           <tr>
+            <th>日付</th>
             <th>部署</th>
             <th>氏名</th>
             <th>承認</th>
@@ -243,7 +244,7 @@
           </tr>
         </thead>
         <tbody>
-          <tr><td colspan="6" class="loading">読込中...</td></tr>
+          <tr><td colspan="7" class="loading">読込中...</td></tr>
         </tbody>
       </table>
     </div>
@@ -527,7 +528,7 @@ function loadDashboard(){
 
   var otTb = document.querySelector('#tblOvertime tbody');
   var hdTb = document.querySelector('#tblHoliday tbody');
-  otTb.innerHTML = '<tr><td colspan="6" class="loading">読込中...</td></tr>';
+  otTb.innerHTML = '<tr><td colspan="7" class="loading">読込中...</td></tr>';
   hdTb.innerHTML = '<tr><td colspan="7" class="loading">読込中...</td></tr>';
 
   google.script.run
@@ -535,7 +536,7 @@ function loadDashboard(){
       console.log('api_getApproverDashboard 結果:', JSON.stringify(res));
       if(!res){
         document.getElementById('approverSub').innerText = 'サーバーからnullが返されました';
-        otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">データを取得できませんでした（res=null）。デプロイ済みか確認してください。</td></tr>';
+        otTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">データを取得できませんでした（res=null）。デプロイ済みか確認してください。</td></tr>';
         hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">デプロイの「新しいデプロイ」ではなく既存デプロイの更新が必要です</td></tr>';
         return;
       }
@@ -543,7 +544,7 @@ function loadDashboard(){
       // サーバー側でキャッチしたエラーを表示
       if(res.error){
         document.getElementById('approverSub').innerText = 'サーバーエラー';
-        otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">サーバーエラー: ' + escHtml(res.error) + '</td></tr>';
+        otTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">サーバーエラー: ' + escHtml(res.error) + '</td></tr>';
         hdTb.innerHTML = '<tr><td colspan="7"></td></tr>';
         return;
       }
@@ -560,7 +561,7 @@ function loadDashboard(){
     .withFailureHandler(function(err){
       console.error('api_getApproverDashboard 失敗:', err);
       document.getElementById('approverSub').innerText = 'API呼出失敗';
-      otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">API失敗: ' + escHtml(err.message || err) + '</td></tr>';
+      otTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">API失敗: ' + escHtml(err.message || err) + '</td></tr>';
       hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">GASエディタのログ（実行数）も確認してください</td></tr>';
     })
     .api_getApproverDashboard(SELECTED_DEPTS);
@@ -586,7 +587,7 @@ function renderDashboard(res){
   document.getElementById('otCount').innerText = (res.overtime || []).length + '名';
 
   if(!res.overtime || res.overtime.length === 0){
-    otTb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px">本日の残業申請はありません</td></tr>';
+    otTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">本日分・未承認の残業申請はありません</td></tr>';
   } else {
     res.overtime.forEach(function(it){ otTb.appendChild(buildOvertimeRow(it)); });
   }
@@ -636,6 +637,7 @@ function buildOvertimeRow(it){
     tr.style.background = 'rgba(255,235,150,0.35)';
   }
   tr.innerHTML =
+    '<td>' + buildTargetDateCell_(it) + '</td>' +
     '<td>' + escHtml(it.dept) + '</td>' +
     '<td>' + nameCell + '</td>' +
     '<td>' + statusPill + '</td>' +
@@ -643,6 +645,42 @@ function buildOvertimeRow(it){
     '<td>' + submittedTime + '</td>' +
     '<td>' + actionCell + '</td>';
   return tr;
+}
+
+// 対象日セル（未処理の過去日は赤字＋⚠で強調）
+function buildTargetDateCell_(it){
+  var label = escHtml(it.targetDateLabel || it.targetDate || '');
+  if(it.isOverdue){
+    return '<span style="color:var(--danger);font-weight:700;white-space:nowrap;">&#9888; ' + label + '</span>';
+  }
+  return '<span style="white-space:nowrap;">' + label + '</span>';
+}
+
+// 承認・却下後に「承認漏れ」表示（日付の赤字⚠・氏名横の⚠未処理）を外す
+function clearOverdueMarks_(requestId, cells){
+  for(var i = 0; i < ALL_ITEMS.length; i++){
+    var it = ALL_ITEMS[i];
+    if(it.requestId !== requestId) continue;
+    if(!it.isOverdue) return;
+    it.isOverdue = false;
+    cells[0].innerHTML = buildTargetDateCell_(it);
+    var warn = cells[2].querySelector('span[style*="--danger"]');
+    if(warn) warn.remove();
+    return;
+  }
+}
+
+// 確認ダイアログ用の申請説明（例: 「11/5(水) 残業 製造1課 山田太郎」）
+function describeItem_(requestId){
+  for(var i = 0; i < ALL_ITEMS.length; i++){
+    var it = ALL_ITEMS[i];
+    if(it.requestId === requestId){
+      var typeJa = it.requestType === 'holiday' ? '休日出勤' : '残業';
+      return (it.targetDateLabel || it.targetDate || '') + ' ' + typeJa + '\n' +
+        (it.dept || '') + ' ' + (it.workerName || '') + '（予定 ' + fmtMin(it.approvedMinutes) + '）';
+    }
+  }
+  return '';
 }
 
 function buildHolidayRow(it){
@@ -669,7 +707,7 @@ function buildHolidayRow(it){
     tr.style.background = 'rgba(255,235,150,0.35)';
   }
   tr.innerHTML =
-    '<td>' + escHtml(it.targetDateLabel || it.targetDate) + '</td>' +
+    '<td>' + buildTargetDateCell_(it) + '</td>' +
     '<td>' + escHtml(it.dept) + '</td>' +
     '<td>' + nameCell + '</td>' +
     '<td>' + statusPill + '</td>' +
@@ -679,12 +717,16 @@ function buildHolidayRow(it){
   return tr;
 }
 
+// 提出日時: 当日なら 'HH:mm'、別の日なら 'M/D HH:mm'
+// サーバーは 'yyyy-MM-dd HH:mm:ss' で返す。Safari は空白区切りを解釈できないため文字列から直接取り出す。
 function fmtTime(val){
   if(!val) return '';
-  try{
-    var d = new Date(val);
-    return z(d.getHours()) + ':' + z(d.getMinutes());
-  } catch(e){ return ''; }
+  var m = /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})[ T](\d{1,2}):(\d{2})/.exec(String(val));
+  if(!m) return '';
+  var hm = z(m[4]) + ':' + m[5];
+  var today = document.getElementById('todayDate').innerText;  // 'yyyy-MM-dd'
+  if(today === m[1] + '-' + z(m[2]) + '-' + z(m[3])) return hm;
+  return Number(m[2]) + '/' + Number(m[3]) + ' ' + hm;
 }
 
 function buildActionCell(it){
@@ -704,12 +746,13 @@ function updateRowToApproved(requestId) {
   var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
   if (!row) return;
   var cells = row.querySelectorAll('td');
-  var isHoliday = row.closest('table').id === 'tblHoliday';
-  var statusIdx = isHoliday ? 3 : 2;
-  var actionIdx = isHoliday ? 6 : 5;
+  // 残業・休日とも列順は 日付/部署/氏名/承認/予定時間/提出/操作
+  var statusIdx = 3;
+  var actionIdx = 6;
 
   cells[statusIdx].innerHTML = '<span class="pill ok">承認済</span>';
   cells[actionIdx].innerHTML = '<span class="muted">承認済</span>';
+  clearOverdueMarks_(requestId, cells);
 
   // 視覚フィードバック（緑フラッシュ）
   row.style.transition = 'background 0.4s';
@@ -740,7 +783,7 @@ function updateKpiCounters() {
 
 // ====== 承認実行 ======
 function doApprove(requestId, btn){
-  if(!confirm('この申請を承認しますか？')) return;
+  if(!confirm('この申請を承認しますか？\n\n' + describeItem_(requestId))) return;
   btn.disabled = true;
   btn.textContent = '承認中…';
   updateRowToApproved(requestId);  // 即時反映
@@ -758,7 +801,7 @@ function doApprove(requestId, btn){
 
 // ====== 却下実行 ======
 function doReject(requestId, btn){
-  if(!confirm('この申請を却下しますか？')) return;
+  if(!confirm('この申請を却下しますか？\n\n' + describeItem_(requestId))) return;
   btn.disabled = true;
   // 即時反映: 行をcanceled表示に
   updateRowToRejected(requestId);
@@ -781,12 +824,13 @@ function updateRowToRejected(requestId) {
   var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
   if (!row) return;
   var cells = row.querySelectorAll('td');
-  var isHoliday = row.closest('table').id === 'tblHoliday';
-  var statusIdx = isHoliday ? 3 : 2;
-  var actionIdx = isHoliday ? 6 : 5;
+  // 残業・休日とも列順は 日付/部署/氏名/承認/予定時間/提出/操作
+  var statusIdx = 3;
+  var actionIdx = 6;
 
   cells[statusIdx].innerHTML = '<span class="pill danger">却下</span>';
   cells[actionIdx].innerHTML = '<span class="pill danger">却下済</span>';
+  clearOverdueMarks_(requestId, cells);
 
   row.style.transition = 'background 0.4s';
   row.style.background = 'rgba(255,90,95,0.08)';
@@ -808,7 +852,18 @@ function approveAllInTable(type){
   });
   if(pending.length === 0){ alert('未承認の申請はありません。'); return; }
   var label = type === 'overtime' ? '残業' : '休日出勤';
-  if(!confirm(label + ' ' + pending.length + '件を一括承認しますか？\n（完了済みの申請がある場合、PDF生成に時間がかかることがあります）')) return;
+  // 対象日ごとの件数を添える（過去日の承認漏れが混じっていても気づけるように）
+  var byDate = {}, dateOrder = [];
+  pending.forEach(function(it){
+    var k = it.targetDateLabel || it.targetDate || '';
+    if(!(k in byDate)){ byDate[k] = 0; dateOrder.push(k); }
+    byDate[k]++;
+  });
+  var dateLines = dateOrder.map(function(k){ return '・' + k + '：' + byDate[k] + '件'; }).join('\n');
+  var overdueCount = pending.filter(function(it){ return it.isOverdue; }).length;
+  var overdueNote = overdueCount > 0 ? '\n※うち ' + overdueCount + '件は過去日の承認漏れです。' : '';
+  if(!confirm(label + ' ' + pending.length + '件を一括承認しますか？\n\n' + dateLines + overdueNote +
+    '\n\n（完了済みの申請がある場合、PDF生成に時間がかかることがあります）')) return;
 
   // 即時: 全行を承認済みに更新
   var requestIds = [];

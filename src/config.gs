@@ -242,3 +242,19 @@ function getSheetHeaderIndex_(sheetName, headerRowNo=1) {
   _headerCache[cacheKey] = { header, idx };
   return { sh, header, idx };
 }
+
+/**
+ * 'yyyy-MM-dd' を画面表示用の短い日付ラベルにする（TZ非依存）。
+ * 今年なら '11/7(土)'、年が違えば '2025/11/7(土)'。
+ * @param {string} ymd 'yyyy-MM-dd'
+ * @param {string} todayYmd 'yyyy-MM-dd'（年の比較用）
+ * @return {string} 解釈できない場合は ymd をそのまま返す
+ */
+function fmtDateLabelJa_(ymd, todayYmd) {
+  var m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ymd || ''));
+  if (!m) return String(ymd || '');
+  var y = Number(m[1]), mo = Number(m[2]), d = Number(m[3]);
+  var dow = ['日','月','火','水','木','金','土'][new Date(Date.UTC(y, mo - 1, d)).getUTCDay()];
+  var sameYear = String(todayYmd || '').slice(0, 4) === m[1];
+  return (sameYear ? '' : y + '/') + mo + '/' + d + '(' + dow + ')';
+}

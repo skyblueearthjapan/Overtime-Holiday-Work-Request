@@ -390,6 +390,8 @@
       <table id="tblPending">
         <thead>
           <tr>
+            <th>対象日</th>
+            <th>種別</th>
             <th>部署</th>
             <th>氏名</th>
             <th>経過時間</th>
@@ -991,15 +993,23 @@ function loadPending(){
     var tb=document.querySelector('#tblPending tbody');
     tb.innerHTML='';
     if(!list || list.length===0){
-      tb.innerHTML='<tr><td colspan="4" class="muted">未承認の滞留はありません</td></tr>';
+      tb.innerHTML='<tr><td colspan="6" class="muted">未承認の滞留はありません</td></tr>';
       return;
     }
     list.forEach(function(r){
       var status = r.isOver48h
         ? '<span class="pill danger">48h超</span>'
         : '<span class="pill warn">滞留中</span>';
+      var typeJa = r.requestType === 'holiday' ? '休日出勤' : (r.requestType === 'overtime' ? '残業' : escHtml(r.requestType || ''));
+      // 対象日を過ぎた未承認は赤字＋⚠（承認漏れ）
+      var dateLabel = escHtml(r.targetDateLabel || r.targetDate || '');
+      var dateCell = r.isPastDate
+        ? '<span style="color:var(--danger);font-weight:700;white-space:nowrap;">&#9888; '+dateLabel+'</span>'
+        : '<span style="white-space:nowrap;">'+dateLabel+'</span>';
       var tr=document.createElement('tr');
       tr.innerHTML=
+        '<td>'+dateCell+'</td>'+
+        '<td>'+typeJa+'</td>'+
         '<td>'+escHtml(r.dept)+'</td>'+
         '<td><b>'+escHtml(r.workerName)+'</b></td>'+
         '<td>'+r.hoursPending+'時間</td>'+

@@ -406,8 +406,11 @@ function api_adminPendingWatch() {
     var _todayYmd = fmtDate_(now, 'yyyy-MM-dd');
 
     result.push({
+      requestType: normalize_(row[idx['requestType(overtime/holiday)']]),
       dept: normalize_(row[idx['dept']]),
       workerName: normalize_(row[idx['workerName']]),
+      targetDateLabel: fmtDateLabelJa_(_tdYmd, _todayYmd),
+      isPastDate: !!_tdYmd && _tdYmd < _todayYmd,
       submittedAt: fmtDate_(submittedAt, 'yyyy-MM-dd HH:mm:ss'),
       hoursPending: Math.floor(hours),
       isOver48h: hours >= 48,
