@@ -1,0 +1,149 @@
+# 残業・休日出勤申請 VPS 版（srv1508169 の /opt/overtime で動かす。vps-app/ の中身を直置き）
+# - ホスト側にポートを出さない。外からは cloudflared（Tunnel overtime-vps）→ web だけ。
+# - コンテナ名・ネットワーク・ボリュームは overtime- で始め、同居するほかのアプリと重ねない。
+# - 秘密は .env（権限 600、git に入れない）。見本は .env.example。
+# - イメージのタグは .env の APP_IMAGE_TAG（コマンド行だけで渡さない＝罠 24e）。
+name: overtime
+
+x-api-env: &api-env
+  APP_ENV: ${APP_ENV}
+  DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+  PUBLIC_ORIGIN: ${PUBLIC_ORIGIN}
+  GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID}
+  GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET}
+  SESSION_SECRET: ${SESSION_SECRET}
+  SESSION_MAX_AGE_DAYS: ${SESSION_MAX_AGE_DAYS:-90}
+  SESSION_IDLE_HOURS: ${SESSION_IDLE_HOURS:-2160}
+  ALLOWED_DOMAIN: ${ALLOWED_DOMAIN}
+  BOOTSTRAP_ADMINS: ${BOOTSTRAP_ADMINS}
+  FERNET_KEY: ${FERNET_KEY}
+  DELEGATE_EMAIL: ${DELEGATE_EMAIL}
+  PROD_SPREADSHEET_ID: ${PROD_SPREADSHEET_ID}
+  STAGING_SPREADSHEET_ID: ${STAGING_SPREADSHEET_ID:-}
+  MASTER_SOURCE_SPREADSHEET_ID: ${MASTER_SOURCE_SPREADSHEET_ID}
+  PROD_PDF_FOLDER_ID: ${PROD_PDF_FOLDER_ID}
+  STAGING_PDF_FOLDER_ID: ${STAGING_PDF_FOLDER_ID:-}
+  PROD_LEDGER_SPREADSHEET_ID: ${PROD_LEDGER_SPREADSHEET_ID}
+  STAGING_LEDGER_SPREADSHEET_ID: ${STAGING_LEDGER_SPREADSHEET_ID:-}
+  GAS_INTERNAL_URL: ${GAS_INTERNAL_URL}
+  GAS_INTERNAL_TOKEN: ${GAS_INTERNAL_TOKEN}
+  GAS_CALL_TIMEOUT_SECONDS: ${GAS_CALL_TIMEOUT_SECONDS:-330}
+  SEBASTIAN_API_TOKEN: ${SEBASTIAN_API_TOKEN}
+  SEBASTIAN_PDF_WAIT_SECONDS: ${SEBASTIAN_PDF_WAIT_SECONDS:-40}
+  DB_SHEET_TIMEZONE: ${DB_SHEET_TIMEZONE}
+  PORTAL_URL: ${PORTAL_URL}
+  SHEET_CONFIG_SYNC_MINUTES: ${SHEET_CONFIG_SYNC_MINUTES:-5}
+  TZ: Asia/Tokyo
+  # uvicorn が X-Forwarded-* を信じる相手（web コンテナの固定 IP だけ）
+  FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-10.93.0.10}
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: overtime-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: Asia/Tokyo
+      PGTZ: Asia/Tokyo
+    volumes:
+      - overtime-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks: [overtime-net]
+
+  api:
+    build:
+      context: ./api
+      target: runtime
+    image: overtime-app:${APP_IMAGE_TAG:-latest}
+    container_name: overtime-api
+    restart: unless-stopped
+    environment: *api-env
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [overtime-net]
+
+  worker:
+    image: overtime-app:${APP_IMAGE_TAG:-latest}
+    container_name: overtime-worker
+    restart: unless-stopped
+    command: ["python", "-m", "app.worker"]
+    environment: *api-env
+    healthcheck:
+      disable: true
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [overtime-net]
+
+  web:
+    image: nginx:1.27-alpine
+    container_name: overtime-web
+    restart: unless-stopped
+    volumes:
+      - ./web/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./web/static:/usr/share/nginx/html/static:ro
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    networks:
+      overtime-net:
+        # api が X-Forwarded-For を信じるのはこの IP だけ（FORWARDED_ALLOW_IPS）
+        ipv4_address: ${OVERTIME_WEB_IP:-10.93.0.10}
+
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.7
+    container_name: overtime-cloudflared
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN}
+    depends_on:
+      web:
+        condition: service_healthy
+    networks: [overtime-net]
+
+  backup:
+    image: postgres:16-alpine
+    container_name: overtime-backup
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      BACKUP_KEEP_DAYS: ${BACKUP_KEEP_DAYS:-14}
+      TZ: Asia/Tokyo
+    volumes:
+      - ${BACKUPS_HOST_PATH:-./backups}:/backups
+      - ./backup/backup_entrypoint.sh:/usr/local/bin/backup_entrypoint.sh:ro
+    entrypoint: ["/bin/sh", "/usr/local/bin/backup_entrypoint.sh"]
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [overtime-net]
+
+volumes:
+  overtime-pgdata:
+    name: overtime-pgdata
+
+networks:
+  overtime-net:
+    name: overtime-net
+    driver: bridge
+    # web の IP を固定するため、サブネットを決める（VPS の既存ネットワークと重ならないことは確認済み。計画書 4-0）。
+    # 既にあるネットワークには反映されないので、変えたときは docker compose down → up で作り直す。
+    ipam:
+      config:
+        - subnet: ${OVERTIME_NET_SUBNET:-10.93.0.0/24}
