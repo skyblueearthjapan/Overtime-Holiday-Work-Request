@@ -19,17 +19,19 @@
 //   vps.renderPdf        {requestId, jobId, mode?, regenerate?, oldPdfFileId?, ledger?, requireWorkDone?, workLog?, expect?}
 //   vps.upsertLedger     {requestId, jobId}
 //   vps.removeLedgerRow  {requestId, requestType, targetDate, jobId}
-//   vps.morningBatch     {targetDate?, jobId}
+//   vps.morningBatch     （使わない。bad_request を返す）
 //   vps.ledgerRewriteDay {targetDate, jobId}
 //   internal.afterApprove / afterComplete / regenerate / afterDelete / batchPdf / ledgerRewriteDay（4-6 の表の経路）
 
 var VPS_INTERNAL_API_VERSION_ = '2026-11-26.1';
 var VPS_INTERNAL_TOKEN_KEY_ = 'VPS_INTERNAL_TOKEN';
 var VPS_JOB_PREFIX_ = 'VPSJOB_';
-var VPS_JOB_MAX_ENTRIES_ = 300;
+var VPS_JOB_MAX_ENTRIES_ = 100;               // スクリプトプロパティ全体（500KB）を食い尽くさないよう少なめ
 var VPS_JOB_TTL_MS_ = 7 * 24 * 60 * 60 * 1000;
 var VPS_JOB_RUNNING_STALE_MS_ = 7 * 60 * 1000; // GAS の 1 回の上限（6 分）より長い
-var VPS_JOB_MAX_VALUE_LEN_ = 8500;             // スクリプトプロパティ 1 値の上限（9KB）より小さく
+var VPS_JOB_MAX_VALUE_LEN_ = 3000;             // 1 件の記録の上限（9KB よりずっと小さく。100 件で約 300KB まで）
+var VPS_TRASH_PARENT_DEPTH_ = 3;               // PDF_ROOT_FOLDER_ID の下かを確かめる深さ（今は 根→日付フォルダ→PDF の 2 段）
+var VPS_WL_KEYS_ = ['actualStartAt', 'actualEndAt', 'actualMinutes', 'breakMinutes', 'netMinutes'];
 var VPS_LOCK_WAIT_MS_ = 20000;
 
 // 本文がこの入口あてかどうか
@@ -107,23 +109,34 @@ function vpsJobRead_(jobId) {
   }
 }
 
+// 残せたら true。失敗（プロパティの上限など）は false（呼び出し側が idempotencyStored:false を返す）。
 function vpsJobWrite_(jobId, entry) {
   try {
     var json = JSON.stringify(entry);
     if (json.length > VPS_JOB_MAX_VALUE_LEN_ && entry.result) {
-      // 長すぎる結果（朝バッチのエラー詳細など）は詳細を削って残す
+      // 長すぎる結果（エラー詳細など）は詳細を削って残す
       var slim = JSON.parse(JSON.stringify(entry));
-      if (slim.result.errors) slim.result.errors = slim.result.errors.slice(0, 5).map(function(s) { return String(s).slice(0, 300); });
+      if (slim.result.errors) slim.result.errors = slim.result.errors.slice(0, 5).map(function(s) { return String(s).slice(0, 200); });
+      if (slim.result.message) slim.result.message = String(slim.result.message).slice(0, 300);
       slim.result.truncated = true;
       json = JSON.stringify(slim);
       if (json.length > VPS_JOB_MAX_VALUE_LEN_) {
-        json = JSON.stringify({ t: entry.t, state: entry.state, action: entry.action,
-          result: { ok: entry.result.ok, error: entry.result.error, truncated: true } });
+        // 要点だけ（ok・error・PDF の 3 列・各段の状態）
+        var r = entry.result;
+        var keep = { ok: r.ok, error: r.error, retryable: r.retryable, action: r.action, jobId: r.jobId, requestId: r.requestId,
+          pdfFileId: r.pdfFileId, pdfFolderId: r.pdfFolderId, pdfGeneratedAt: r.pdfGeneratedAt,
+          pdfGeneratedAtEpochMs: r.pdfGeneratedAtEpochMs, pdfName: r.pdfName, trashSkipped: r.trashSkipped, truncated: true };
+        ['pdf', 'ledger', 'trash'].forEach(function(k) {
+          if (r[k] && typeof r[k] === 'object') keep[k] = { status: r[k].status, reason: r[k].reason, pdfFileId: r[k].pdfFileId };
+        });
+        json = JSON.stringify({ t: entry.t, state: entry.state, action: entry.action, result: keep });
       }
     }
     PropertiesService.getScriptProperties().setProperty(vpsJobKey_(jobId), json);
+    return true;
   } catch (e) {
     Logger.log('vpsJobWrite_: ' + e.message);
+    return false;
   }
 }
 
@@ -209,6 +222,13 @@ function dispatchVpsInternal_(body) {
     if (prev && prev.state === 'running' && Date.now() - Number(prev.t || 0) < VPS_JOB_RUNNING_STALE_MS_) {
       return vpsFail_('busy', 'same jobId is still running', true, { action: action, jobId: jobId });
     }
+    if (prev && prev.state === 'running' && route.noRerun) {
+      // 台帳の作り直しは途中で止まると年度タブが _backup へ改名済みのことがある。同じ jobId でもう一度動かさない
+      // （動かすたびに _backup が増える）。人が台帳を確かめてから、新しい jobId で頼み直す。
+      return vpsFail_('previous_attempt_unfinished',
+        'a previous attempt of this jobId started and did not finish; check the ledger before retrying with a new jobId',
+        false, { action: action, jobId: jobId });
+    }
 
     var lock = LockService.getScriptLock();
     if (!lock.tryLock(VPS_LOCK_WAIT_MS_)) {
@@ -232,9 +252,9 @@ function dispatchVpsInternal_(body) {
 
       var final = result.ok === true || result.retryable === false;
       if (final) {
-        vpsJobWrite_(jobId, { t: Date.now(), state: 'done', action: action, result: result });
         vpsJobPrune_();
-      } else {
+        result.idempotencyStored = vpsJobWrite_(jobId, { t: Date.now(), state: 'done', action: action, result: result });
+      } else if (!route.noRerun) {
         vpsJobDelete_(jobId);
       }
       return result;
@@ -261,15 +281,20 @@ function vpsMergeParams_(body) {
 // ===== action の表 =====
 
 var VPS_INTERNAL_ROUTES_ = {
-  'vps.ping': { readOnly: true, fn: function(p) { return vpsPing_(); } },
-  'internal.ping': { readOnly: true, fn: function(p) { return vpsPing_(); } },
+  'vps.ping': { readOnly: true, fn: function(p) { return vpsPing_(p); } },
+  'internal.ping': { readOnly: true, fn: function(p) { return vpsPing_(p); } },
 
   'vps.renderPdf': { fn: function(p) { return vpsRenderPdf_(p); } },
   'vps.upsertLedger': { fn: function(p) { return vpsUpsertLedger_(p); } },
   'vps.removeLedgerRow': { fn: function(p) { return vpsRemoveLedgerRow_(p); } },
-  'vps.morningBatch': { fn: function(p) { return vpsMorningBatch_(p); } },
+  // 使わない（VPS は internal.batchPdf を 1 件ずつ呼ぶ）。呼ばれると BatchLogs に DB に無い行ができ、
+  // 毎晩の照合が止まり続けるので拒む（データ安全レビュー 低-4）。vpsMorningBatch_ は手で使う時のために残す。
+  'vps.morningBatch': { fn: function(p) {
+    return vpsFail_('bad_request', 'vps.morningBatch is disabled; use internal.batchPdf and internal.ledgerRewriteDay', false);
+  } },
   'vps.ledgerRewriteDay': { fn: function(p) { return vpsLedgerRewriteDay_(p); } },
-  'vps.ledgerRebuild': { fn: function(p) { return vpsLedgerRebuild_(p); } },
+  // noRerun: 一度始めた jobId は、途中で止まっても同じ jobId で動かし直さない（データ安全レビュー 中-4）
+  'vps.ledgerRebuild': { noRerun: true, fn: function(p) { return vpsLedgerRebuild_(p); } },
 
   // 計画 4-6 の表の経路（今の画面の関数と同じ順序・条件）
   // 一次承認: actualEndAt があるときだけ作る。PDF が例外なら台帳は書かない（approval.gs api_approveRequest）
@@ -282,7 +307,7 @@ var VPS_INTERNAL_ROUTES_ = {
     var isSeb = String(p.source || '') === 'sebastian';
     var fixed = { mode: isSeb ? 'xlookup' : 'auto', ledger: 'always', regenerate: false };
     if (isSeb) fixed.workLog = null;
-    else if (p.wlOverride && typeof p.wlOverride === 'object') fixed.workLog = p.wlOverride;
+    else if (p.wlOverride !== undefined && p.wlOverride !== null) fixed.workLog = p.wlOverride; // 形は vpsRenderPdf_ で確かめる
     if (p.statusAtEnqueue !== undefined && p.statusAtEnqueue !== null && String(p.statusAtEnqueue) !== 'approved') {
       fixed.skipPdfReason = 'not_approved_at_enqueue';
     }
@@ -304,7 +329,7 @@ var VPS_INTERNAL_ROUTES_ = {
     return vpsRenderPdf_(vpsWith_(p, { mode: 'auto', ledger: 'none', regenerate: false, skipIfHasPdf: true, pdfErrorIsOk: true }));
   } },
   'internal.ledgerRewriteDay': { fn: function(p) { return vpsLedgerRewriteDay_(p); } },
-  'internal.ledgerRebuild': { fn: function(p) { return vpsLedgerRebuild_(p); } },
+  'internal.ledgerRebuild': { noRerun: true, fn: function(p) { return vpsLedgerRebuild_(p); } },
 };
 
 function vpsWith_(p, fixed) {
@@ -318,22 +343,42 @@ function vpsWith_(p, fixed) {
 
 // 仕様 7-2 の名前（scriptId・spreadsheetId・spreadsheetTimeZone・migrated・forwardUrlSet・accumulationKeyRows・
 // apiVersion）と、最初の版の名前（dbId・dbTimeZone・migrationMode・version）の両方を返す。
+// migrated（＝移転モード。いつも true か false）は、毎回プロパティを読み直して決める（実行の中のキャッシュを使わない）。
+// プロパティが読めないときは migrated:false・migratedReadError:true（VPS は本番で書かない側に倒れる。データ安全 高-3）。
+// p.light === true なら DB を開かずに migrated・scriptId・版だけを返す（安く何度でも呼べる）。
 var INTERNAL_API_VERSION = 1;
-function vpsPing_() {
+function vpsReadMigration_() {
+  invalidateMigrationCache_();
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var url = String(props.getProperty(MIGRATED_TO_URL_KEY) || '').trim();
+    var fwd = !!props.getProperty(SEBASTIAN_FORWARD_URL_KEY);
+    return { migrated: !!url, migratedTo: url, forwardUrlSet: fwd, readError: false };
+  } catch (e) {
+    return { migrated: false, migratedTo: '', forwardUrlSet: false, readError: true };
+  }
+}
+
+function vpsPing_(p) {
+  var mig = vpsReadMigration_();
   var out = {
     ok: true,
     pong: new Date().toISOString(),
     apiVersion: INTERNAL_API_VERSION,
     version: VPS_INTERNAL_API_VERSION_,
     scriptId: '',
-    migrated: isMigrationMode_(),
-    migrationMode: isMigrationMode_(),
-    migratedTo: getMigratedToUrl_(),
-    forwardUrlSet: false,
+    migrated: mig.migrated,
+    migrationMode: mig.migrated,
+    migratedTo: mig.migratedTo,
+    forwardUrlSet: mig.forwardUrlSet,
     scriptTimeZone: '',
   };
+  if (mig.readError) out.migratedReadError = true;
   try { out.scriptId = ScriptApp.getScriptId(); } catch (e0) { out.scriptIdError = String(e0.message || e0); }
-  try { out.forwardUrlSet = !!PropertiesService.getScriptProperties().getProperty(SEBASTIAN_FORWARD_URL_KEY); } catch (e1) { /* ignore */ }
+  if (p && p.light === true) {
+    out.light = true;
+    return out;
+  }
   try { out.scriptTimeZone = Session.getScriptTimeZone(); } catch (e) { /* ignore */ }
   try {
     var ss = getDb_();
@@ -449,9 +494,61 @@ function vpsUpsertLedgerCore_(requestId, req) {
   var sheetType = req.requestType === 'overtime' ? '残業' : '休日出勤';
   var pre = vpsLedgerPrecheck_(d, [sheetType]);
   if (pre) return pre;
-  // 今の関数は失敗をログに出して握る（今と同じ）。ここでは呼んだことだけを返す。
+  // 今の関数は失敗をログに出して握る（今と同じ）。書けたかは、台帳のその行を読み直して確かめる（データ安全 中-6）。
   upsertAccumulationRow_(requestId);
-  return { status: 'upserted', sheetName: sheetType + '_' + computeAccFiscalYear_(d) + '年度' };
+  var sheetName = sheetType + '_' + computeAccFiscalYear_(d) + '年度';
+  if (!vpsLedgerHasRow_(sheetName, requestId)) {
+    return { status: 'error', error: 'ledger_upsert_failed', retryable: true, sheetName: sheetName,
+      message: 'ledger row not found after upsert: ' + requestId };
+  }
+  return { status: 'upserted', sheetName: sheetName };
+}
+
+// 台帳の年度タブの 1 列目（管理番号）に requestId があるか
+function vpsLedgerHasRow_(sheetName, requestId) {
+  try {
+    var ss = SpreadsheetApp.openById(normalize_(getSettings_()['ACCUMULATION_SS_ID']));
+    var sh = ss.getSheetByName(sheetName);
+    if (!sh) return false;
+    var last = sh.getLastRow();
+    if (last < 2) return false;
+    var ids = sh.getRange(2, 1, last - 1, 1).getValues();
+    for (var i = 0; i < ids.length; i++) if (normalize_(ids[i][0]) === requestId) return true;
+    return false;
+  } catch (e) {
+    Logger.log('vpsLedgerHasRow_: ' + e.message);
+    return false;
+  }
+}
+
+// 台帳の段の失敗のうち、送り直せば直る見込みのもの
+function vpsLedgerRetryable_(ledger) {
+  return !!ledger && ledger.status === 'error' &&
+    (ledger.error === 'ledger_unavailable' || ledger.error === 'ledger_upsert_failed' || ledger.retryable === true);
+}
+
+// workLog（wlOverride）の形と範囲を確かめる（セキュリティ 中-2）。正しければ 5 項目だけの写しを、違えば null を返す。
+//   actualStartAt / actualEndAt: 'yyyy-MM-dd HH:mm:ss'（秒なしも可）で、終了 >= 開始
+//   actualMinutes / breakMinutes / netMinutes: 0〜1440 の数（24 時間まで。空は 0）
+function vpsValidWorkLog_(wl) {
+  if (!wl || typeof wl !== 'object' || Array.isArray(wl)) return null;
+  var out = {};
+  var dt = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}(:\d{2})?$/;
+  for (var i = 0; i < VPS_WL_KEYS_.length; i++) {
+    var k = VPS_WL_KEYS_[i];
+    var v = wl[k];
+    if (k === 'actualStartAt' || k === 'actualEndAt') {
+      if (typeof v !== 'string' || !dt.test(v) || vpsEpochMs_(v) === null) return null;
+      out[k] = v;
+    } else {
+      if (v === undefined || v === null || v === '') { out[k] = 0; continue; }
+      var n = typeof v === 'number' ? v : (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN);
+      if (!isFinite(n) || n < 0 || n > 1440) return null;
+      out[k] = n;
+    }
+  }
+  if (vpsEpochMs_(out.actualEndAt) < vpsEpochMs_(out.actualStartAt)) return null;
+  return out;
 }
 
 // ===== vps.renderPdf =====
@@ -478,6 +575,13 @@ function vpsRenderPdf_(p) {
   }
   var oldPdfFileId = normalize_(p.oldPdfFileId);
   var regenerate = p.regenerate === true || mode === 'secondary' || !!oldPdfFileId;
+  var wlOverride;
+  if (p.workLog !== undefined && p.workLog !== null) {
+    wlOverride = vpsValidWorkLog_(p.workLog);
+    if (!wlOverride) {
+      return vpsFail_('bad_request', 'workLog must have actualStartAt/actualEndAt (yyyy-MM-dd HH:mm:ss, end >= start) and minutes 0-1440', false);
+    }
+  }
 
   var mismatch = vpsCheckExpect_(requestId, p.expect);
   if (mismatch.length) {
@@ -526,7 +630,6 @@ function vpsRenderPdf_(p) {
   }
 
   if (canMake) {
-    var wlOverride = (p.workLog && typeof p.workLog === 'object') ? p.workLog : undefined;
     try {
       var r = useDirect ? generatePdfDirect_(requestId, wlOverride) : generatePdfForRequest_(requestId, wlOverride);
       if (r && r.already) {
@@ -563,10 +666,17 @@ function vpsRenderPdf_(p) {
   out.pdf.pdfGeneratedAt = out.pdfGeneratedAt;
   out.pdf.pdfGeneratedAtEpochMs = out.pdfGeneratedAtEpochMs;
 
+  if (out.trash && out.trash.trashSkipped) out.trashSkipped = true;
   if (out.pdf.status === 'error' && p.pdfErrorIsOk !== true) {
     out.ok = false;
     out.error = 'pdf_failed';
     out.message = out.pdf.error;
+    out.retryable = true;
+  } else if (vpsLedgerRetryable_(out.ledger)) {
+    // 台帳が書けなかった: 同じ jobId で送り直してもらう（PDF は作り済みなので次は already になる。データ安全 中-6）
+    out.ok = false;
+    out.error = 'ledger_failed';
+    out.message = out.ledger.message || out.ledger.error;
     out.retryable = true;
   }
   return out;
@@ -587,13 +697,25 @@ function vpsTrashOldPdf_(req, oldPdfFileId) {
     var trashedOk = vpsTryTrash_(cur);
     clearExistingPdfForRegeneration_(info.sh, info.idx, vpsRowWithoutPdfId_(row, info.idx), req.rowNo);
     SpreadsheetApp.flush();
-    out.status = trashedOk === true ? 'trashed' : 'error';
-    if (trashedOk !== true) out.error = trashedOk;
+    vpsApplyTrashResult_(out, trashedOk);
   } else if (oldPdfFileId) {
     // VPS が先にシートの 3 列を空にした: ゴミ箱へ移すだけ
-    var t = vpsTryTrash_(oldPdfFileId);
-    out.status = t === true ? 'trashed' : 'error';
-    if (t !== true) out.error = t;
+    vpsApplyTrashResult_(out, vpsTryTrash_(oldPdfFileId));
+  }
+  return out;
+}
+
+// vpsTryTrash_ の結果（true / {skipped, reason} / エラー文）を trash の欄に入れる
+function vpsApplyTrashResult_(out, t) {
+  if (t === true) {
+    out.status = 'trashed';
+  } else if (t && typeof t === 'object' && t.skipped) {
+    out.status = 'skipped';
+    out.reason = t.reason;
+    out.trashSkipped = true;
+  } else {
+    out.status = 'error';
+    out.error = t;
   }
   return out;
 }
@@ -606,14 +728,35 @@ function vpsRowWithoutPdfId_(row, idx) {
   return copy;
 }
 
+// ゴミ箱へ移すのは「Settings の PDF_ROOT_FOLDER_ID の下（親を VPS_TRASH_PARENT_DEPTH_ 段までたどる）にある PDF」だけ。
+// 違えば捨てずに {skipped:true, reason} を返す（ステージングが本番の PDF を捨てないため。token が漏れた時の守りも兼ねる。
+// データ安全 高-1・セキュリティ 中-2）。返り値: true（移した）/ {skipped:true, reason}（確かめで止めた）/ 文字（Drive のエラー）
 function vpsTryTrash_(fileId) {
+  var rootId = '';
+  try { rootId = normalize_(getSettings_()['PDF_ROOT_FOLDER_ID']); } catch (e0) { rootId = ''; }
+  if (!rootId) return { skipped: true, reason: 'pdf_root_not_set' };
   try {
-    DriveApp.getFileById(fileId).setTrashed(true);
+    var f = DriveApp.getFileById(fileId);
+    if (String(f.getMimeType()) !== 'application/pdf') return { skipped: true, reason: 'not_pdf' };
+    if (!vpsIsUnderFolder_(f, rootId, VPS_TRASH_PARENT_DEPTH_)) return { skipped: true, reason: 'outside_pdf_root' };
+    f.setTrashed(true);
     return true;
   } catch (e) {
     Logger.log('旧PDF削除スキップ: ' + e.message);
     return String((e && e.message) || e);
   }
+}
+
+// item（ファイルかフォルダ）の親を depth 段までたどり、rootId のフォルダがあれば true
+function vpsIsUnderFolder_(item, rootId, depth) {
+  if (depth <= 0) return false;
+  var it = item.getParents();
+  while (it.hasNext()) {
+    var parent = it.next();
+    if (String(parent.getId()) === rootId) return true;
+    if (vpsIsUnderFolder_(parent, rootId, depth - 1)) return true;
+  }
+  return false;
 }
 
 // ===== vps.upsertLedger =====
@@ -625,7 +768,7 @@ function vpsUpsertLedger_(p) {
   var req = getRequestById_(requestId);
   if (!req) return vpsFail_('row_not_synced', 'request not found in sheet: ' + requestId, true);
   var ledger = vpsUpsertLedgerCore_(requestId, req);
-  if (ledger.status === 'error') return vpsFail_(ledger.error, ledger.message, ledger.error === 'ledger_unavailable', { ledger: ledger });
+  if (ledger.status === 'error') return vpsFail_(ledger.error, ledger.message, vpsLedgerRetryable_(ledger), { ledger: ledger });
   return { ok: true, requestId: requestId, ledger: ledger };
 }
 
@@ -657,9 +800,9 @@ function vpsAfterDelete_(p) {
   if (req && (oldPdfFileId || normalize_(req.pdfFileId))) {
     out.trash = vpsTrashOldPdf_(req, oldPdfFileId);
   } else if (oldPdfFileId) {
-    var t = vpsTryTrash_(oldPdfFileId);
-    out.trash = t === true ? { status: 'trashed', fileId: oldPdfFileId } : { status: 'error', fileId: oldPdfFileId, error: t };
+    out.trash = vpsApplyTrashResult_({ status: 'skipped', fileId: oldPdfFileId }, vpsTryTrash_(oldPdfFileId));
   }
+  if (out.trash && out.trash.trashSkipped) out.trashSkipped = true;
   var requestType = normalize_(p.requestType) || (req ? req.requestType : '');
   var d = vpsParseYmd_(p.targetDate) || (req ? (req.targetDate instanceof Date ? req.targetDate : new Date(req.targetDate)) : null);
   if (!d || isNaN(d.getTime()) || (requestType !== 'overtime' && requestType !== 'holiday')) {

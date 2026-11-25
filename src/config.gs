@@ -104,6 +104,14 @@ function normalize_(s) {
       String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
 }
 
+// 利用者が入れた文字をセルへ書くとき（台帳・PDF のひな形）に通す。
+// = + - @ で始まる文字は setValue(s) が式として扱うので、先頭に ' を付けて「文字」として入れる。
+// ' はセルにも PDF にも表示されない（見た目は入力どおり）。それ以外の値（ふつうの文字・数・日付）はそのまま返す。
+function sheetLiteral_(v) {
+  if (typeof v !== 'string') return v;
+  return /^[=+\-@]/.test(v) ? "'" + v : v;
+}
+
 // ====== 過去日遡及申請ヘルパー ======
 // 年度開始は 3/16。当該日が3/16以降ならその年の3/16、以前なら前年の3/16を返す。
 

@@ -171,7 +171,9 @@ function renderMigratedPage_(e) {
 // ===== Sebastian の転送（移転モードのときだけ doPost から呼ぶ） =====
 
 // 受けた本文（生の文字列）をそのまま VPS の /api/sebastian へ POST し、返事の本文をそのまま返す。
-// 転送できないときは、今の doPost の失敗と同じ形 {error, action} を返す（HTTP 200）。
+// 取り決めは実装仕様 4-4（ヘッダー X-Overtime-Forwarded: gas。200 で JSON ならその文字をそのまま返す。
+// 200 以外は {"error":"upstream error: <code>"}、例外は {"error":"upstream unavailable: <message>"}）。どれも HTTP 200。
+// action は仕様の形に合わせて付けない（引数は呼び出し側の互換のために残す）。
 function forwardSebastianToVps_(rawBody, action) {
   var url = '';
   try {
@@ -190,20 +192,24 @@ function forwardSebastianToVps_(rawBody, action) {
       payload: String(rawBody == null ? '' : rawBody),
       muteHttpExceptions: true,
       followRedirects: false,
+      headers: { 'X-Overtime-Forwarded': 'gas' },
     });
   } catch (err) {
     Logger.log('forwardSebastianToVps_: 転送に失敗: ' + err.message);
-    var fail = { error: 'forward failed: ' + String((err && err.message) || err) };
-    if (action) fail.action = action;
-    return _apiResponse_(fail);
+    return _apiResponse_({ error: 'upstream unavailable: ' + String((err && err.message) || err) });
   }
   var code = res.getResponseCode();
   var text = res.getContentText();
   if (code !== 200) {
     Logger.log('forwardSebastianToVps_: VPS が HTTP ' + code + ' を返しました');
-    var bad = { error: 'forward failed: HTTP ' + code };
-    if (action) bad.action = action;
-    return _apiResponse_(bad);
+    return _apiResponse_({ error: 'upstream error: ' + code });
+  }
+  try {
+    JSON.parse(text);
+  } catch (e2) {
+    // 200 でも JSON でない（Cloudflare の画面など）。Sebastian に HTML を渡さない
+    Logger.log('forwardSebastianToVps_: VPS の返事が JSON ではありません');
+    return _apiResponse_({ error: 'upstream error: ' + code });
   }
   return ContentService.createTextOutput(text).setMimeType(ContentService.MimeType.JSON);
 }
@@ -276,6 +282,37 @@ function enterMigrationModeForOvertime() {
     throw new Error('スクリプトプロパティ ' + VPS_ORIGIN_KEY + ' に新しいアプリの起点（https://…）を入れてから実行してください。');
   }
   return enterMigrationMode(origin);
+}
+
+// ===== 秘密・起点の設定（エディタから実行。値はログにも返り値にも出さない） =====
+// VPS_INTERNAL_TOKEN は GAS エディタの「プロジェクトの設定 → スクリプト プロパティ」で直接入れてもよい。
+// setInternalToken() を引数なしで実行すると、64 字の乱数を作って保存する（VPS の .env へは、
+// スクリプト プロパティの画面で値を見て手で写す）。引数で渡すときは 32 字以上・SEBASTIAN_API_TOKEN と違う値だけ受ける。
+// ログと返り値は長さだけ。
+function setInternalToken(token) {
+  assertCutoverOperator_();
+  var props = PropertiesService.getScriptProperties();
+  var value = token == null || token === '' ? '' : String(token).trim();
+  if (!value) {
+    value = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, ''); // 64 字（16 進）
+  }
+  if (value.length < 32) throw new Error('VPS_INTERNAL_TOKEN は 32 字以上にしてください（値は表示しません）。');
+  if (value === String(props.getProperty('SEBASTIAN_API_TOKEN') || '')) {
+    throw new Error('VPS_INTERNAL_TOKEN は SEBASTIAN_API_TOKEN と別の値にしてください（値は表示しません）。');
+  }
+  props.setProperty('VPS_INTERNAL_TOKEN', value);
+  Logger.log('VPS_INTERNAL_TOKEN を保存しました（' + value.length + ' 字）。値はスクリプト プロパティの画面で確かめてください。');
+  return { saved: true, length: value.length };
+}
+
+// 例: setVpsOrigin('https://overtime.lineworks-local.net')。移転モードには入らない（入るのは enterMigrationModeForOvertime）。
+function setVpsOrigin(origin) {
+  assertCutoverOperator_();
+  var value = normalizeVpsOrigin_(origin);
+  if (!isValidVpsOrigin_(value)) throw new Error('起点は https://ホスト名 の形（パスなし）で、引数に渡してください。');
+  PropertiesService.getScriptProperties().setProperty(VPS_ORIGIN_KEY, value);
+  Logger.log(VPS_ORIGIN_KEY + ' を保存しました: ' + value);
+  return value;
 }
 
 // Sebastian の転送を始める（計画 B-17）。移転モードの起点 + /api/sebastian を転送先にする。
