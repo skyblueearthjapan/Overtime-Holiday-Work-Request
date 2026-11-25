@@ -162,3 +162,24 @@ def test_gas_lane_body_runs_one_job(session_factory):
     assert len(ran) == 1
     w.gas_lane_body()
     assert len(ran) == 2
+
+
+def test_skip_daily_on_startup_skips_current_daily_slot_only(session_factory, monkeypatch):
+    """データ安全 中-5: SKIP_DAILY_ON_STARTUP=1 で起動したら、枠の中の毎日の予定はその回だけ飛ばす。"""
+    calls = []
+    worker.register_schedule("sheet_reconcile", task=lambda sf: calls.append("rec") or {"ok": True}, at=(2, 10))
+    worker.register_schedule("gas_ping", task=lambda sf: calls.append("ping") or {"ok": True}, every_minutes=5,
+                             run_at_startup=True)
+    now = jst(2026, 11, 26, 2, 15)
+    monkeypatch.setattr(timeutil, "now_utc", lambda: now)
+    monkeypatch.setenv("SKIP_DAILY_ON_STARTUP", "1")
+    s = worker.Scheduler(session_factory, skip_daily_on_startup=worker.skip_daily_on_startup_env())
+    assert s.tick(now) == ["gas_ping"]
+    assert s.tick(now + timedelta(minutes=5)) == ["gas_ping"]  # 同じ枠では照合は動かない
+    assert worker.Scheduler(session_factory).tick(now + timedelta(minutes=6)) == ["gas_ping"]  # 起動し直しても
+    assert "sheet_reconcile" in s.tick(jst(2026, 11, 27, 2, 10))  # 次の日は動く
+    with session_factory() as db:
+        skipped = db.scalars(select(SyncRun).where(SyncRun.kind == "schedule:sheet_reconcile")).first()
+        assert skipped.summary_json == {"state": "skipped", "reason": "SKIP_DAILY_ON_STARTUP"}
+    monkeypatch.setenv("SKIP_DAILY_ON_STARTUP", "0")
+    assert worker.skip_daily_on_startup_env() is False

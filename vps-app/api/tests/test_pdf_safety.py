@@ -136,3 +136,44 @@ def test_reconcile_skips_requests_with_running_gas_jobs(rec, db):
     result = rec.run()
     assert result["diffCount"] == 0 and result["tabs"]["Requests"]["skipped"] >= 1
     assert rec.tab.get(r, REQUEST_HEADERS.index("workerName")).value == "GAS の仕事の途中"
+
+
+# ===== データ安全 中-4: 台帳の作り直しは送り直さない・反映待ちが 0 になるまで動かさない =====
+
+from gas_fakes import job  # noqa: E402
+
+from app.services.gas_client import GasTransportError  # noqa: E402
+
+
+@pytest.mark.parametrize("response", [
+    GasTransportError("時間切れ"),
+    {"ok": False, "error": "busy", "message": "ロック待ち", "retryable": True},
+])
+def test_ledger_rebuild_is_never_retried(env, db, gas, clock, response):
+    with env() as s:
+        jid = gas_jobs.enqueue_ledger_rebuild(s)
+        s.commit()
+    gas.responses["internal.ledgerRebuild"] = [response]
+    run(env, clock)
+    assert gas.actions() == ["internal.ledgerRebuild"]  # 1 回だけ
+    assert job(db, jid).state == "failed"
+
+
+def test_ledger_rebuild_waits_for_pending_rows(env, db, gas, clock):
+    add_request(db, "R1", synced=False)  # 反映待ちの行
+    with env() as s:
+        jid = gas_jobs.enqueue_ledger_rebuild(s)
+        s.commit()
+    jobs.JobRunner(env, lane="gas", now=clock).run_once()
+    assert gas.actions() == [] and job(db, jid).state == "pending" and "row_not_synced" in job(db, jid).last_error
+
+
+def test_ops_rebuild_ledger_refuses_while_rows_are_pending(db):
+    from app.domain import ops
+    from app.rpc import RpcError
+    from test_domain_helpers import ADMIN, ctx
+
+    add_request(db, "R1", synced=False)
+    with pytest.raises(RpcError) as e:
+        ops.ops_rebuildLedger(ctx(db, email=ADMIN))
+    assert "反映待ち" in e.value.message

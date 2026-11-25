@@ -68,6 +68,14 @@ def ops_batchPdfForDate(ctx: RpcContext, ymd=None):
 
 
 def ops_rebuildLedger(ctx: RpcContext):
+    from sqlalchemy import func, select
+
+    from app.models import SheetSyncState as S
+
+    pending = int(ctx.db.scalar(select(func.count()).select_from(S).where(S.desired_version > S.synced_version)) or 0)
+    if pending:
+        # 反映待ちの申請が台帳から抜けないよう、積む前に止める（データ安全 中-4）
+        raise RpcError(f"シートへの反映待ちが {pending} 行あります。0 になってから台帳を作り直してください。")
     job_id = gasjobs.service("gas_jobs").enqueue_ledger_rebuild(ctx.db)
     return {"ok": True, "jobId": job_id}
 

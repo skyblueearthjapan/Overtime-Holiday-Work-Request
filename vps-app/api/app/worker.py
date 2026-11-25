@@ -155,10 +155,20 @@ def run_task(session_factory: Callable[[], Session], name: str, *, marker: int |
         return row
 
 
+def skip_daily_on_startup_env() -> bool:
+    """SKIP_DAILY_ON_STARTUP=1: 起動した時に枠の中にある毎日の予定を、その回だけ飛ばす（データ安全 中-5）。"""
+    import os
+
+    return os.environ.get("SKIP_DAILY_ON_STARTUP", "").strip().lower() in ("1", "true", "yes")
+
+
 @dataclass
 class Scheduler:
     session_factory: Callable[[], Session]
     started: bool = False
+    # 起動した時に枠の中にある毎日の予定（照合 2:10・マスタ同期 0:30・朝バッチ 6:50 など）を動かさず、
+    # 枠を「飛ばした」として記録する。切り替えの夜に worker を起動するとき、確かめの前に書き始めないため。
+    skip_daily_on_startup: bool = False
 
     def due(self, now: datetime | None = None) -> list[tuple[str, int]]:
         """今の枠で動かす予定（名前と、先に書いた sync_runs の id）。枠の行はここで書いて確定する。"""
@@ -172,6 +182,12 @@ class Scheduler:
                 if start is None and not (first and sched.run_at_startup):
                     continue
                 if start is not None and _slot_taken(db, name, start) and not (first and sched.run_at_startup):
+                    continue
+                if first and self.skip_daily_on_startup and sched.at is not None and start is not None:
+                    db.add(SyncRun(kind=SCHEDULE_PREFIX + name, started_at=now, finished_at=now, ok=True,
+                                   summary_json={"state": "skipped", "reason": "SKIP_DAILY_ON_STARTUP"}))
+                    db.commit()
+                    log.warning("scheduled task skipped on startup (SKIP_DAILY_ON_STARTUP): %s", name)
                     continue
                 row = SyncRun(kind=SCHEDULE_PREFIX + name, started_at=now, ok=False,
                               summary_json={"state": "running"})
@@ -288,7 +304,7 @@ class Worker:
         JobRunner(self.session_factory, lane="default", app_settings=self.app_settings).run_once()
 
     def run_forever(self) -> None:
-        scheduler = Scheduler(self.session_factory)
+        scheduler = Scheduler(self.session_factory, skip_daily_on_startup=skip_daily_on_startup_env())
         threads = [
             threading.Thread(target=self._loop, args=("row_sync", ROW_SYNC_SECONDS, self.row_sync_body), daemon=True),
             threading.Thread(target=self._loop, args=("gas_lane", GAS_LANE_SECONDS, self.gas_lane_body), daemon=True),
