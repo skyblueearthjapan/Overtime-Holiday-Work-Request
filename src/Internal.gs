@@ -527,9 +527,9 @@ function vpsLedgerRetryable_(ledger) {
     (ledger.error === 'ledger_unavailable' || ledger.error === 'ledger_upsert_failed' || ledger.retryable === true);
 }
 
-// workLog（wlOverride）の形と範囲を確かめる（セキュリティ 中-2）。正しければ 5 項目だけの写しを、違えば null を返す。
-//   actualStartAt / actualEndAt: 'yyyy-MM-dd HH:mm:ss'（秒なしも可）で、終了 >= 開始
-//   actualMinutes / breakMinutes / netMinutes: 0〜1440 の数（24 時間まで。空は 0）
+// workLog（wlOverride）の形と型を確かめる（セキュリティ 中-2）。正しければ 5 項目だけの写しを、違えば null を返す。
+//   actualStartAt / actualEndAt: 'yyyy-MM-dd HH:mm:ss'（秒なしも可）か空
+//   actualMinutes / breakMinutes / netMinutes: 有限の数（数の文字も可。空は 0）
 function vpsValidWorkLog_(wl) {
   if (!wl || typeof wl !== 'object' || Array.isArray(wl)) return null;
   var out = {};
@@ -538,16 +538,18 @@ function vpsValidWorkLog_(wl) {
     var k = VPS_WL_KEYS_[i];
     var v = wl[k];
     if (k === 'actualStartAt' || k === 'actualEndAt') {
+      if (v === undefined || v === null || v === '') { out[k] = ''; continue; }
       if (typeof v !== 'string' || !dt.test(v) || vpsEpochMs_(v) === null) return null;
       out[k] = v;
     } else {
       if (v === undefined || v === null || v === '') { out[k] = 0; continue; }
-      var n = typeof v === 'number' ? v : (typeof v === 'string' && /^\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN);
-      if (!isFinite(n) || n < 0 || n > 1440) return null;
+      var n = typeof v === 'number' ? v : (typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v.trim()) ? Number(v) : NaN);
+      if (!isFinite(n)) return null;
       out[k] = n;
     }
   }
-  if (vpsEpochMs_(out.actualEndAt) < vpsEpochMs_(out.actualStartAt)) return null;
+  // 順序（終了 < 開始）と長さ（24 時間超）は確かめない。今の GAS は 17:20 前の完了・日をまたぐ完了でも
+  // PDF と台帳の行を作るので、同じ依頼を受ける（verify-fixes R-1）。
   return out;
 }
 
@@ -579,7 +581,7 @@ function vpsRenderPdf_(p) {
   if (p.workLog !== undefined && p.workLog !== null) {
     wlOverride = vpsValidWorkLog_(p.workLog);
     if (!wlOverride) {
-      return vpsFail_('bad_request', 'workLog must have actualStartAt/actualEndAt (yyyy-MM-dd HH:mm:ss, end >= start) and minutes 0-1440', false);
+      return vpsFail_('bad_request', 'workLog must have actualStartAt/actualEndAt as yyyy-MM-dd HH:mm:ss (or empty) and finite minutes', false);
     }
   }
 

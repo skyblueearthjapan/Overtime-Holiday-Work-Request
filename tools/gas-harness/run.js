@@ -764,16 +764,16 @@ test('trash guard: PDF in a date folder under the root is trashed (2 levels); Dr
 });
 
 // security mid-2: workLog override range/format
-test('workLog override: bad format / out of range -> bad_request (not stored as retryable), nothing generated', () => {
+test('workLog override: bad format / wrong type -> bad_request (not stored as retryable), nothing generated', () => {
   const w = makeWorld();
   const good = { actualStartAt: '2026-11-25 17:20:00', actualEndAt: '2026-11-25 19:00:00', actualMinutes: 100, breakMinutes: 10, netMinutes: 90 };
   const bads = [
     Object.assign({}, good, { actualEndAt: '19:00' }),
     Object.assign({}, good, { actualStartAt: '2026-11-25T17:20:00Z' }),
-    Object.assign({}, good, { netMinutes: 1441 }),
-    Object.assign({}, good, { breakMinutes: -1 }),
     Object.assign({}, good, { actualMinutes: '1e3' }),
-    Object.assign({}, good, { actualEndAt: '2026-11-25 17:00:00' }),
+    Object.assign({}, good, { netMinutes: 'abc' }),
+    Object.assign({}, good, { breakMinutes: true }),
+    Object.assign({}, good, { actualEndAt: 1764000000000 }),
     [good], 'x',
   ];
   bads.forEach((wl, i) => {
@@ -783,6 +783,27 @@ test('workLog override: bad format / out of range -> bad_request (not stored as 
   eq(w.names('generatePdfDirect_').length + w.names('upsertAccumulationRow_').length, 0);
   w.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'wv-ok', args: { source: 'screen', wlOverride: Object.assign({}, good, { netMinutes: '90', extra: 'ignored' }) } }));
   eq(w.names('generatePdfDirect_')[0][2], Object.assign({}, good, { netMinutes: 90 }), 'numeric string accepted; only the 5 keys passed');
+});
+
+test('workLog override (verify-fixes R-1): end before start and > 24h are accepted like today\'s GAS', () => {
+  const w = makeWorld();
+  // completion pressed before 17:20 (end < start, negative minutes)
+  const early = { actualStartAt: '2026-11-25 17:20:00', actualEndAt: '2026-11-25 17:05:00', actualMinutes: -15, breakMinutes: 0, netMinutes: -15 };
+  const r1 = w.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'r1a', args: { source: 'screen', wlOverride: early } })).json;
+  eq([r1.ok, r1.pdf.status, r1.ledger.status], [true, 'created', 'upserted']);
+  eq(w.names('generatePdfDirect_').pop()[2], early);
+  // completion after midnight of the next day (> 1440 minutes)
+  const w2 = makeWorld();
+  const long = { actualStartAt: '2026-11-25 08:00:00', actualEndAt: '2026-11-26 09:30:00', actualMinutes: 1530, breakMinutes: '60', netMinutes: '1470' };
+  const r2 = w2.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'r1b', args: { source: 'admin', wlOverride: long } })).json;
+  eq([r2.ok, r2.pdf.status, r2.ledger.status], [true, 'created', 'upserted']);
+  eq(w2.names('generatePdfDirect_').pop()[2], Object.assign({}, long, { breakMinutes: 60, netMinutes: 1470 }));
+  // empty end time is passed through as empty
+  const w3 = makeWorld();
+  const r3 = w3.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'r1c', args: { source: 'screen',
+    wlOverride: { actualStartAt: '2026-11-25 17:20:00', actualEndAt: '', actualMinutes: '', breakMinutes: 0, netMinutes: 0 } } })).json;
+  eq(r3.ok, true);
+  eq(w3.names('generatePdfDirect_').pop()[2].actualEndAt, '');
 });
 
 // data-safety high-3 cooperation: ping reports migrated reliably and cheaply
