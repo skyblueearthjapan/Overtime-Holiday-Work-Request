@@ -943,7 +943,7 @@ function migrateAccumulationTimeColumns() {
  * メニューから手動実行を想定。
  */
 function rebuildAccumulationSS() {
-  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
+  assertDbOpenAllowed_(); // 移転モード（Cutover.gs）なら止める（VPS の内部用の入口 internal.ledgerRebuild だけ通す）
   var t0 = Date.now();
   var ss;
   try {
@@ -951,7 +951,7 @@ function rebuildAccumulationSS() {
   } catch (e) {
     Logger.log('蓄積SS取得失敗: ' + e.message);
     try { SpreadsheetApp.getUi().alert('蓄積スプレッドシートが取得できません: ' + e.message); } catch (e2) {}
-    return;
+    return { rebuilt: false, reason: 'ledger_unavailable: ' + e.message }; // 内部用の入口が件数を返すため
   }
 
   var timestamp = Utilities.formatDate(new Date(), TZ, 'yyyyMMdd_HHmmss');
@@ -980,7 +980,7 @@ function rebuildAccumulationSS() {
   var reqLastRow = reqSh.getLastRow();
   if (reqLastRow < 2) {
     try { SpreadsheetApp.getUi().alert('Requests シートが空のため再構築をスキップしました。'); } catch (e) {}
-    return;
+    return { rebuilt: false, reason: 'requests_empty', backups: backupRenamed }; // 内部用の入口が件数を返すため
   }
   var reqValues = reqSh.getRange(2, 1, reqLastRow - 1, reqSh.getLastColumn()).getValues();
   Logger.log('[rebuild] step2 requests read: ' + reqValues.length + ' rows (' + (Date.now() - t0) + 'ms)');
@@ -1127,6 +1127,9 @@ function rebuildAccumulationSS() {
     + '所要時間: ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒';
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) { /* trigger実行時はUI不可 */ }
+  // 内部用の入口（internal.ledgerRebuild）が件数を返すため。メニューからの実行では使わない
+  return { rebuilt: true, processed: processed, sheets: sheetCount, written: totalWritten,
+    backups: backupRenamed, durationMs: Date.now() - t0 };
 }
 
 // ====================================================================

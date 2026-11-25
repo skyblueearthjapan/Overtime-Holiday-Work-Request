@@ -75,6 +75,16 @@ function vpsParseYmd_(ymd) {
   return isNaN(d.getTime()) ? null : d;
 }
 
+// pdfGeneratedAt（Date か 'yyyy-MM-dd HH:mm:ss'＝JST の文字）→ エポックのミリ秒。無ければ null
+function vpsEpochMs_(v) {
+  if (!v) return null;
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.getTime();
+  var m = /^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(?::\d{2})?)$/.exec(String(v).trim());
+  if (!m) return null;
+  var t = new Date(m[1] + 'T' + (m[2].length === 5 ? m[2] + ':00' : m[2]) + '+09:00').getTime();
+  return isNaN(t) ? null : t;
+}
+
 function vpsYesterday_() {
   var d = new Date();
   d.setDate(d.getDate() - 1);
@@ -259,6 +269,7 @@ var VPS_INTERNAL_ROUTES_ = {
   'vps.removeLedgerRow': { fn: function(p) { return vpsRemoveLedgerRow_(p); } },
   'vps.morningBatch': { fn: function(p) { return vpsMorningBatch_(p); } },
   'vps.ledgerRewriteDay': { fn: function(p) { return vpsLedgerRewriteDay_(p); } },
+  'vps.ledgerRebuild': { fn: function(p) { return vpsLedgerRebuild_(p); } },
 
   // 計画 4-6 の表の経路（今の画面の関数と同じ順序・条件）
   // 一次承認: actualEndAt があるときだけ作る。PDF が例外なら台帳は書かない（approval.gs api_approveRequest）
@@ -266,9 +277,16 @@ var VPS_INTERNAL_ROUTES_ = {
     return vpsRenderPdf_(vpsWith_(p, { mode: 'auto', requireWorkDone: true, ledger: 'onSuccess', regenerate: false }));
   } },
   // 完了（画面・総務の手動入力・Sebastian）: PDF の成否に関係なく台帳を upsert。Sebastian はいつも XLOOKUP 方式
+  // 仕様 7-2: statusAtEnqueue が approved のときだけ作る。wlOverride は screen・admin のときだけ（sebastian は override なし）
   'internal.afterComplete': { fn: function(p) {
-    var mode = String(p.source || '') === 'sebastian' ? 'xlookup' : 'auto';
-    return vpsRenderPdf_(vpsWith_(p, { mode: mode, ledger: 'always', regenerate: false }));
+    var isSeb = String(p.source || '') === 'sebastian';
+    var fixed = { mode: isSeb ? 'xlookup' : 'auto', ledger: 'always', regenerate: false };
+    if (isSeb) fixed.workLog = null;
+    else if (p.wlOverride && typeof p.wlOverride === 'object') fixed.workLog = p.wlOverride;
+    if (p.statusAtEnqueue !== undefined && p.statusAtEnqueue !== null && String(p.statusAtEnqueue) !== 'approved') {
+      fixed.skipPdfReason = 'not_approved_at_enqueue';
+    }
+    return vpsRenderPdf_(vpsWith_(p, fixed));
   } },
   // 作り直し: secondary＝いつも直接方式・台帳はいつも / edit＝PDF_MODE・台帳あり / admin＝PDF_MODE・台帳なし
   'internal.regenerate': { fn: function(p) {
@@ -279,11 +297,14 @@ var VPS_INTERNAL_ROUTES_ = {
     return vpsFail_('bad_request', 'reason must be secondary|edit|admin', false);
   } },
   'internal.afterDelete': { fn: function(p) { return vpsAfterDelete_(p); } },
-  // 朝バッチの 1 件: pdfFileId があれば数えるだけ（already）。台帳は書かない（最後に ledgerRewriteDay）
+  // 仕様 7-2: PDF の無い二次承認の単票など。vps.upsertLedger と同じ
+  'internal.ledgerUpsert': { fn: function(p) { return vpsUpsertLedger_(p); } },
+  // 朝バッチの 1 件: シートに pdfFileId があれば skipped。PDF の例外も ok:true で返す（朝バッチが数える）。台帳は書かない
   'internal.batchPdf': { fn: function(p) {
-    return vpsRenderPdf_(vpsWith_(p, { mode: 'auto', ledger: 'none', regenerate: false }));
+    return vpsRenderPdf_(vpsWith_(p, { mode: 'auto', ledger: 'none', regenerate: false, skipIfHasPdf: true, pdfErrorIsOk: true }));
   } },
   'internal.ledgerRewriteDay': { fn: function(p) { return vpsLedgerRewriteDay_(p); } },
+  'internal.ledgerRebuild': { fn: function(p) { return vpsLedgerRebuild_(p); } },
 };
 
 function vpsWith_(p, fixed) {
@@ -295,28 +316,43 @@ function vpsWith_(p, fixed) {
 
 // ===== ping =====
 
+// 仕様 7-2 の名前（scriptId・spreadsheetId・spreadsheetTimeZone・migrated・forwardUrlSet・accumulationKeyRows・
+// apiVersion）と、最初の版の名前（dbId・dbTimeZone・migrationMode・version）の両方を返す。
+var INTERNAL_API_VERSION = 1;
 function vpsPing_() {
   var out = {
     ok: true,
     pong: new Date().toISOString(),
+    apiVersion: INTERNAL_API_VERSION,
     version: VPS_INTERNAL_API_VERSION_,
+    scriptId: '',
+    migrated: isMigrationMode_(),
     migrationMode: isMigrationMode_(),
     migratedTo: getMigratedToUrl_(),
+    forwardUrlSet: false,
     scriptTimeZone: '',
   };
+  try { out.scriptId = ScriptApp.getScriptId(); } catch (e0) { out.scriptIdError = String(e0.message || e0); }
+  try { out.forwardUrlSet = !!PropertiesService.getScriptProperties().getProperty(SEBASTIAN_FORWARD_URL_KEY); } catch (e1) { /* ignore */ }
   try { out.scriptTimeZone = Session.getScriptTimeZone(); } catch (e) { /* ignore */ }
   try {
     var ss = getDb_();
-    out.dbId = ss.getId();
-    try { out.dbTimeZone = ss.getSpreadsheetTimeZone(); } catch (e2) { /* ignore */ }
+    out.spreadsheetId = out.dbId = ss.getId();
+    try { out.spreadsheetTimeZone = out.dbTimeZone = ss.getSpreadsheetTimeZone(); } catch (e2) { /* ignore */ }
     var s = getSettings_();
     out.settings = {
       TEMPLATE_SSID: normalize_(s['TEMPLATE_SSID']),
       PDF_ROOT_FOLDER_ID: normalize_(s['PDF_ROOT_FOLDER_ID']),
       ACCUMULATION_SS_ID: normalize_(s['ACCUMULATION_SS_ID']),
       PDF_MODE: String(s['PDF_MODE'] == null ? '' : s['PDF_MODE']),
+      SOURCE_SSID: normalize_(s['SOURCE_SSID']),
       pdfModeIsDirect: normalize_(s['PDF_MODE']).indexOf('direct') >= 0,
     };
+    // Settings に ACCUMULATION_SS_ID の行がいくつあるか（2 行以上なら下の行が使われる。gap-5 中-2）
+    var vals = ss.getSheetByName(SHEET.SETTINGS).getDataRange().getValues();
+    var n = 0;
+    for (var r = 2; r < vals.length; r++) if (String(vals[r][0] || '').trim() === 'ACCUMULATION_SS_ID') n++;
+    out.accumulationKeyRows = n;
   } catch (e3) {
     out.dbError = String(e3.message || e3);
   }
@@ -472,7 +508,13 @@ function vpsRenderPdf_(p) {
   out.pdf.method = useDirect ? 'direct' : 'xlookup';
 
   var canMake = true;
-  if (req.status !== 'approved') {
+  if (p.skipPdfReason) {
+    canMake = false;
+    out.pdf = { status: 'skipped', reason: String(p.skipPdfReason), method: out.pdf.method };
+  } else if (p.skipIfHasPdf === true && normalize_(req.pdfFileId)) {
+    canMake = false;
+    out.pdf = { status: 'skipped', reason: 'has_pdf', method: out.pdf.method };
+  } else if (req.status !== 'approved') {
     canMake = false;
     out.pdf = { status: 'skipped', reason: 'not_approved', method: out.pdf.method };
   } else if (p.requireWorkDone === true) {
@@ -514,12 +556,14 @@ function vpsRenderPdf_(p) {
   out.pdfFileId = normalize_(after.pdfFileId);
   out.pdfFolderId = normalize_(after.pdfFolderId);
   out.pdfGeneratedAt = vpsFmtDateTime_(after.pdfGeneratedAt);
+  out.pdfGeneratedAtEpochMs = vpsEpochMs_(after.pdfGeneratedAt);
   out.pdfName = out.pdf.pdfName || '';
   out.pdf.pdfFileId = out.pdfFileId;
   out.pdf.folderId = out.pdfFolderId;
   out.pdf.pdfGeneratedAt = out.pdfGeneratedAt;
+  out.pdf.pdfGeneratedAtEpochMs = out.pdfGeneratedAtEpochMs;
 
-  if (out.pdf.status === 'error') {
+  if (out.pdf.status === 'error' && p.pdfErrorIsOk !== true) {
     out.ok = false;
     out.error = 'pdf_failed';
     out.message = out.pdf.error;
@@ -674,5 +718,26 @@ function vpsMorningBatch_(p) {
     errors: pdfResult.errors || [],
     batchLog: { status: 'appended', batchName: 'morningBatchNoMail' },
     ledger: ledger,
+  };
+}
+
+// ===== vps.ledgerRebuild / internal.ledgerRebuild =====
+// 今の rebuildAccumulationSS()（年度タブを _backup_<日時> へ名前を変えてから全件を書き直す）をそのまま呼ぶ。
+// 台帳を開けなければ呼ばない（今の getAccumulationSS_ が新しい台帳を作るのを防ぐ）。6 分を超えれば GAS が止め、
+// VPS 側は時間切れ（結果が分からない）として扱う。
+function vpsLedgerRebuild_(p) {
+  var pre = vpsLedgerPrecheck_(new Date(), []);
+  if (pre) return vpsFail_(pre.error, pre.message, pre.error === 'ledger_unavailable', { ledger: pre });
+  var r = rebuildAccumulationSS();
+  if (!r || r.rebuilt !== true) {
+    return vpsFail_('internal', 'rebuildAccumulationSS did not finish: ' + ((r && r.reason) || 'unknown'), true,
+      { ledger: { status: 'error', error: (r && r.reason) || 'unknown' } });
+  }
+  return {
+    ok: true,
+    ledger: { status: 'rebuilt' },
+    counts: { processedRows: r.processed, sheets: r.sheets, writtenRows: r.written, backups: r.backups.length },
+    backups: r.backups,
+    rebuildMs: r.durationMs,
   };
 }

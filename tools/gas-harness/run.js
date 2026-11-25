@@ -195,6 +195,7 @@ function makeWorld(opts) {
       newTrigger: fn => { const b = { timeBased: () => b, everyDays: () => b, atHour: () => b, nearMinute: () => b, everyMinutes: () => b,
         create: () => { triggers.push({ fn, id: 'N' + triggers.length, type: 'CLOCK' }); calls.push(['newTrigger', fn]); } }; return b; },
       getOAuthToken: () => 'tok',
+      getScriptId: () => 'SCRIPT-ID-1',
     },
     DriveApp: { getFileById: id => ({ setTrashed: () => { calls.push(['trash', id]); if (id === 'FOREIGN') throw new Error('no permission'); } }) },
     FormApp: { openById: id => { calls.push(['FormApp.openById', id]); const f = forms[id]; if (!f) throw new Error('no form');
@@ -229,6 +230,9 @@ function makeWorld(opts) {
   ctx.upsertAccumulationRow_ = id => calls.push(['upsertAccumulationRow_', id]);
   ctx.removeAccumulationRow_ = (id, t, d) => calls.push(['removeAccumulationRow_', id, t, ctx.fmtDate_(d, 'yyyy-MM-dd')]);
   ctx.appendToAccumulationSS_ = d => calls.push(['appendToAccumulationSS_', ctx.fmtDate_(d, 'yyyy-MM-dd')]);
+  const realRebuild = ctx.rebuildAccumulationSS;
+  ctx.__realRebuild = realRebuild;
+  ctx.rebuildAccumulationSS = () => { calls.push(['rebuildAccumulationSS']); return { rebuilt: true, processed: 12, sheets: 2, written: 12, backups: ['残業_2026年度_backup_x'], durationMs: 5 }; };
   ctx.batchGeneratePdfs_ = d => { calls.push(['batchGeneratePdfs_', ctx.fmtDate_(d, 'yyyy-MM-dd')]); return { ok: 2, skip: 1, fail: 1, errors: ['R-9 (加工班/X): boom'] }; };
 
   return { ctx, db, ledger, props, calls, log, forms, lockState, get triggers() { return triggers; },
@@ -464,7 +468,7 @@ test('migration: every browser-callable function is refused with Japanese messag
   const publicFns = [];
   for (const f of fs.readdirSync(SRC).filter(f => f.endsWith('.gs') && !['Cutover.gs', 'Internal.gs'].includes(f))) {
     for (const m of fs.readFileSync(path.join(SRC, f), 'utf8').matchAll(/^function\s+([A-Za-z0-9_$]+)\s*\(/gm)) {
-      if (!m[1].endsWith('_') && !['doGet', 'doPost', 'onOpen', 'syncAllMasters'].includes(m[1])) publicFns.push(m[1]);
+      if (!m[1].endsWith('_') && !['doGet', 'doPost', 'onOpen', 'syncAllMasters', 'rebuildAccumulationSS' /* stubbed; real one tested below */].includes(m[1])) publicFns.push(m[1]);
     }
   }
   for (const fn of publicFns) throwsMatch(() => w.ctx[fn](), /新しいアドレスへ移りました/, fn);
@@ -580,6 +584,76 @@ test('remove triggers lists what it deleted; restore recreates (2 core / all 4)'
 test('timing-safe compare', () => {
   const w = makeWorld();
   eq([w.ctx.vpsTimingSafeEqual_('abc', 'abc'), w.ctx.vpsTimingSafeEqual_('abc', 'abd'), w.ctx.vpsTimingSafeEqual_('abc', 'abcd'), w.ctx.vpsTimingSafeEqual_(undefined, '')], [true, false, false, true]);
+});
+
+
+// --- follow-up (team M integration): spec 7-1/7-2 names
+test('ping returns scriptId and spec 7-2 names (plus the first-version names)', () => {
+  const w = makeWorld({ props: { SEBASTIAN_FORWARD_URL: ORIGIN + '/api/sebastian' } });
+  w.db.sheets.Settings.data.push(['ACCUMULATION_SS_ID', 'ACC1']);
+  const r = w.post({ internal: true, token: VPS_TOKEN, action: 'internal.ping' }).json;
+  eq([r.ok, r.scriptId, r.spreadsheetId, r.dbId, r.spreadsheetTimeZone, r.dbTimeZone, r.scriptTimeZone, r.migrated, r.forwardUrlSet, r.apiVersion, r.accumulationKeyRows],
+    [true, 'SCRIPT-ID-1', 'DB1', 'DB1', 'Asia/Tokyo', 'Asia/Tokyo', 'Asia/Tokyo', false, true, 1, 2]);
+  assert('SOURCE_SSID' in r.settings, 'settings.SOURCE_SSID');
+  eq(w.post(vps('vps.ping')).json.scriptId, 'SCRIPT-ID-1');
+});
+test('router has every action named in spec 7-2 (+ vps.* names)', () => {
+  const w = makeWorld();
+  const names = Object.keys(w.ctx.VPS_INTERNAL_ROUTES_ || vm.runInContext('VPS_INTERNAL_ROUTES_', w.ctx));
+  for (const a of ['internal.ping', 'internal.afterApprove', 'internal.afterComplete', 'internal.regenerate', 'internal.ledgerUpsert',
+    'internal.afterDelete', 'internal.batchPdf', 'internal.ledgerRewriteDay', 'internal.ledgerRebuild',
+    'vps.ping', 'vps.renderPdf', 'vps.upsertLedger', 'vps.removeLedgerRow', 'vps.morningBatch', 'vps.ledgerRewriteDay', 'vps.ledgerRebuild']) {
+    assert(names.includes(a), 'missing ' + a);
+  }
+});
+test('internal.ledgerUpsert == vps.upsertLedger', () => {
+  const w = makeWorld();
+  const r = w.post({ internal: true, token: VPS_TOKEN, action: 'internal.ledgerUpsert', jobId: 'lu1', requestId: 'R-1' }).json;
+  eq([r.ok, r.ledger.status], [true, 'upserted']);
+  eq(w.names('upsertAccumulationRow_').map(c => c[1]), ['R-1']);
+});
+test('internal.ledgerRebuild / vps.ledgerRebuild run rebuildAccumulationSS and return counts (also in migration mode)', () => {
+  const w = migrated();
+  const r = w.post({ internal: true, token: VPS_TOKEN, action: 'internal.ledgerRebuild', jobId: 'rb1' }).json;
+  eq([r.ok, r.ledger.status, r.counts], [true, 'rebuilt', { processedRows: 12, sheets: 2, writtenRows: 12, backups: 1 }]);
+  eq(w.post(vps('vps.ledgerRebuild', { jobId: 'rb2' })).json.ok, true);
+  eq(w.names('rebuildAccumulationSS').length, 2);
+  const w2 = makeWorld({ ledgerMissing: true });
+  const r2 = w2.post(vps('vps.ledgerRebuild', { jobId: 'rb3' })).json;
+  eq([r2.error, r2.retryable], ['ledger_unavailable', true]);
+  eq(w2.names('rebuildAccumulationSS').length, 0, 'does not create a new ledger');
+});
+test('real rebuildAccumulationSS: refused in migration mode unless inside the authenticated internal call', () => {
+  const w = migrated();
+  throwsMatch(() => w.ctx.__realRebuild(), /新しいアドレスへ移りました/);
+});
+test('PDF results carry pdfGeneratedAtEpochMs (number) with the JST string', () => {
+  const w = makeWorld();
+  const r = w.post(vps('vps.renderPdf', { requestId: 'R-1', jobId: 'ep1' })).json;
+  eq([r.pdfGeneratedAt, r.pdfGeneratedAtEpochMs, r.pdf.pdfGeneratedAtEpochMs], ['2026-11-26 09:00:00', Date.parse('2026-11-26T00:00:00Z'), Date.parse('2026-11-26T00:00:00Z')]);
+  w.db.sheets.Requests.data[2][12] = '2026-11-25 18:30:00';
+  const a = w.post(vps('vps.renderPdf', { requestId: 'R-2', jobId: 'ep2' })).json;
+  eq([a.pdf.status, a.pdfGeneratedAtEpochMs], ['already', Date.parse('2026-11-25T18:30:00+09:00')]);
+  const n = w.post(vps('vps.renderPdf', { requestId: 'R-3', jobId: 'ep3' })).json;
+  eq(n.pdfGeneratedAtEpochMs, null);
+});
+test('afterComplete: statusAtEnqueue != approved -> no PDF, ledger still; wlOverride passed; sebastian ignores override', () => {
+  const w = makeWorld();
+  const r = w.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'sa1', args: { source: 'screen', statusAtEnqueue: 'submitted' } })).json;
+  eq([r.pdf.status, r.pdf.reason, r.ledger.status], ['skipped', 'not_approved_at_enqueue', 'upserted']);
+  const wl = { actualStartAt: '2026-11-25 17:20:00', actualEndAt: '2026-11-25 19:10:00', actualMinutes: 110, breakMinutes: 10, netMinutes: 100 };
+  w.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'sa2', args: { source: 'admin', statusAtEnqueue: 'approved', wlOverride: wl } }));
+  eq(w.names('generatePdfDirect_').pop()[2], wl);
+  const w2 = makeWorld();
+  w2.post(vps('internal.afterComplete', { requestId: 'R-1', jobId: 'sa3', args: { source: 'sebastian', statusAtEnqueue: 'approved', wlOverride: wl } }));
+  eq(w2.names('generatePdfForRequest_').pop()[2], null, 'sebastian: no override, XLOOKUP');
+});
+test('batchPdf: existing pdfFileId -> skipped; PDF exception -> ok:true with pdf.status=error', () => {
+  const w = makeWorld({ pdfFail: { 'R-1': true } });
+  eq(w.post(vps('internal.batchPdf', { requestId: 'R-2', jobId: 'bp1' })).json.pdf.status, 'skipped');
+  const r = w.post(vps('internal.batchPdf', { requestId: 'R-1', jobId: 'bp2' })).json;
+  eq([r.ok, r.pdf.status, r.pdf.error], [true, 'error', 'PDFエクスポートに失敗しました: HTTP 500']);
+  eq(w.names('upsertAccumulationRow_').length, 0);
 });
 
 // ---------------------------------------------------------------- report
