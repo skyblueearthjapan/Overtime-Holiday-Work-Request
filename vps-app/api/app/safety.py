@@ -241,6 +241,12 @@ def verify_gas_ping(ping: Mapping[str, Any] | None, settings: Settings | None = 
     for name, (actual, want) in expected.items():
         if actual != want:
             problems.append(f"{name} が {s.app_env} の値と違います")
+    # Apps Script の getSpreadsheetTimeZone() は、シートの時間帯が GMT（Sheets API では "Etc/GMT"）のとき
+    # 空の文字を返す（2026-11-26 ステージングで確認）。GMT の系統を設定しているときだけ、空を同じ値として扱う。
+    # シートの本当の時間帯は、行の反映（row_sync）が Sheets API の properties.timeZone で別に確かめる。
+    gmt_family = {"Etc/GMT", "GMT", "Etc/UTC", "UTC", "Etc/GMT+0", "Etc/GMT-0", "Etc/Greenwich", "Etc/Universal"}
+    if tz == "" and s.db_sheet_timezone in gmt_family:
+        tz = s.db_sheet_timezone
     if tz != s.db_sheet_timezone:
         problems.append(f"spreadsheetTimeZone（{tz or '空'}）が DB_SHEET_TIMEZONE（{s.db_sheet_timezone}）と違います")
     # 同じ指摘を重ねない（並びは保つ）

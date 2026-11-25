@@ -6,3 +6,6 @@
 - 「スプレッドシートのコピーを作成」でできたサンドボックスは、Settings タブが本番の PDF フォルダ・台帳・フォーム・宛先を指したまま。コピー直後に Settings を試験用へ書き換え、フォームの対応表のタブは名前を変えて無効にする。Sheets の自動補完で値が変わることがあるので、書いた後に画面で確かめる。
 - JEV ハンズの画面読みは ID を伏せ字にする。ID はボタンで写して PowerShell の Get-Clipboard で読むか、Drive API の検索で取る。
 - 本番の DB スプレッドシートを、ほかのアプリ（貯蔵品の VPS 版）が DeptApprovers の読み先にしていた。最初に、ほかのアプリのリポジトリを DB の ID で grep する。
+- DB スプレッドシートの時間帯が GMT（Sheets API の properties.timeZone は "Etc/GMT"、地域は en_US）だった。Apps Script の `getSpreadsheetTimeZone()` はこのとき空の文字を返す。GAS の返事だけで時間帯を照合すると必ず不合格になるので、GMT 系の設定のときは空を同じ値として扱い、本当の値は Sheets API で確かめる。
+- 外の仕組み（Sebastian）が、Sheets API で Requests に新しい申請の行を直接足していた（`values.append`、USER_ENTERED、INSERT_ROWS）。GAS の doPost だけを見ていると気づかない。移す前に、シートに直接書いている仕組みが無いかを、その仕組みのコードで確かめる（DB の ID で grep）。VPS 側に「シートからの取り込み」を足して、外の仕組みは変えずに済ませた。
+- 移行の道具が本番だけを移す元として受け付ける作りだと、ステージングにも本番の行が入る。本番の PDF の ID などは、ステージングでは空にして入れる（ステージングの GAS もオーナーの権限で動くため、本番のファイルを捨てられる）。

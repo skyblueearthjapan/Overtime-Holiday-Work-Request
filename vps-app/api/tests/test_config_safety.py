@@ -471,3 +471,15 @@ def test_gas_client_refuses_other_prod_deployment(monkeypatch):
     staging = make_settings(prod_gas_internal_deployment_id=PROD_INTERNAL)
     with pytest.raises(GasClientConfigError):
         assert_gas_url_allowed(f"https://script.google.com/macros/s/{PROD_INTERNAL}/exec", staging)
+
+
+
+def test_gas_ping_empty_timezone_is_accepted_only_for_gmt_family(settings):
+    """Apps Script は GMT のシートで getSpreadsheetTimeZone() に空を返す（2026-11-26 確認）。
+    GMT の系統を DB_SHEET_TIMEZONE にしたときだけ、空を同じ時間帯として合格にする。"""
+    gmt = settings.model_copy(update={"db_sheet_timezone": "Etc/GMT"})
+    assert safety.verify_gas_ping(staging_ping(spreadsheetTimeZone=""), gmt) == []
+    assert safety.verify_gas_ping(staging_ping(spreadsheetTimeZone="Etc/GMT"), gmt) == []
+    assert safety.verify_gas_ping(staging_ping(spreadsheetTimeZone="Asia/Tokyo"), gmt)
+    # 東京の設定では、空はこれまでどおり不合格
+    assert safety.verify_gas_ping(staging_ping(spreadsheetTimeZone=""), settings)
