@@ -146,7 +146,8 @@ def test_optional_args_and_wrong_arity(logged_in):
     assert logged_in.post("/api/rpc/api_markOvertimeDone", json=["R"]).json()["result"] == ["R", None]
     assert logged_in.post("/api/rpc/api_markOvertimeDone", json=["R", "19:30"]).json()["result"] == ["R", "19:30"]
     assert logged_in.post("/api/rpc/api_markOvertimeDone", json=[]).status_code == 400
-    assert logged_in.post("/api/rpc/api_markOvertimeDone", json=["R", None, "extra"]).status_code == 400
+    # 余った引数は GAS と同じく捨てる（正しさ 低-7）
+    assert logged_in.post("/api/rpc/api_markOvertimeDone", json=["R", None, "extra"]).json()["result"] == ["R", None]
 
 
 @pytest.mark.parametrize("body", [b"{}", b"\"x\"", b"not json", b"123", b"null"])
