@@ -369,3 +369,24 @@ def test_config_defines_the_fixed_constants():
                  "PROD_PDF_FOLDER_ID_FIXED", "PROD_LEDGER_SPREADSHEET_ID_FIXED"):
         assert re.fullmatch(r"[A-Za-z0-9_-]{25,}", getattr(config, name))
     assert not (PRODUCTION_IDS & KNOWN_STAGING_IDS)
+
+
+# ===== Sebastian の token の強さ（セキュリティ確認 中-1） =====
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+def test_short_sebastian_token_refuses_to_start(app_env, monkeypatch):
+    monkeypatch.delenv("SEBASTIAN_API_TOKEN", raising=False)
+    values = {k.lower(): v for k, v in TEST_ENV.items()}
+    values.update(app_env=app_env, sebastian_api_token="x" * 31)
+    if app_env == "production":
+        values.update(gas_internal_url="https://script.google.com/macros/s/AKfycbPRODinternal/exec")
+    with pytest.raises(ValidationError):
+        config.Settings(_env_file=None, **values)  # type: ignore[call-arg]
+    values["sebastian_api_token"] = "x" * 32
+    assert config.Settings(_env_file=None, **values).sebastian_api_token == "x" * 32  # type: ignore[call-arg]
+
+
+def test_sebastian_token_must_differ_from_gas_internal_token():
+    with pytest.raises(ValidationError, match="同じ値"):
+        make_settings(sebastian_api_token=TEST_ENV["GAS_INTERNAL_TOKEN"])

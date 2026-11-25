@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hmac
 import re
 from functools import lru_cache
 from typing import Literal
@@ -113,8 +114,9 @@ class Settings(BaseSettings):
     gas_internal_token: str = Field(min_length=32)
     gas_call_timeout_seconds: float = Field(default=330, gt=0, le=600)
 
-    # Sebastian の入口（実装仕様 4-4）
-    sebastian_api_token: str = Field(min_length=1)
+    # Sebastian の入口（実装仕様 4-4）。社外から認証なしで届く入口なので 32 字以上を必須にする
+    # （本番・ステージングとも。GAS の内部用の token と同じ値は拒む。セキュリティ確認 中-1）
+    sebastian_api_token: str = Field(min_length=32)
     sebastian_pdf_wait_seconds: float = Field(default=40, gt=0, le=300)
 
     # DB スプレッドシートの時間帯（IANA 名。シートの値と違えば行の反映を止める）
@@ -194,6 +196,8 @@ class Settings(BaseSettings):
         for email in self.bootstrap_admin_list:
             if not _EMAIL_RE.match(email):
                 raise ValueError("BOOTSTRAP_ADMINS にメールアドレスでない値があります")
+        if hmac.compare_digest(self.sebastian_api_token.encode(), self.gas_internal_token.encode()):
+            raise ValueError("SEBASTIAN_API_TOKEN と GAS_INTERNAL_TOKEN に同じ値を使わないでください")
         if not self.delegate_email.endswith("@" + self.allowed_domain):
             raise ValueError("DELEGATE_EMAIL は社内ドメインのアドレスにしてください")
 

@@ -11,7 +11,7 @@ from app.domain import gasjobs, sebastian
 from conftest import freeze_now
 from test_domain_helpers import add_request, add_wl, jobs_of, jst, wls
 
-TOKEN = "test-sebastian-token"
+TOKEN = "test-sebastian-token-0123456789abcdef0123"
 NOW = jst(2026, 11, 26, 19, 30, 15, 123)
 
 
@@ -202,3 +202,32 @@ def test_pdf_from_result_shapes():
     assert sebastian.pdf_from_result({"already": True, "pdfFileId": "X"}) == {"already": True, "pdfFileId": "X"}
     assert sebastian.pdf_from_result({"ok": True, "pdfFileId": "X", "pdfName": "n", "folderId": "f"}) == {
         "ok": True, "pdfFileId": "X", "pdfName": "n", "folderId": "f"}
+
+
+# ===== セキュリティ確認 中-1・正しさ 低-19 =====
+
+
+def test_unexpected_exception_does_not_leak_internal_text(client, db, monkeypatch):
+    add_request(db, "R1", request_type="holiday")
+
+    def boom(*a, **k):
+        raise RuntimeError('relation "work_logs" does not exist SELECT secret')
+
+    monkeypatch.setattr(sebastian.worklog, "core_holiday_start", boom)
+    res = call(client, "markHolidayStart", requestId="R1")
+    assert res == {"error": "internal error", "action": "markHolidayStart"}
+
+
+def test_exception_while_waiting_for_pdf_keeps_ok_true(client, db, monkeypatch):
+    add_request(db, "R1", status="approved", target=date(2026, 11, 26))
+
+    def boom(*a, **k):
+        raise RuntimeError("db connection lost")
+
+    monkeypatch.setattr(gasjobs, "wait_for_result", boom)
+    res = call(client, "completeOvertime", requestId="R1")
+    assert res["ok"] is True and res["status"] == "approved"
+    assert res["pdf"] == {"error": sebastian.PDF_WAIT_ERROR}
+    assert "db connection" not in json.dumps(res)
+    db.expire_all()
+    assert wls(db, "R1")  # WorkLogs は確定している

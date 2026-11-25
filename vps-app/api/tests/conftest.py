@@ -45,7 +45,7 @@ TEST_ENV = {
     "GAS_INTERNAL_URL": "https://script.google.com/macros/s/AKfycbTESTstagingInternal/exec",
     "GAS_INTERNAL_TOKEN": "test-gas-internal-token-0123456789abcdef",
     "GAS_CALL_TIMEOUT_SECONDS": "330",
-    "SEBASTIAN_API_TOKEN": "test-sebastian-token",
+    "SEBASTIAN_API_TOKEN": "test-sebastian-token-0123456789abcdef0123",
     "SEBASTIAN_PDF_WAIT_SECONDS": "40",
     "DB_SHEET_TIMEZONE": "Asia/Tokyo",
     "PORTAL_URL": "https://portal.example.lineworks-local.info/",

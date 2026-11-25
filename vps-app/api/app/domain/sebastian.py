@@ -33,6 +33,10 @@ from .jsdate import iso_utc_ms, js_truthy
 log = logging.getLogger(__name__)
 UPDATED_BY = "sebastian-agent"
 PDF_TIMEOUT_ERROR = "PDF作成の結果待ちが時間切れになりました（作成は続いています）"
+# 想定外の例外の返事（内部の例外の文は返さない。詳細はログだけ。セキュリティ確認 中-1）
+INTERNAL_ERROR = "internal error"
+# 確定の後に PDF の結果待ちで例外が出たときの pdf（保存は済んでいるので ok:true のまま返す。正しさ 低-19）
+PDF_WAIT_ERROR = "PDF作成の結果を確かめられませんでした（作成は続いている可能性があります）"
 
 
 def target_date_value(req: Request, settings: Settings) -> Any:
@@ -75,9 +79,15 @@ def pdf_from_result(result: dict | None) -> dict | None:
 
 
 def _wait_pdf(db: Session, job_id: int, settings: Settings) -> dict | None:
-    factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
-    result = gasjobs.wait_for_result(factory, job_id, settings.sebastian_pdf_wait_seconds)
-    return pdf_from_result(result)
+    """WorkLogs は確定済み。ここでの例外は外へ出さず pdf:{error} にする（{error, action} を返すと
+    Sebastian が再送して二重の完了になる恐れがある）。"""
+    try:
+        factory = sessionmaker(bind=db.get_bind(), expire_on_commit=False)
+        result = gasjobs.wait_for_result(factory, job_id, settings.sebastian_pdf_wait_seconds)
+        return pdf_from_result(result)
+    except Exception:  # noqa: BLE001 - 詳細はログだけ
+        log.exception("sebastian: waiting for pdf job %s failed", job_id)
+        return {"error": PDF_WAIT_ERROR}
 
 
 def _complete_overtime(db: Session, request_id: str, now: datetime, settings: Settings) -> dict:
@@ -156,7 +166,7 @@ def handle(db: Session, raw_body: bytes, settings: Settings | None = None) -> di
     except RpcError as exc:
         db.rollback()
         return {"error": exc.message, "action": action}
-    except Exception as exc:  # noqa: BLE001 - GAS と同じく {error, action}（詳細はログ）
+    except Exception:  # noqa: BLE001 - GAS と同じく {error, action}。内部の例外の文は返さない（詳細はログ）
         db.rollback()
         log.exception("sebastian %s failed", action)
-        return {"error": str(exc) or type(exc).__name__, "action": action}
+        return {"error": INTERNAL_ERROR, "action": action}
