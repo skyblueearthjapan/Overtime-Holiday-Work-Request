@@ -229,7 +229,16 @@ def write_tab(api: SheetsApi, sid: str, dst: str, data: list[list], meta: dict) 
     if col_count > cols:
         clear.append(f"{q}!{column_letter(cols)}1:{last_col}{rows}")
     if clear:
-        api.values_batch_clear(sid, clear, tab=dst, purpose="master_sync")
+        # 余りの行の消去も 3 回まで送り直す。だめならそのタブを失敗にする（呼ぶ側が ok:false にし、DB の表も
+        # 置き換えない。データ安全 低-3）
+        for attempt in range(READ_ATTEMPTS):
+            try:
+                api.values_batch_clear(sid, clear, tab=dst, purpose="master_sync")
+                break
+            except Exception:
+                if attempt + 1 >= READ_ATTEMPTS:
+                    raise
+                sleep(READ_WAIT_SECONDS)
 
 
 def sync_masters(db: Session, api: SheetsApi | None = None, app_settings: Any = None) -> dict:

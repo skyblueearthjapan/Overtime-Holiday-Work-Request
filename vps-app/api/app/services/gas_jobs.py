@@ -63,6 +63,7 @@ COMPLETE_SOURCES = ("screen", "admin", "sebastian")
 REGENERATE_REASONS = ("secondary", "edit", "admin")
 
 GAS_PING_KIND = "gas_ping"  # sync_runs.kind
+ORPHAN_PDF_KIND = "orphan_pdf"  # sync_runs.kind（記録しそこねた PDF の ID。管理者の欄に出す）
 GAS_PING_MAX_AGE = timedelta(minutes=10)
 GAS_PING_WAIT_SECONDS = 60.0
 SYNC_WAIT_SECONDS = 5.0
@@ -293,6 +294,11 @@ def record_pdf_result(db: Session, request_id: str, pdf: Mapping[str, Any], *,
         state = db.get(models.SheetSyncState, ("requests", request_id))
         if not req.pdf_file_id and not req.old_pdf_file_id_pending:
             req.old_pdf_file_id_pending = file_id
+        elif file_id not in (req.pdf_file_id, req.old_pdf_file_id_pending):
+            # どこにも残らない PDF（Drive に同じ申請の PDF が 2 つ）。管理者が見られるように残す（データ安全 低-5）
+            db.add(models.SyncRun(kind=ORPHAN_PDF_KIND, started_at=timeutil.now_utc(), finished_at=timeutil.now_utc(),
+                                  ok=False, summary_json={"requestId": request_id, "pdfFileId": file_id,
+                                                          "reason": "後の操作で PDF の列が変わり、捨てる候補も埋まっていた"}))
         sheet_queue.mark_dirty(db, "requests", request_id)
         if state is not None:
             _note_sheet_has(db, request_id, sheet_values)
@@ -518,6 +524,14 @@ def apply_response(ctx: JobContext, req: models.Request | None, resp: Mapping[st
     """GAS の返事を記録する。失敗でも PDF ができていれば先に記録してから上げる（7-1）。"""
     db = ctx.db
     resp = dict(resp)
+    if resp.get("idempotencyStored") is False:
+        # GAS が冪等の記録を残せなかった（スクリプトプロパティの上限など）。同じ jobId の送り直しが再生されず
+        # もう一度動く恐れがあるので、管理者の欄（exhausted と同じ一覧）に残す（データ安全 中-3 の VPS 側）
+        log.warning("GAS が冪等の記録を残せませんでした: job %s %s", ctx.job_id, ctx.kind)
+        db.add(models.SyncRun(kind=EXHAUSTED_KIND, started_at=timeutil.now_utc(), finished_at=timeutil.now_utc(),
+                              ok=False, summary_json={"jobId": ctx.job_id, "kind": ctx.kind,
+                                                      "requestId": ctx.request_id,
+                                                      "warning": "idempotencyStored:false（GAS の冪等の記録の失敗）"}))
     pdf = resp.get("pdf")
     if req is not None and isinstance(pdf, Mapping) and pdf_result_to_record(resp):
         merged = dict(pdf)

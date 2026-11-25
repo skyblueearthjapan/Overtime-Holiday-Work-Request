@@ -177,3 +177,38 @@ def test_ops_rebuild_ledger_refuses_while_rows_are_pending(db):
     with pytest.raises(RpcError) as e:
         ops.ops_rebuildLedger(ctx(db, email=ADMIN))
     assert "反映待ち" in e.value.message
+
+
+def test_stray_pdf_is_reported_when_pending_slot_is_taken(db, clock):
+    """データ安全 低-5: 捨てる候補が埋まっているときに記録しそこねた PDF は、管理者の欄（orphanPdfs）に残す。"""
+    from app import sheet_queue
+    from app.services import ops_status
+
+    add_request(db, "R1", pdf_file_id="OLD")
+    req = db.get(models.Request, "R1")
+    snapshot = gas_jobs.pdf_snapshot(req)
+    req.pdf_file_id, req.pdf_folder_id, req.pdf_generated_at = "", "", None
+    req.old_pdf_file_id_pending = "OLDER"
+    sheet_queue.mark_dirty(db, "requests", "R1")
+    db.commit()
+    assert not gas_jobs.record_pdf_result(db, "R1", {"pdfFileId": "STRAY"}, expected_current=snapshot)
+    db.commit()
+    db.refresh(req)
+    assert req.old_pdf_file_id_pending == "OLDER"
+    orphans = ops_status.get_ops_status(db)["orphanPdfs"]
+    assert orphans and orphans[0]["pdfFileId"] == "STRAY" and orphans[0]["requestId"] == "R1"
+
+
+def test_idempotency_not_stored_is_visible_to_admin(env, db, gas, clock):
+    """データ安全 中-3（VPS 側）: GAS が冪等の記録を残せなかったら管理者の欄に出す。"""
+    from app.services import ops_status
+
+    add_request(db, "R1", work_log_end="2026-11-25 19:00:00")
+    resp = gas.default("internal.afterApprove", "R1")
+    resp["idempotencyStored"] = False
+    gas.responses["internal.afterApprove"] = [resp]
+    with env() as s:
+        gas_jobs.enqueue_after_approve(s, "R1")
+        s.commit()
+    assert run(env, clock) == ["done"]
+    assert any("idempotencyStored" in str(e.get("warning", "")) for e in ops_status.get_ops_status(db)["exhausted"])

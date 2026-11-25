@@ -181,3 +181,30 @@ def test_compact_and_detect_last_col_like_gas():
     assert data == [["h1", "h2"], ["k", "v"]]
     assert master_sync.as_gas_reads("0042") == "42" and master_sync.as_gas_reads("2026-04-04") == "2026-04-04"
     assert master_sync.as_gas_reads(1.0) == "1"
+
+
+def test_clear_is_retried_and_failure_marks_tab_failed(db, settings, monkeypatch):
+    """データ安全 低-3: 余りの行の消去は 3 回まで。だめならそのタブは ok:false で、DB の表も置き換えない。"""
+    fake = make_fake()
+    api = fake.api(settings)
+    calls = {"n": 0}
+    real = api.values_batch_clear
+
+    def flaky(*a, **k):
+        calls["n"] += 1
+        if calls["n"] <= 2:
+            raise RuntimeError("503")
+        return real(*a, **k)
+
+    monkeypatch.setattr(api, "values_batch_clear", flaky)
+    result = master_sync.sync_masters(db, api=api, app_settings=settings)
+    assert result["tabs"]["作業員マスタ"]["ok"] is True and calls["n"] >= 3
+
+    fake2 = make_fake()
+    api2 = fake2.api(settings)
+    monkeypatch.setattr(api2, "values_batch_clear", lambda *a, **k: (_ for _ in ()).throw(RuntimeError("503")))
+    db.execute(Worker.__table__.delete())
+    db.commit()
+    result = master_sync.sync_masters(db, api=api2, app_settings=settings)
+    assert result["tabs"]["作業員マスタ"]["ok"] is False and "503" in result["tabs"]["作業員マスタ"]["skipped_reason"]
+    assert db.scalars(select(Worker)).all() == []
