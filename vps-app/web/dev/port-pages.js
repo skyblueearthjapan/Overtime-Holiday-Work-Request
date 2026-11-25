@@ -161,7 +161,7 @@ const PATCHES = {
       (h) => replaceExact(h,
         '      <div class="sub" style="margin-top:8px">※status=submitted のまま放置されている申請を検出。</div>\n    </div>\n',
         '      <div class="sub" style="margin-top:8px">※status=submitted のまま放置されている申請を検出。</div>\n    </div>\n' +
-          fs.readFileSync(path.join(ADD_DIR, 'admin-ops.html'), 'utf8').replace(/^\n/, '').replace(/\r\n/g, '\n'),
+          fs.readFileSync(path.join(ADD_DIR, 'admin-ops.html'), 'utf8').replace(/\r\n/g, '\n').replace(/^\n/, ''),
         1, 'admin ops panel')
     ],
     js: [
