@@ -1,0 +1,392 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>残業・休日出勤申請</title>
+  <style>
+    :root{
+      --bg1:#eaf6ff;
+      --bg2:#f7fffb;
+      --accent:#1f9d55;
+      --accent2:#0ea5e9;
+      --text:#0b2545;
+      --muted:#5c6b7a;
+      --card:#ffffffcc;
+      --line:#d7e7f5;
+      --danger:#ff5a5f;
+      --warn:#ffb020;
+    }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(1100px 600px at 18% 0%, var(--bg1), transparent),
+        radial-gradient(1100px 600px at 92% 20%, var(--bg2), transparent),
+        linear-gradient(180deg, #ffffff, #f3fbff);
+    }
+    header{
+      padding:18px 22px;
+      display:flex; align-items:flex-end; justify-content:space-between;
+      border-bottom:1px solid var(--line);
+      backdrop-filter: blur(8px);
+      position:sticky; top:0;
+      background: rgba(255,255,255,.55);
+      z-index: 10;
+    }
+    .title{ font-weight:900; letter-spacing:.06em; }
+    .sub{ opacity:.8; font-size:12px; color:var(--muted); }
+    .wrap{ padding:18px 22px; max-width:1060px; margin:0 auto; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:14px 14px;
+      box-shadow: 0 10px 30px rgba(10,40,80,.06);
+    }
+    .kpi{ font-size:22px; font-weight:900; }
+    .grid3{ display:grid; gap:12px; grid-template-columns: 1fr 1fr 1fr; }
+    .sectionTitle{
+      font-weight:900;
+      letter-spacing:.05em;
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:8px;
+    }
+    .section-count{
+      font-size:13px; font-weight:700; color:var(--accent2);
+      margin-left:8px;
+    }
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:13px;
+    }
+    th, td{
+      border-bottom:1px solid var(--line);
+      padding:10px 8px;
+      text-align:left;
+    }
+    th{
+      font-size:12px;
+      color:var(--muted);
+    }
+    button{
+      padding:10px 12px;
+      border-radius:12px;
+      border:0;
+      background:linear-gradient(135deg, var(--accent), #1bd67f);
+      color:#fff; font-weight:800;
+      cursor:pointer;
+      box-shadow: 0 10px 22px rgba(31,157,85,.20);
+    }
+    .ghost{
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--line);
+      box-shadow:none;
+    }
+    .btn-sm{ padding:6px 10px; font-size:12px; border-radius:8px; }
+    .btn-approve{
+      background:linear-gradient(135deg, var(--accent), #1bd67f);
+      box-shadow:0 6px 16px rgba(31,157,85,.20);
+    }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      display:inline-block;
+      color:var(--text);
+    }
+    .danger{ border-color:#ffb3b3; background:#fff0f0; color:#7a0b0b; }
+    .warn{ border-color:#ffd29e; background:#fff6eb; color:#7a4a0b; }
+    .ok{ border-color:#bfe9d0; background:#f0fff6; color:#0b5a2b; }
+    .info{ border-color:#b3d4ff; background:#f0f7ff; color:#0b2a5a; }
+    .muted{ color:var(--muted); }
+    a{ color:var(--accent2); text-decoration:none; }
+    a:hover{ text-decoration:underline; }
+    .nav-link{
+      font-size:13px; padding:6px 12px; border-radius:8px;
+      border:1px solid var(--line); background:#fff; color:var(--text);
+    }
+    .nav-link:hover{ background:var(--bg1); text-decoration:none; }
+    .portal-link{ background:var(--accent); color:#fff; border-color:var(--accent); }
+    .portal-link:hover{ background:#177a43; color:#fff; }
+    .loading{ text-align:center; padding:30px; color:var(--muted); }
+
+    /* ---- 月次セクション（折りたたみ） ---- */
+    .section-toggle{
+      cursor:pointer;
+      user-select:none;
+      display:flex; align-items:center; justify-content:space-between;
+      padding:12px 14px;
+    }
+    .section-toggle .arrow{
+      transition: transform .2s;
+      font-size:14px; color:var(--muted);
+    }
+    .section-toggle .arrow.open{ transform: rotate(90deg); }
+    .monthly-body{
+      display:none;
+      padding:0 14px 14px;
+    }
+    .monthly-body.open{ display:block; }
+    .approver-chart{ width:100%; height:260px; }
+    .chip{
+      border:1px solid var(--line);
+      background:#fff;
+      border-radius:999px;
+      padding:6px 10px;
+      display:inline-flex; gap:6px; align-items:center;
+      font-size:12px;
+      cursor:pointer;
+      user-select:none;
+    }
+    .chip input{ transform: scale(1.1); }
+    .monthly-filters{
+      display:flex; gap:8px; flex-wrap:wrap; align-items:center;
+      margin-bottom:10px;
+    }
+    .monthly-filters input[type="text"],
+    .monthly-filters input[type="month"]{
+      padding:8px 10px;
+      border-radius:10px;
+      border:1px solid var(--line);
+      background:#fff;
+      font-size:13px;
+    }
+    .mini-kpi-row{
+      display:grid; gap:10px; grid-template-columns: 1fr 1fr 1fr;
+      margin-bottom:10px;
+    }
+    .mini-kpi{
+      background:#f8fbff;
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px 12px;
+      text-align:center;
+    }
+    .mini-kpi .val{ font-size:20px; font-weight:900; }
+    #tblApproverMonthly th,
+    #tblApproverWatch th{
+      cursor:pointer;
+    }
+
+    @media (max-width:640px){
+      header{ flex-direction:column; align-items:flex-start; gap:8px; }
+      .wrap{ padding:12px 10px; }
+      .grid3{ grid-template-columns:1fr; }
+      .row{ flex-direction:column; align-items:stretch; }
+      table{ font-size:12px; }
+      th, td{ padding:8px 4px; }
+      .monthly-filters{ flex-direction:column; align-items:stretch; }
+      .mini-kpi-row{ grid-template-columns:1fr; }
+    }
+  </style>
+<link rel="stylesheet" href="/static/css/mobile.css">
+</head>
+<body data-page="approver">
+  <header>
+    <div>
+      <div class="title">承認者画面</div>
+      <div class="sub" id="approverSub">読込中...</div>
+    </div>
+    <div class="row">
+      <a href="{{ APP_URL }}?page=top" target="_top" class="nav-link">トップへ</a>
+      <a href="{{ APP_URL }}?page=admin" target="_top" class="nav-link">総務部画面</a>
+      <a href="{{ PORTAL_URL }}" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
+      <button class="ghost btn-sm" id="btnChangeDept" data-on-click="showApproverModal" style="display:none;">承認者変更</button>
+    </div>
+  </header>
+
+  <div class="wrap">
+
+    <!-- KPI -->
+    <div class="grid3" style="margin-bottom:12px">
+      <div class="card">
+        <div class="sub">申請件数（残業+休日）</div>
+        <div class="kpi" id="kpiTotal">-</div>
+      </div>
+      <div class="card">
+        <div class="sub">未承認</div>
+        <div class="kpi" id="kpiPending" style="color:var(--warn)">-</div>
+      </div>
+      <div class="card">
+        <div class="sub">承認済</div>
+        <div class="kpi" id="kpiApproved" style="color:var(--accent)">-</div>
+      </div>
+    </div>
+
+    <!-- 残業セクション -->
+    <div class="card" style="margin-bottom:12px;">
+      <div class="sectionTitle">
+        <div>
+          残業申請（本日分＋未承認）（<span id="todayDate">-</span>）
+          <span class="section-count" id="otCount"></span>
+        </div>
+        <div class="row" style="gap:6px;">
+          <button class="ghost btn-sm" id="btnApproveAll-overtime" data-on-click="approveAllInTable" data-args='["overtime"]'>残業 全件承認</button>
+          <button class="ghost btn-sm" data-on-click="loadDashboard">更新</button>
+        </div>
+      </div>
+      <table id="tblOvertime">
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>部署</th>
+            <th>氏名</th>
+            <th>承認</th>
+            <th>予定時間</th>
+            <th>提出</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="7" class="loading">読込中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 休日セクション -->
+    <div class="card">
+      <div class="sectionTitle">
+        <div>
+          休日出勤申請（未承認＋当日承認済み）
+          <span class="section-count" id="hdCount"></span>
+        </div>
+        <button class="ghost btn-sm" id="btnApproveAll-holiday" data-on-click="approveAllInTable" data-args='["holiday"]'>休日 全件承認</button>
+      </div>
+      <table id="tblHoliday">
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>部署</th>
+            <th>氏名</th>
+            <th>承認</th>
+            <th>予定時間</th>
+            <th>提出</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="7" class="loading">読込中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 月次サマリー（折りたたみ） -->
+    <div class="card" style="margin-top:12px;">
+      <div class="section-toggle" data-on-click="toggleMonthly">
+        <div style="font-weight:900; letter-spacing:.05em;">
+          月次：個人別サマリー
+          <span class="sub" style="margin-left:8px;">実績・予測・40h/60h監視</span>
+        </div>
+        <span class="arrow" id="monthlyArrow">&#9654;</span>
+      </div>
+
+      <div class="monthly-body" id="monthlyBody">
+        <!-- フィルタ行 -->
+        <div class="monthly-filters">
+          <input type="month" id="approverYm" />
+          <input type="text" id="approverQ" placeholder="氏名検索" style="min-width:120px;" data-on-input="onApproverFilterChange">
+          <label class="chip"><input type="checkbox" id="afOver40" data-on-change="onApproverFilterChange"> 40h超</label>
+          <label class="chip"><input type="checkbox" id="afOver60" data-on-change="onApproverFilterChange"> 60h超</label>
+          <label class="chip"><input type="checkbox" id="afProj40" data-on-change="onApproverFilterChange"> 予測40h超</label>
+          <label class="chip"><input type="checkbox" id="afPdfMiss" data-on-change="onApproverFilterChange"> PDF未作成</label>
+          <button class="ghost btn-sm" data-on-click="loadApproverMonthly">更新</button>
+        </div>
+
+        <!-- ミニKPI -->
+        <div class="mini-kpi-row">
+          <div class="mini-kpi">
+            <div class="sub">対象人数</div>
+            <div class="val" id="mkpiPeople">-</div>
+          </div>
+          <div class="mini-kpi">
+            <div class="sub">40h超（実績/予測）</div>
+            <div class="val" id="mkpi40">-</div>
+          </div>
+          <div class="mini-kpi">
+            <div class="sub">PDF未作成</div>
+            <div class="val" id="mkpiPdf" style="color:var(--warn);">-</div>
+          </div>
+        </div>
+
+        <!-- バーチャート -->
+        <div style="margin-bottom:10px;">
+          <canvas id="cApproverPeople" class="approver-chart"></canvas>
+          <div class="sub" id="approverChartInfo"></div>
+        </div>
+
+        <!-- 月次テーブル -->
+        <div style="margin-bottom:10px;">
+          <div class="sectionTitle">
+            <div>個人別一覧</div>
+            <div class="sub">列見出しクリックで並び替え</div>
+          </div>
+          <table id="tblApproverMonthly">
+            <thead>
+              <tr>
+                <th data-k="workerName">氏名</th>
+                <th data-k="totalNet">合算(分)</th>
+                <th data-k="totalNetH">合算</th>
+                <th data-k="overtimeNet">残業</th>
+                <th data-k="holidayNet">休日</th>
+                <th data-k="remain40">40残</th>
+                <th data-k="projectedTotal">予測</th>
+                <th data-k="pdfMissing">PDF</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+
+        <!-- 注意対象テーブル -->
+        <div>
+          <div class="sectionTitle">
+            <div>注意対象</div>
+            <div class="sub">30h超 or 予測40h超</div>
+          </div>
+          <table id="tblApproverWatch">
+            <thead>
+              <tr>
+                <th>氏名</th>
+                <th>実績</th>
+                <th>予測</th>
+                <th>40残</th>
+                <th>60残</th>
+                <th>PDF</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+<!-- 承認者選択モーダル（管理者用） -->
+<div id="deptModalWrap" style="display:none;">
+  <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:100;"></div>
+  <div class="card" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:101; max-width:400px; width:90%; padding:24px; text-align:center;">
+    <div style="font-weight:900; font-size:18px; margin-bottom:4px;" id="modalTitle">承認者を選択</div>
+    <div class="sub" style="margin-bottom:18px;" id="modalSub">表示する承認者を選んでください</div>
+    <div id="deptModalBody">
+      <div class="loading">承認者情報を確認中...</div>
+    </div>
+    <div style="margin-top:16px;padding-top:12px;border-top:1px solid #e5e7eb;">
+      <a href="{{ APP_URL }}?page=top" target="_top" style="display:inline-block;padding:8px 20px;border-radius:8px;border:1px solid #d1d5db;background:#fff;color:#333;font-size:13px;font-weight:700;text-decoration:none;">申請TOPへ戻る</a>
+    </div>
+  </div>
+</div>
+
+<script type="application/json" id="gas-template-data">{{ data_json|safe }}</script>
+<script src="/static/js/gas-shim.js"></script>
+<script src="/static/js/approver.js"></script>
+</body>
+</html>

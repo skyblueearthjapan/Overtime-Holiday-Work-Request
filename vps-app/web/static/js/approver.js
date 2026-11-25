@@ -1,0 +1,813 @@
+/* approver.js — GAS 版 src/approver.html の <script> をそのまま写したもの（仕様 3-6）。
+ * vps-app/web/dev/port-pages.js が作る。手で直さない。 */
+var ALL_ITEMS = [];
+var SELECTED_DEPTS = [];    // 複数部署（配列）
+var SELECTED_APPROVER_NAME = '';  // 表示中の承認者名
+var APPROVER_DATA = null;   // api_getApproverDepts の結果キャッシュ
+
+function fmtMin(min){
+  min = Math.max(0, Math.round(Number(min||0)));
+  var h = Math.floor(min/60), r = min % 60;
+  if(h===0) return r+'分';
+  if(r===0) return h+'時間';
+  return h+'時間'+r+'分';
+}
+
+function z(n){ return String(n).padStart(2,'0'); }
+
+function escHtml(s){
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+// ====== 初期ロード ======
+initApprover();
+
+function initApprover(){
+  SELECTED_DEPTS = [];
+  SELECTED_APPROVER_NAME = '';
+  document.getElementById('btnChangeDept').style.display = 'none';
+  document.getElementById('deptModalWrap').style.display = 'block';
+  document.getElementById('deptModalBody').innerHTML = '<div class="loading">承認者情報を確認中...</div>';
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      APPROVER_DATA = res;
+      var body = document.getElementById('deptModalBody');
+      body.innerHTML = '';
+
+      if(!res || !res.approvers || res.approvers.length === 0){
+        body.innerHTML = '<div class="muted" style="padding:16px;">承認可能な部署がありません。</div>';
+        return;
+      }
+
+      if(!res.isAdmin){
+        // 一般承認者: モーダルスキップ → 自動的に全担当部署を表示
+        var me = null;
+        for(var i=0; i<res.approvers.length; i++){
+          if(res.approvers[i].email === res.currentEmail){
+            me = res.approvers[i]; break;
+          }
+        }
+        if(me){
+          selectApprover(me.name, me.depts);
+          return;
+        }
+        // フォールバック：最初のプロファイル
+        selectApprover(res.approvers[0].name, res.approvers[0].depts);
+        return;
+      }
+
+      // 管理者: 承認者名ボタン群 + 「全部署」ボタン
+      document.getElementById('modalTitle').innerText = '承認者を選択';
+      document.getElementById('modalSub').innerText = '表示する承認者を選んでください';
+
+      // 「全部署」ボタン
+      var allBtn = document.createElement('button');
+      allBtn.className = 'ghost';
+      allBtn.style.cssText = 'width:100%; margin-bottom:12px; text-align:center; padding:12px 16px; font-size:14px; font-weight:900; border:2px solid var(--accent2); color:var(--accent2);';
+      allBtn.innerText = '全部署（一括表示）';
+      allBtn.onclick = function(){
+        var allDepts = [];
+        var deptSet = {};
+        for(var i=0; i<res.approvers.length; i++){
+          for(var j=0; j<res.approvers[i].depts.length; j++){
+            var d = res.approvers[i].depts[j];
+            if(!deptSet[d]){ allDepts.push(d); deptSet[d] = true; }
+          }
+        }
+        selectApprover('全部署', allDepts);
+      };
+      body.appendChild(allBtn);
+
+      // 承認者ごとのボタン
+      res.approvers.forEach(function(ap){
+        var btn = document.createElement('button');
+        btn.className = 'ghost';
+        btn.style.cssText = 'width:100%; margin-bottom:8px; text-align:left; padding:12px 16px; font-size:14px;';
+        btn.innerHTML = '<b>' + escHtml(ap.name) + '</b> <span class="sub" style="margin-left:8px;">' + escHtml(ap.depts.join(', ')) + '</span>';
+        btn.onclick = function(){ selectApprover(ap.name, ap.depts); };
+        body.appendChild(btn);
+      });
+
+      var note = document.createElement('div');
+      note.className = 'sub';
+      note.style.marginTop = '8px';
+      note.innerText = '管理者: 承認者を選択するか、全部署を一括表示できます';
+      body.appendChild(note);
+    })
+    .withFailureHandler(function(err){
+      document.getElementById('deptModalBody').innerHTML =
+        '<div class="muted" style="padding:16px;">エラー: ' + escHtml(err.message || err) + '</div>';
+    })
+    .api_getApproverDepts();
+}
+
+function showApproverModal(){
+  // 管理者用: 承認者選択モーダルを再表示
+  if(APPROVER_DATA && APPROVER_DATA.isAdmin){
+    document.getElementById('deptModalWrap').style.display = 'block';
+    // モーダル内容は既にキャッシュされているので再構築
+    initApprover();
+  } else {
+    initApprover();
+  }
+}
+
+function selectApprover(name, depts){
+  SELECTED_DEPTS = depts;
+  SELECTED_APPROVER_NAME = name;
+  // 月次セクションのステートをリセット
+  MONTHLY_STATE.data = null;
+  MONTHLY_STATE.loaded = false;
+  var body = document.getElementById('monthlyBody');
+  if(body) body.classList.remove('open');
+  var arrow = document.getElementById('monthlyArrow');
+  if(arrow) arrow.classList.remove('open');
+  closeDeptModal();
+  loadDashboard();
+}
+
+function closeDeptModal(){
+  document.getElementById('deptModalWrap').style.display = 'none';
+  document.getElementById('btnChangeDept').style.display = '';
+  // 一般承認者は「承認者変更」ボタンを隠す
+  if(APPROVER_DATA && !APPROVER_DATA.isAdmin){
+    document.getElementById('btnChangeDept').style.display = 'none';
+  }
+}
+
+function loadDashboard(){
+  if(!SELECTED_DEPTS || SELECTED_DEPTS.length === 0){
+    initApprover();
+    return;
+  }
+
+  var otTb = document.querySelector('#tblOvertime tbody');
+  var hdTb = document.querySelector('#tblHoliday tbody');
+  otTb.innerHTML = '<tr><td colspan="7" class="loading">読込中...</td></tr>';
+  hdTb.innerHTML = '<tr><td colspan="7" class="loading">読込中...</td></tr>';
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      console.log('api_getApproverDashboard 結果:', JSON.stringify(res));
+      if(!res){
+        document.getElementById('approverSub').innerText = 'サーバーからnullが返されました';
+        otTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">データを取得できませんでした（res=null）。デプロイ済みか確認してください。</td></tr>';
+        hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">デプロイの「新しいデプロイ」ではなく既存デプロイの更新が必要です</td></tr>';
+        return;
+      }
+
+      // サーバー側でキャッチしたエラーを表示
+      if(res.error){
+        document.getElementById('approverSub').innerText = 'サーバーエラー';
+        otTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">サーバーエラー: ' + escHtml(res.error) + '</td></tr>';
+        hdTb.innerHTML = '<tr><td colspan="7"></td></tr>';
+        return;
+      }
+
+      // サブヘッダー: "田中太郎 の担当（製造1課, 品質管理課）"
+      var deptsLabel = (res.selectedDepts || SELECTED_DEPTS).join(', ');
+      document.getElementById('approverSub').innerText =
+        SELECTED_APPROVER_NAME + ' の担当（' + deptsLabel + '）' +
+        (res.isAdmin ? '  [管理者]' : '');
+
+      ALL_ITEMS = (res.overtime || []).concat(res.holiday || []);
+      renderDashboard(res);
+    })
+    .withFailureHandler(function(err){
+      console.error('api_getApproverDashboard 失敗:', err);
+      document.getElementById('approverSub').innerText = 'API呼出失敗';
+      otTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">API失敗: ' + escHtml(err.message || err) + '</td></tr>';
+      hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">GASエディタのログ（実行数）も確認してください</td></tr>';
+    })
+    .api_getApproverDashboard(SELECTED_DEPTS);
+}
+
+function renderDashboard(res){
+  document.getElementById('todayDate').innerText = res.today;
+
+  // KPI
+  var allItems = (res.overtime || []).concat(res.holiday || []);
+  var submitted = 0, approved = 0;
+  allItems.forEach(function(it){
+    if(it.status === 'submitted') submitted++;
+    if(it.status === 'approved') approved++;
+  });
+  document.getElementById('kpiTotal').innerText = allItems.length;
+  document.getElementById('kpiPending').innerText = submitted;
+  document.getElementById('kpiApproved').innerText = approved;
+
+  // 残業テーブル
+  var otTb = document.querySelector('#tblOvertime tbody');
+  otTb.innerHTML = '';
+  document.getElementById('otCount').innerText = (res.overtime || []).length + '名';
+
+  if(!res.overtime || res.overtime.length === 0){
+    otTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">本日分・未承認の残業申請はありません</td></tr>';
+  } else {
+    res.overtime.forEach(function(it){ otTb.appendChild(buildOvertimeRow(it)); });
+  }
+
+  // 休日テーブル
+  var hdTb = document.querySelector('#tblHoliday tbody');
+  hdTb.innerHTML = '';
+  document.getElementById('hdCount').innerText = (res.holiday || []).length + '名';
+
+  if(!res.holiday || res.holiday.length === 0){
+    hdTb.innerHTML = '<tr><td colspan="7" class="muted" style="text-align:center;padding:24px">休日出勤申請はありません</td></tr>';
+  } else {
+    res.holiday.forEach(function(it){ hdTb.appendChild(buildHolidayRow(it)); });
+  }
+}
+
+// 過去申請バッジHTML生成（approver/admin共用の軽量版）
+function buildRetroactiveBadge_(it){
+  if(!it || it.isRetroactive !== true) return '';
+  var days = (typeof it.daysAgo === 'number' && it.daysAgo >= 0) ? it.daysAgo : null;
+  var daysLabel = (days !== null) ? ' <span style="color:#7a1b1b;font-size:10px;font-weight:700;">(' + days + '日前)</span>' : '';
+  return ' <span class="pill" style="background:#ffe5e5;color:#b91c1c;border:1px solid #fca5a5;font-size:11px;font-weight:800;">&#128281; 過去申請</span>' + daysLabel;
+}
+
+function buildOvertimeRow(it){
+  var statusPill = it.status === 'submitted'
+    ? '<span class="pill warn">未承認</span>'
+    : (it.status === 'canceled' ? '<span class="pill danger">却下</span>' : '<span class="pill ok">承認済</span>');
+
+  var submittedTime = fmtTime(it.submittedAt);
+  var actionCell = buildActionCell(it);
+
+  var nameCell = '<b>' + escHtml(it.workerName) + '</b>';
+  if(it.isOverdue){
+    nameCell += ' <span style="color:var(--danger);font-size:11px;font-weight:700;">&#9888; 未処理</span>';
+  }
+  // 過去申請バッジ
+  nameCell += buildRetroactiveBadge_(it);
+
+  var tr = document.createElement('tr');
+  tr.setAttribute('data-request-id', it.requestId);
+  if(it.isOverdue){
+    tr.style.background = 'rgba(255,90,95,0.06)';
+  }
+  // 過去申請は薄い黄色でハイライト（未処理ハイライトより優先）
+  if(it.isRetroactive === true){
+    tr.style.background = 'rgba(255,235,150,0.35)';
+  }
+  tr.innerHTML =
+    '<td>' + buildTargetDateCell_(it) + '</td>' +
+    '<td>' + escHtml(it.dept) + '</td>' +
+    '<td>' + nameCell + '</td>' +
+    '<td>' + statusPill + '</td>' +
+    '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
+    '<td>' + submittedTime + '</td>' +
+    '<td>' + actionCell + '</td>';
+  return tr;
+}
+
+// 対象日セル（未処理の過去日は赤字＋⚠で強調）
+function buildTargetDateCell_(it){
+  var label = escHtml(it.targetDateLabel || it.targetDate || '');
+  if(it.isOverdue){
+    return '<span style="color:var(--danger);font-weight:700;white-space:nowrap;">&#9888; ' + label + '</span>';
+  }
+  return '<span style="white-space:nowrap;">' + label + '</span>';
+}
+
+// 承認・却下後に「承認漏れ」表示（日付の赤字⚠・氏名横の⚠未処理）を外す
+function clearOverdueMarks_(requestId, cells){
+  for(var i = 0; i < ALL_ITEMS.length; i++){
+    var it = ALL_ITEMS[i];
+    if(it.requestId !== requestId) continue;
+    if(!it.isOverdue) return;
+    it.isOverdue = false;
+    cells[0].innerHTML = buildTargetDateCell_(it);
+    var warn = cells[2].querySelector('span[style*="--danger"]');
+    if(warn) warn.remove();
+    return;
+  }
+}
+
+// 確認ダイアログ用の申請説明（例: 「11/5(水) 残業 製造1課 山田太郎」）
+function describeItem_(requestId){
+  for(var i = 0; i < ALL_ITEMS.length; i++){
+    var it = ALL_ITEMS[i];
+    if(it.requestId === requestId){
+      var typeJa = it.requestType === 'holiday' ? '休日出勤' : '残業';
+      return (it.targetDateLabel || it.targetDate || '') + ' ' + typeJa + '\n' +
+        (it.dept || '') + ' ' + (it.workerName || '') + '（予定 ' + fmtMin(it.approvedMinutes) + '）';
+    }
+  }
+  return '';
+}
+
+function buildHolidayRow(it){
+  var statusPill = it.status === 'submitted'
+    ? '<span class="pill warn">未承認</span>'
+    : (it.status === 'canceled' ? '<span class="pill danger">却下</span>' : '<span class="pill ok">承認済</span>');
+
+  var submittedTime = fmtTime(it.submittedAt);
+  var actionCell = buildActionCell(it);
+
+  var nameCell = '<b>' + escHtml(it.workerName) + '</b>';
+  if(it.isOverdue){
+    nameCell += ' <span style="color:var(--danger);font-size:11px;font-weight:700;">&#9888; 未処理</span>';
+  }
+  // 過去申請バッジ
+  nameCell += buildRetroactiveBadge_(it);
+
+  var tr = document.createElement('tr');
+  tr.setAttribute('data-request-id', it.requestId);
+  if(it.isOverdue){
+    tr.style.background = 'rgba(255,90,95,0.06)';
+  }
+  if(it.isRetroactive === true){
+    tr.style.background = 'rgba(255,235,150,0.35)';
+  }
+  tr.innerHTML =
+    '<td>' + buildTargetDateCell_(it) + '</td>' +
+    '<td>' + escHtml(it.dept) + '</td>' +
+    '<td>' + nameCell + '</td>' +
+    '<td>' + statusPill + '</td>' +
+    '<td>' + fmtMin(it.approvedMinutes) + '</td>' +
+    '<td>' + submittedTime + '</td>' +
+    '<td>' + actionCell + '</td>';
+  return tr;
+}
+
+// 提出日時: 当日なら 'HH:mm'、別の日なら 'M/D HH:mm'
+// サーバーは 'yyyy-MM-dd HH:mm:ss' で返す。Safari は空白区切りを解釈できないため文字列から直接取り出す。
+function fmtTime(val){
+  if(!val) return '';
+  var m = /^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})[ T](\d{1,2}):(\d{2})/.exec(String(val));
+  if(!m) return '';
+  var hm = z(m[4]) + ':' + m[5];
+  var today = document.getElementById('todayDate').innerText;  // 'yyyy-MM-dd'
+  if(today === m[1] + '-' + z(m[2]) + '-' + z(m[3])) return hm;
+  return Number(m[2]) + '/' + Number(m[3]) + ' ' + hm;
+}
+
+function buildActionCell(it){
+  if(it.status === 'submitted'){
+    return '<button class="btn-approve btn-sm" ' +
+      'data-on-click="doApprove" data-args="' + __vpsArgs(it.requestId, '$this') + '">承認</button>' +
+      ' <button class="btn-sm" style="background:linear-gradient(135deg,var(--danger),#ff8a8e);" ' +
+      'data-on-click="doReject" data-args="' + __vpsArgs(it.requestId, '$this') + '">却下</button>';
+  }
+  if(it.status === 'canceled'){
+    return '<span class="pill danger">却下済</span>';
+  }
+  return '<span class="muted">承認済</span>';
+}
+
+function updateRowToApproved(requestId) {
+  var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
+  if (!row) return;
+  var cells = row.querySelectorAll('td');
+  // 残業・休日とも列順は 日付/部署/氏名/承認/予定時間/提出/操作
+  var statusIdx = 3;
+  var actionIdx = 6;
+
+  cells[statusIdx].innerHTML = '<span class="pill ok">承認済</span>';
+  cells[actionIdx].innerHTML = '<span class="muted">承認済</span>';
+  clearOverdueMarks_(requestId, cells);
+
+  // 視覚フィードバック（緑フラッシュ）
+  row.style.transition = 'background 0.4s';
+  row.style.background = 'rgba(31,157,85,0.08)';
+  setTimeout(function(){ row.style.background = ''; }, 1200);
+
+  // ALL_ITEMS の状態も更新
+  for (var i = 0; i < ALL_ITEMS.length; i++) {
+    if (ALL_ITEMS[i].requestId === requestId) {
+      ALL_ITEMS[i].status = 'approved';
+      break;
+    }
+  }
+  updateKpiCounters();
+}
+
+function updateKpiCounters() {
+  var submitted = 0, approved = 0, canceled = 0;
+  ALL_ITEMS.forEach(function(it) {
+    if (it.status === 'submitted' || it.status === 'modified') submitted++;
+    if (it.status === 'approved') approved++;
+    if (it.status === 'canceled') canceled++;
+  });
+  document.getElementById('kpiTotal').innerText = ALL_ITEMS.length;
+  document.getElementById('kpiPending').innerText = submitted;
+  document.getElementById('kpiApproved').innerText = approved;
+}
+
+// ====== 承認実行 ======
+function doApprove(requestId, btn){
+  if(!confirm('この申請を承認しますか？\n\n' + describeItem_(requestId))) return;
+  btn.disabled = true;
+  btn.textContent = '承認中…';
+  updateRowToApproved(requestId);  // 即時反映
+
+  google.script.run
+    .withSuccessHandler(function(){
+      btn.textContent = '承認済';
+    })
+    .withFailureHandler(function(err){
+      alert('エラー: ' + (err.message || err));
+      loadDashboard();  // 失敗時のみ全件リロードで復元
+    })
+    .api_approveRequest(requestId);
+}
+
+// ====== 却下実行 ======
+function doReject(requestId, btn){
+  if(!confirm('この申請を却下しますか？\n\n' + describeItem_(requestId))) return;
+  btn.disabled = true;
+  // 即時反映: 行をcanceled表示に
+  updateRowToRejected(requestId);
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      if(!res || !res.ok){
+        alert('エラー: ' + ((res && res.message) || '不明'));
+        loadDashboard();
+      }
+    })
+    .withFailureHandler(function(err){
+      alert('却下エラー: ' + (err.message || err));
+      loadDashboard();
+    })
+    .api_rejectRequest(requestId);
+}
+
+function updateRowToRejected(requestId) {
+  var row = document.querySelector('tr[data-request-id="' + requestId + '"]');
+  if (!row) return;
+  var cells = row.querySelectorAll('td');
+  // 残業・休日とも列順は 日付/部署/氏名/承認/予定時間/提出/操作
+  var statusIdx = 3;
+  var actionIdx = 6;
+
+  cells[statusIdx].innerHTML = '<span class="pill danger">却下</span>';
+  cells[actionIdx].innerHTML = '<span class="pill danger">却下済</span>';
+  clearOverdueMarks_(requestId, cells);
+
+  row.style.transition = 'background 0.4s';
+  row.style.background = 'rgba(255,90,95,0.08)';
+  setTimeout(function(){ row.style.background = ''; }, 1200);
+
+  for (var i = 0; i < ALL_ITEMS.length; i++) {
+    if (ALL_ITEMS[i].requestId === requestId) {
+      ALL_ITEMS[i].status = 'canceled';
+      break;
+    }
+  }
+  updateKpiCounters();
+}
+
+// ====== 全件一括承認（残業 or 休日） ======
+function approveAllInTable(type){
+  var pending = ALL_ITEMS.filter(function(it){
+    return it.status === 'submitted' && it.requestType === type;
+  });
+  if(pending.length === 0){ alert('未承認の申請はありません。'); return; }
+  var label = type === 'overtime' ? '残業' : '休日出勤';
+  // 対象日ごとの件数を添える（過去日の承認漏れが混じっていても気づけるように）
+  var byDate = {}, dateOrder = [];
+  pending.forEach(function(it){
+    var k = it.targetDateLabel || it.targetDate || '';
+    if(!(k in byDate)){ byDate[k] = 0; dateOrder.push(k); }
+    byDate[k]++;
+  });
+  var dateLines = dateOrder.map(function(k){ return '・' + k + '：' + byDate[k] + '件'; }).join('\n');
+  var overdueCount = pending.filter(function(it){ return it.isOverdue; }).length;
+  var overdueNote = overdueCount > 0 ? '\n※うち ' + overdueCount + '件は過去日の承認漏れです。' : '';
+  if(!confirm(label + ' ' + pending.length + '件を一括承認しますか？\n\n' + dateLines + overdueNote +
+    '\n\n（完了済みの申請がある場合、PDF生成に時間がかかることがあります）')) return;
+
+  // 即時: 全行を承認済みに更新
+  var requestIds = [];
+  pending.forEach(function(it){
+    requestIds.push(it.requestId);
+    updateRowToApproved(it.requestId);
+  });
+
+  // ローディング表示
+  var batchBtn = document.getElementById('btnApproveAll-' + type);
+  if (batchBtn) { batchBtn.disabled = true; batchBtn.textContent = '承認処理中…'; }
+
+  // 1回のAPI呼出しで一括承認
+  google.script.run
+    .withSuccessHandler(function(res){
+      if (batchBtn) { batchBtn.textContent = '一括承認完了'; }
+      var errors = [];
+      if(res && res.results){
+        res.results.forEach(function(r){
+          if(!r.ok) errors.push(r.requestId + ': ' + (r.error || '不明'));
+        });
+      }
+      if(errors.length > 0){
+        alert('一括承認完了（エラー' + errors.length + '件）\n' + errors.join('\n'));
+        loadDashboard();
+      }
+    })
+    .withFailureHandler(function(err){
+      if (batchBtn) { batchBtn.disabled = false; batchBtn.textContent = '一括承認'; }
+      alert('一括承認エラー: ' + (err.message || err));
+      loadDashboard();
+    })
+    .api_approveRequestsBatch(requestIds);
+}
+
+// ====== 月次サマリー ======
+var MONTHLY_STATE = {
+  data: null,
+  loaded: false,
+  sortKey: 'totalNet',
+  sortDir: 'desc',
+  visiblePeople: []
+};
+
+// 月選択の初期値
+(function(){
+  var d = new Date();
+  var ym = d.getFullYear() + '-' + z(d.getMonth()+1);
+  var el = document.getElementById('approverYm');
+  if(el) el.value = ym;
+})();
+
+function toggleMonthly(){
+  var body = document.getElementById('monthlyBody');
+  var arrow = document.getElementById('monthlyArrow');
+  var isOpen = body.classList.contains('open');
+
+  if(isOpen){
+    body.classList.remove('open');
+    arrow.classList.remove('open');
+  } else {
+    body.classList.add('open');
+    arrow.classList.add('open');
+    // 初回展開時に自動ロード
+    if(!MONTHLY_STATE.loaded && SELECTED_DEPTS.length > 0){
+      loadApproverMonthly();
+    }
+  }
+}
+
+function loadApproverMonthly(){
+  if(!SELECTED_DEPTS || SELECTED_DEPTS.length === 0) return;
+  var ym = document.getElementById('approverYm').value;
+  if(!ym) return;
+
+  // ローディング表示
+  var tb = document.querySelector('#tblApproverMonthly tbody');
+  tb.innerHTML = '<tr><td colspan="8" class="loading">読込中...</td></tr>';
+  var wb = document.querySelector('#tblApproverWatch tbody');
+  wb.innerHTML = '<tr><td colspan="6" class="loading">読込中...</td></tr>';
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      MONTHLY_STATE.data = res;
+      MONTHLY_STATE.loaded = true;
+      renderApproverMonthly();
+    })
+    .withFailureHandler(function(err){
+      alert('月次サマリー取得エラー: ' + (err.message || err));
+      tb.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px;">エラー: ' + escHtml(err.message || err) + '</td></tr>';
+      wb.innerHTML = '';
+    })
+    .api_approverMonthlySummary(ym, SELECTED_DEPTS);
+}
+
+function applyApproverFilters(people){
+  var q = (document.getElementById('approverQ').value || '').trim();
+  var fOver40 = document.getElementById('afOver40').checked;
+  var fOver60 = document.getElementById('afOver60').checked;
+  var fProj40 = document.getElementById('afProj40').checked;
+  var fPdfMiss = document.getElementById('afPdfMiss').checked;
+
+  var out = people.slice();
+  if(q) out = out.filter(function(p){ return (p.workerName||'').indexOf(q) >= 0; });
+  if(fOver40) out = out.filter(function(p){ return p.totalNet >= 2400; });
+  if(fOver60) out = out.filter(function(p){ return p.totalNet >= 3600; });
+  if(fProj40) out = out.filter(function(p){ return p.projectedTotal >= 2400; });
+  if(fPdfMiss) out = out.filter(function(p){ return (p.pdfMissing||0) > 0; });
+
+  // sort
+  var k = MONTHLY_STATE.sortKey;
+  var dir = MONTHLY_STATE.sortDir;
+  out.sort(function(a,b){
+    var av = (k==='totalNetH') ? a.totalNet : (a[k] != null ? a[k] : '');
+    var bv = (k==='totalNetH') ? b.totalNet : (b[k] != null ? b[k] : '');
+    if(typeof av === 'number' && typeof bv === 'number'){
+      return dir==='asc' ? av-bv : bv-av;
+    }
+    return dir==='asc'
+      ? String(av).localeCompare(String(bv),'ja')
+      : String(bv).localeCompare(String(av),'ja');
+  });
+
+  return out;
+}
+
+function onApproverFilterChange(){
+  if(MONTHLY_STATE.data) renderApproverMonthly();
+}
+
+function renderApproverMonthly(){
+  var res = MONTHLY_STATE.data;
+  if(!res) return;
+
+  // ミニKPI
+  document.getElementById('mkpiPeople').innerText = res.kpi.totalPeople;
+  document.getElementById('mkpi40').innerText = res.kpi.over40 + ' / ' + res.kpi.projectedOver40;
+  document.getElementById('mkpiPdf').innerText = res.kpi.pdfMissingTotal;
+
+  // フィルタ＆ソート
+  var visible = applyApproverFilters(res.people);
+  MONTHLY_STATE.visiblePeople = visible;
+
+  // テーブル描画
+  var tb = document.querySelector('#tblApproverMonthly tbody');
+  tb.innerHTML = '';
+  if(visible.length === 0){
+    tb.innerHTML = '<tr><td colspan="8" class="muted" style="text-align:center;padding:24px;">該当データなし</td></tr>';
+  } else {
+    visible.forEach(function(p){
+      var remain40 = Math.max(0, 2400 - p.totalNet);
+      var badge40 = remain40===0 ? '<span class="pill danger">超過</span>' :
+        (remain40<=300 ? '<span class="pill warn">'+fmtMin(remain40)+'残</span>' : '<span class="pill">'+fmtMin(remain40)+'残</span>');
+      var proj = p.projectedTotal >= 3600 ? '<span class="pill danger">60超予測</span>' :
+                   p.projectedTotal >= 2400 ? '<span class="pill warn">40超予測</span>' :
+                   '<span class="pill ok">範囲内</span>';
+      var pdf = (p.pdfMissing||0) > 0 ? '<span class="pill warn">'+p.pdfMissing+'件</span>' : '<span class="pill ok">0</span>';
+
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><b>'+escHtml(p.workerName)+'</b></td>'+
+        '<td>'+p.totalNet+'</td>'+
+        '<td><b>'+fmtMin(p.totalNet)+'</b></td>'+
+        '<td>'+fmtMin(p.overtimeNet)+'</td>'+
+        '<td>'+fmtMin(p.holidayNet)+'</td>'+
+        '<td>'+badge40+'</td>'+
+        '<td>'+fmtMin(p.projectedTotal)+' '+proj+'</td>'+
+        '<td>'+pdf+'</td>';
+      tb.appendChild(tr);
+    });
+  }
+
+  // 注意対象テーブル
+  var wb = document.querySelector('#tblApproverWatch tbody');
+  wb.innerHTML = '';
+  var watchList = (res.watch || []);
+  if(watchList.length === 0){
+    wb.innerHTML = '<tr><td colspan="6" class="muted" style="text-align:center;padding:24px;">注意対象なし</td></tr>';
+  } else {
+    watchList.forEach(function(w){
+      var pdf = (w.pdfMissing||0) > 0 ? '<span class="pill warn">'+w.pdfMissing+'件</span>' : '<span class="pill ok">0</span>';
+      var projBadge = w.projectedOver60 ? '<span class="pill danger">60超</span>' :
+                      (w.projectedOver40 ? '<span class="pill warn">40超</span>' : '<span class="pill ok">範囲内</span>');
+      var tr = document.createElement('tr');
+      tr.innerHTML =
+        '<td><b>'+escHtml(w.workerName)+'</b></td>'+
+        '<td><b>'+fmtMin(w.totalNet)+'</b></td>'+
+        '<td>'+fmtMin(w.projectedTotal)+' '+projBadge+'</td>'+
+        '<td>'+fmtMin(w.remain40)+'</td>'+
+        '<td>'+fmtMin(w.remain60)+'</td>'+
+        '<td>'+pdf+'</td>';
+      wb.appendChild(tr);
+    });
+  }
+
+  // チャート描画
+  drawApproverPeopleBar('cApproverPeople', visible, res.charts.people.limit40, res.charts.people.limit60);
+  document.getElementById('approverChartInfo').innerText =
+    '棒：表示中 '+visible.length+'名（実績=濃、予測=薄）。40h/60hラインは固定。';
+}
+
+// ====== Canvas描画 ======
+function clearApproverCanvas(id){
+  var c = document.getElementById(id);
+  if(!c) return null;
+  var ctx = c.getContext('2d');
+  var rect = c.getBoundingClientRect();
+  c.width = Math.floor(rect.width * devicePixelRatio);
+  c.height = Math.floor(rect.height * devicePixelRatio);
+  ctx.scale(devicePixelRatio, devicePixelRatio);
+  ctx.clearRect(0,0,rect.width,rect.height);
+  return {c:c,ctx:ctx,w:rect.width,h:rect.height};
+}
+
+function clamp(v,a,b){ return Math.max(a, Math.min(b, v)); }
+
+function drawApproverPeopleBar(canvasId, people, limit40, limit60){
+  var o = clearApproverCanvas(canvasId);
+  if(!o) return;
+  var ctx=o.ctx, w=o.w, h=o.h;
+  var padL=44, padR=14, padT=14, padB=46;
+  var innerW = w - padL - padR;
+  var innerH = h - padT - padB;
+
+  var maxVal = Math.max(limit60, 4000);
+  for(var i=0;i<people.length;i++){
+    if(people[i].totalNet > maxVal) maxVal = people[i].totalNet;
+    if((people[i].projectedTotal||0) > maxVal) maxVal = people[i].projectedTotal;
+  }
+  var n = Math.max(1, people.length);
+  var gap = 6;
+  var barW = clamp((innerW - gap*(n-1)) / n, 6, 20);
+
+  // grid lines
+  ctx.font = '12px system-ui';
+  ctx.fillStyle = '#5c6b7a';
+  ctx.strokeStyle = '#d7e7f5';
+
+  var ticks = [0, limit40, limit60, maxVal];
+  ticks.forEach(function(t){
+    var y = padT + innerH - (t/maxVal)*innerH;
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+innerW,y); ctx.stroke();
+    ctx.fillText(Math.round(t/60)+'h', 8, y+4);
+  });
+
+  // limit lines
+  function drawLimitLine(yVal, label){
+    ctx.save();
+    var y = padT + innerH - (yVal/maxVal)*innerH;
+    ctx.strokeStyle = '#1f9d55';
+    ctx.setLineDash([6,4]);
+    ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(padL+innerW,y); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#1f9d55';
+    ctx.fillText(label, padL+6, y-6);
+    ctx.restore();
+  }
+  drawLimitLine(limit40, '40h');
+  drawLimitLine(limit60, '60h');
+
+  // bars
+  people.forEach(function(p,i){
+    var x = padL + i*(barW+gap);
+    var v = p.totalNet;
+    var pv = p.projectedTotal || 0;
+
+    // projected (light)
+    var ph = (pv/maxVal)*innerH;
+    ctx.fillStyle = 'rgba(14,165,233,0.18)';
+    ctx.fillRect(x, padT + innerH - ph, barW, ph);
+
+    // actual (solid)
+    var ah = (v/maxVal)*innerH;
+    var over60 = v>=3600;
+    var over40 = v>=2400;
+    ctx.fillStyle = over60 ? 'rgba(255,90,95,0.68)' : (over40 ? 'rgba(255,176,32,0.68)' : 'rgba(31,157,85,0.62)');
+    ctx.fillRect(x, padT + innerH - ah, barW, ah);
+
+    // x label
+    if(n<=40){
+      var name = (p.workerName||'').slice(0,6);
+      ctx.save();
+      ctx.translate(x+barW/2, padT+innerH+22);
+      ctx.rotate(-0.7);
+      ctx.fillStyle='#5c6b7a';
+      ctx.fillText(name, -10, 0);
+      ctx.restore();
+    }
+  });
+
+  // axis frame
+  ctx.strokeStyle = '#d7e7f5';
+  ctx.strokeRect(padL, padT, innerW, innerH);
+}
+
+// ====== テーブルソート ======
+document.querySelectorAll('#tblApproverMonthly thead th').forEach(function(th){
+  th.addEventListener('click', function(){
+    var k = th.dataset.k;
+    if(!k) return;
+    if(MONTHLY_STATE.sortKey === k){
+      MONTHLY_STATE.sortDir = (MONTHLY_STATE.sortDir === 'asc') ? 'desc' : 'asc';
+    } else {
+      MONTHLY_STATE.sortKey = k;
+      MONTHLY_STATE.sortDir = 'desc';
+    }
+    renderApproverMonthly();
+  });
+});
+
+/* ===================================================================
+ * VPS 版で足した部分（ここから下だけ。上は GAS 版 src/approver.html のまま）
+ * =================================================================== */
+
+// 操作中にログインが切れたとき、管理者が選んだ承認者を退避し、戻ったら選び直す（仕様 3-5）
+(function(){
+  if (!window.__vpsDraft) return;
+  window.__vpsDraft.register({
+    name: 'approver',
+    collect: function(){
+      if (!APPROVER_DATA || !APPROVER_DATA.isAdmin || !SELECTED_DEPTS || SELECTED_DEPTS.length === 0) return null;
+      return { name: SELECTED_APPROVER_NAME, depts: SELECTED_DEPTS.slice() };
+    },
+    restore: function(d){
+      if (!d || !d.depts || d.depts.length === 0) return;
+      window.__vpsDraft.when(function(){ return APPROVER_DATA && APPROVER_DATA.isAdmin; }, function(){
+        selectApprover(d.name, d.depts);
+      });
+    }
+  });
+})();
