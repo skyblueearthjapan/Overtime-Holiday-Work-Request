@@ -187,3 +187,23 @@ def test_mobile_css_rules_are_all_inside_max_width_820_media():
             depth -= 1
         i += 1
     assert top_level == []  # @media の外に規則が無い（PC の見た目を変えない）
+
+
+def test_nginx_sebastian_and_auth_limits_and_callback_not_logged():
+    """セキュリティ 中-1・低-3・低-12。"""
+    conf = read(WEB / "nginx.conf")
+    locations = dict(re.findall(r"^\s*location ([^{]+?)\s*\{([^}]*)\}", conf, flags=re.M))
+    assert "zone=overtime_sebastian:10m rate=30r/m" in conf
+    assert "limit_req zone=overtime_sebastian" in locations["= /api/sebastian"]
+    assert "proxy_pass http://overtime_api;" in locations["= /api/sebastian"]
+    assert "limit_req zone=overtime_auth" in locations["/auth/"]
+    assert "access_log off;" in locations["= /auth/callback"]
+    assert "proxy_set_header X-Forwarded-For $overtime_client_ip;" in locations["= /auth/callback"]
+
+
+def test_api_and_worker_drop_capabilities():
+    """セキュリティ 低-4（api・worker）。"""
+    compose = read(VPS_DIR / "docker-compose.yml")
+    for name in ("overtime-api", "overtime-worker"):
+        block = re.split(r"\n  \S", compose.split(f"container_name: {name}", 1)[1], maxsplit=1)[0]
+        assert 'cap_drop: ["ALL"]' in block and "no-new-privileges:true" in block, name

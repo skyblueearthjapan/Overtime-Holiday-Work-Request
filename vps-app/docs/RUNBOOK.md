@@ -60,7 +60,7 @@ ssh lineworks-vps-user "test \"\$(hostname)\" = srv1508169 || exit 9; cd /opt/ov
 
 ## 道具（tools/）
 
-`tools/` はイメージに入っていません（罠 5）。
+`tools/` はイメージに入っていません（罠 5）。`migrate_from_sheets.py`（移行。staging では本番の PDF の ID を空にし、元の値を `source_pdf_*` に残す）、`cutover_backup.py`（DB と台帳の控え）、`restore_tabs_from_copy.py`（控えから写し戻す。既定は確かめだけ）。使い方は各ファイルの先頭と `docs/cutover-runbook.md`。
 
 ```sh
 sg docker -c "docker compose run --rm --no-deps -T -e PYTHONPATH=/app -v /opt/overtime/tools:/app/tools:ro api python tools/<道具>.py ..."
@@ -80,6 +80,18 @@ sg docker -c "docker compose run --rm --no-deps -T -e PYTHONPATH=/app -v /opt/ov
 | `purge` | 毎日 3:30（冪等キー 24 時間・期限切れのセッション・done の仕事 90 日。audit_log は消さない） | F |
 
 GAS の仕事（`jobs` の `lane='gas'`）は全体で同時に 1 本。失敗は管理者の「運用（管理者）」欄（`ops_getStatus`）に出ます。
+
+- シートへ書く前の関所（`services/write_gate`）: 本番は、合格した `gas_ping` が `SHEET_WRITE_PING_MAX_MINUTES`（既定 10）分以内で、GAS が移転モード（`migrated=true`）のときだけ、行の反映・照合・マスタ同期がシートへ書きます。ステージングは、ステージングの GAS への合格した `gas_ping` があれば書きます。止めているときは `ops_getStatus` の `sheetWriteGate.blocked` が `true` で、理由が出ます。
+- `SKIP_DAILY_ON_STARTUP=1` で起動すると、起動した時に枠の中にある毎日の予定（0:30・2:10・6:50 など）を、その回だけ飛ばします（`sync_runs` に `skipped`）。切り替えの夜に使い、済んだら `.env` から消します。
+- blocked の行（人がシートの行を消したなど）: `docker compose exec -T worker python -m app.services.row_sync status` で一覧、行を直したら `unblock <table> <pk>`、行が消えたなら `reappend <table> <pk>`（末尾に新しい行として書き直す）。
+- 朝バッチ（6:50〜7:50 の枠）を worker の停止で逃したときは取り戻しません（7:05 の確かめが「仕事がありません」と出します）。管理者の欄の `ops_batchPdfForDate`（前日の `yyyy-MM-dd`）で手で流します（データ安全 低-8）。
+- 台帳の作り直し（`ops_rebuildLedger`）は、行の反映待ちが 0 のときだけ積めます。時間切れ・失敗しても送り直しません（台帳を見てから手で動かし直す）。
+
+## ログインの取り消し
+
+- 1 人（共有アカウント 1 つ）: 管理者の欄の `ops_revokeSessions`（そのメールの全端末）。退職・共有パスワードの変更のときは必ず使います。
+- 全員: `sg docker -c "docker compose exec -T db psql -U overtime -d overtime -c 'DELETE FROM sessions'"`（全員がもう一度ログインします。セキュリティ確認 中-4 の当面の手当て）。
+- ログインの成功・失敗は api のログ（`login ok`・`login rejected`）に残ります。
 
 ## バックアップ
 

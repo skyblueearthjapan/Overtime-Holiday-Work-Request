@@ -16,6 +16,7 @@ from types import SimpleNamespace
 
 import pytest
 from sqlalchemy import select
+from conftest import TEST_ENV
 
 QA_DIR = Path(__file__).resolve().parents[2] / "tools" / "qa"
 pytestmark = pytest.mark.skipif(not (QA_DIR / "acceptance.py").is_file(),
@@ -253,7 +254,7 @@ def _by_id(report):
 
 
 def test_runner_read_only_against_app(acc, live, session_factory):
-    runner = acc.Runner(live.api, web=live.web, cookie=live.cookie, sebastian_token="test-sebastian-token",
+    runner = acc.Runner(live.api, web=live.web, cookie=live.cookie, sebastian_token=TEST_ENV["SEBASTIAN_API_TOKEN"],
                         expect_env="staging", job_wait=0, log=lambda *_: None)
     rep = runner.run()
     items = _by_id(rep)
@@ -294,7 +295,7 @@ def test_runner_reports_missing_security_headers(acc, live):
 def test_runner_write_scenario_against_app(acc, live, session_factory):
     from app.models import Job, Request
 
-    runner = acc.Runner(live.api, web=live.web, cookie=live.cookie, sebastian_token="test-sebastian-token",
+    runner = acc.Runner(live.api, web=live.web, cookie=live.cookie, sebastian_token=TEST_ENV["SEBASTIAN_API_TOKEN"],
                         probe=live.probe, write=True, job_wait=0, run_id="T1", log=lambda *_: None)
     rep = runner.run()
     items = _by_id(rep)
@@ -346,7 +347,7 @@ def test_main_refuses_write_when_not_staging(acc, capsys):
 
 def test_main_prints_table_and_exit_code(acc, live, capsys, tmp_path):
     out = tmp_path / "r.json"
-    code = acc.main(["--cookie", live.cookie, "--sebastian-token", "test-sebastian-token", "--job-wait", "0",
+    code = acc.main(["--cookie", live.cookie, "--sebastian-token", TEST_ENV["SEBASTIAN_API_TOKEN"], "--job-wait", "0",
                      "--json-out", str(out)], api=live.api, web=live.web)
     text = capsys.readouterr().out
     assert code == 1  # gas_ping（O-1）

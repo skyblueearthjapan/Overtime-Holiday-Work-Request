@@ -123,6 +123,10 @@ class Request(Base):
     modified_by: Mapped[str] = _text()
     # PDF の 3 列を空にした操作の、まだゴミ箱へ移していない前の ID（7 章の仕事が使う）
     old_pdf_file_id_pending: Mapped[str] = _text()
+    # ステージングへの移行で空にした、本番の PDF の 3 列のうち 2 列の元の値（参照用。仕事は使わない。
+    # ステージングの GAS が本番の PDF を触らないようにするため。データ安全 高-1）。シートには書かない
+    source_pdf_file_id: Mapped[str] = _text()
+    source_pdf_folder_id: Mapped[str] = _text()
 
     row_version: Mapped[int] = _row_version()
     sheet_row: Mapped[int | None] = _sheet_row()

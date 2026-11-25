@@ -1,19 +1,19 @@
 # 実行に使うもの（api と worker で共用）。版は固定する。
 # PDF・メール・QR は VPS で作らない（決定 B）ので playwright・segno・lxml は入れない。
-fastapi==0.123.10
-starlette==0.50.0
+fastapi==0.165.0
+starlette==1.10.0
 uvicorn[standard]==0.32.1
 sqlalchemy==2.0.36
 alembic==1.14.0
 psycopg[binary]==3.2.3
 pydantic==2.10.3
 pydantic-settings==2.6.1
-pyjwt[crypto]==2.10.1
-cryptography==46.0.7
+pyjwt[crypto]==2.15.1
+cryptography==50.0.2
 itsdangerous==2.2.0
 httpx==0.28.1
-anyio==4.7.0
+anyio==4.16.0
 jinja2==3.1.6
 google-auth==2.37.0
-requests==2.32.3
+requests==2.34.2
 tzdata==2024.2

@@ -14,7 +14,7 @@ W の業務関数は、業務の書き込みと同じトランザクションで
 | internal.afterDelete       | internal.afterDelete   | 前の PDF をゴミ箱へ → 台帳の行を消す |
 | internal.batchPdf          | internal.batchPdf      | 朝バッチで通信に失敗した件の送り直し（台帳は書かない） |
 | internal.ledgerRewriteDay  | internal.ledgerRewriteDay | その日の台帳の書き直し（朝バッチの送り直しが後で成功したとき） |
-| internal.ledgerRebuild     | internal.ledgerRebuild | 台帳の作り直し（管理者）。G に未実装（bad_request で failed になる） |
+| internal.ledgerRebuild     | internal.ledgerRebuild | 台帳の作り直し（管理者）。送り直さない（時間切れ・通信の失敗・retryable も failed）。行の反映待ちが 0 になるまで動かさない |
 
 動かす前の確かめ（7-3）:
   1. requires（積んだ時点の版）は jobs.JobRunner が待つ。ここでは「今の版」まで行の反映が済んだかも確かめ、
@@ -63,6 +63,7 @@ COMPLETE_SOURCES = ("screen", "admin", "sebastian")
 REGENERATE_REASONS = ("secondary", "edit", "admin")
 
 GAS_PING_KIND = "gas_ping"  # sync_runs.kind
+ORPHAN_PDF_KIND = "orphan_pdf"  # sync_runs.kind（記録しそこねた PDF の ID。管理者の欄に出す）
 GAS_PING_MAX_AGE = timedelta(minutes=10)
 GAS_PING_WAIT_SECONDS = 60.0
 SYNC_WAIT_SECONDS = 5.0
@@ -293,6 +294,11 @@ def record_pdf_result(db: Session, request_id: str, pdf: Mapping[str, Any], *,
         state = db.get(models.SheetSyncState, ("requests", request_id))
         if not req.pdf_file_id and not req.old_pdf_file_id_pending:
             req.old_pdf_file_id_pending = file_id
+        elif file_id not in (req.pdf_file_id, req.old_pdf_file_id_pending):
+            # どこにも残らない PDF（Drive に同じ申請の PDF が 2 つ）。管理者が見られるように残す（データ安全 低-5）
+            db.add(models.SyncRun(kind=ORPHAN_PDF_KIND, started_at=timeutil.now_utc(), finished_at=timeutil.now_utc(),
+                                  ok=False, summary_json={"requestId": request_id, "pdfFileId": file_id,
+                                                          "reason": "後の操作で PDF の列が変わり、捨てる候補も埋まっていた"}))
         sheet_queue.mark_dirty(db, "requests", request_id)
         if state is not None:
             _note_sheet_has(db, request_id, sheet_values)
@@ -315,6 +321,21 @@ def record_pdf_result(db: Session, request_id: str, pdf: Mapping[str, Any], *,
         _note_sheet_has(db, request_id, sheet_values)
     db.flush()
     return True
+
+
+def pdf_result_to_record(resp: Mapping[str, Any]) -> bool:
+    """GAS の返事に、DB に記録すべき PDF の ID があるか。
+
+    created・already に加え、skipped（has_pdf など＝シートに既に PDF がある）でも、返事に空でない pdfFileId が
+    あれば記録する（記録しないと毎晩の照合がシートの 3 列を空で上書きする。データ安全 高-2）。
+    """
+    pdf = resp.get("pdf")
+    if not isinstance(pdf, Mapping):
+        return False
+    status = pdf.get("status")
+    if status in ("created", "already"):
+        return True
+    return status == "skipped" and bool(normalize_gas(pdf.get("pdfFileId") or resp.get("pdfFileId")))
 
 
 def _apply_trash(db: Session, request_id: str, trash: Any, old_pdf_file_id: str) -> None:
@@ -450,6 +471,23 @@ def _error_text(resp: Mapping[str, Any]) -> str:
     return f"{code}: {message}" if message and message != code else code
 
 
+def pending_row_count(db: Session) -> int:
+    """行の反映待ち（desired_version > synced_version）の行の数。"""
+    S = models.SheetSyncState
+    return int(db.scalar(select(func.count()).select_from(S).where(S.desired_version > S.synced_version)) or 0)
+
+
+def _require_no_pending_rows(db: Session, ctx: JobContext) -> None:
+    """台帳の作り直しは、まだシートに出ていない申請が台帳から抜けないよう、反映待ち 0 で動かす（データ安全 中-4）。"""
+    n = pending_row_count(db)
+    if not n:
+        return
+    reason = f"row_not_synced（行の反映待ち {n} 行。0 になってから台帳を作り直します）"
+    if ctx.created_at is not None and ctx.now - ctx.created_at > SYNC_WAIT_DEADLINE:
+        raise PermanentJobError(reason + "（24 時間を過ぎました）")
+    raise RetryLater(SYNC_WAIT_SECONDS, reason)
+
+
 def handle_job(ctx: JobContext) -> dict:
     """GAS の仕事 1 件（jobs.register_kind のハンドラー）。"""
     spec = KINDS[ctx.kind]
@@ -463,12 +501,19 @@ def handle_job(ctx: JobContext) -> dict:
             raise SkipJob("canceled")
         require_synced(db, ctx.request_id, created_at=ctx.created_at, now=ctx.now, with_work_logs=spec.with_work_logs)
     require_gas_ping(db, ctx.now)
+    if ctx.kind == KIND_LEDGER_REBUILD:
+        _require_no_pending_rows(db, ctx)
     expect, gas_args = build_call(ctx.kind, req, ctx.args)
     snapshot = pdf_snapshot(req)
     _batch_spacing(db, ctx.batch_id)
     try:
         resp = call_gas(ctx.app_settings, spec.gas_action, job_id=_gas_job_id(ctx), request_id=ctx.request_id,
                         expect=expect, args=gas_args)
+    except Exception as exc:
+        if ctx.kind == KIND_LEDGER_REBUILD:
+            # 作り直しは途中まで書いた年度タブを _backup へ改名してから書き直すので、送り直すと重なる（データ安全 中-4）
+            raise PermanentJobError(f"ledgerRebuild は送り直しません（管理者が台帳を確かめてから手で動かす）: {exc}") from exc
+        raise
     finally:
         _mark_batch_call(ctx.batch_id)
     return apply_response(ctx, req, resp, snapshot, old_pdf_file_id=str(gas_args.get("oldPdfFileId") or ""))
@@ -479,8 +524,16 @@ def apply_response(ctx: JobContext, req: models.Request | None, resp: Mapping[st
     """GAS の返事を記録する。失敗でも PDF ができていれば先に記録してから上げる（7-1）。"""
     db = ctx.db
     resp = dict(resp)
+    if resp.get("idempotencyStored") is False:
+        # GAS が冪等の記録を残せなかった（スクリプトプロパティの上限など）。同じ jobId の送り直しが再生されず
+        # もう一度動く恐れがあるので、管理者の欄（exhausted と同じ一覧）に残す（データ安全 中-3 の VPS 側）
+        log.warning("GAS が冪等の記録を残せませんでした: job %s %s", ctx.job_id, ctx.kind)
+        db.add(models.SyncRun(kind=EXHAUSTED_KIND, started_at=timeutil.now_utc(), finished_at=timeutil.now_utc(),
+                              ok=False, summary_json={"jobId": ctx.job_id, "kind": ctx.kind,
+                                                      "requestId": ctx.request_id,
+                                                      "warning": "idempotencyStored:false（GAS の冪等の記録の失敗）"}))
     pdf = resp.get("pdf")
-    if req is not None and isinstance(pdf, Mapping) and pdf.get("status") in ("created", "already"):
+    if req is not None and isinstance(pdf, Mapping) and pdf_result_to_record(resp):
         merged = dict(pdf)
         for key in ("pdfFileId", "pdfFolderId", "pdfGeneratedAt", "pdfGeneratedAtEpochMs"):
             if not merged.get(key) and resp.get(key):
@@ -493,7 +546,7 @@ def apply_response(ctx: JobContext, req: models.Request | None, resp: Mapping[st
         return resp
     _store_job_result(db, ctx.job_id, resp)
     ctx.commit()  # PDF の記録と返事を残してから失敗にする
-    if resp.get("retryable") is True:
+    if resp.get("retryable") is True and ctx.kind != KIND_LEDGER_REBUILD:
         raise GasJobError(_error_text(resp))
     raise PermanentJobError(_error_text(resp))
 

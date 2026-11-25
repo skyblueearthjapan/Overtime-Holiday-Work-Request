@@ -107,7 +107,7 @@ psql_q() { sg docker -c "docker compose exec -T db psql -U overtime -d overtime 
      ```
 
      Sebastian が別のデプロイ（〇〇）を使っていれば、同じ手順でそちらにも当てます。当てた直後に、本番の `/exec` が今までどおり開くことを画面で確かめます。
-  3. 本番の内部用のデプロイを作ります: `$CLASP create-deployment --versionNumber 〇〇 --description "vps internal"`。出てきた deploymentId を `GAS_INTERNAL_URL`（`https://script.google.com/macros/s/<id>/exec`）として控え、`vps-app/api/app/config.py` の `PROD_GAS_DEPLOYMENT_IDS_FIXED` に足して（ステージングがこれを指せば起動しない歯止め）、新しいイメージを作っておきます（`docs/RUNBOOK.md` のデプロイ。`APP_IMAGE_TAG` を控える）。
+  3. 本番の内部用のデプロイを作ります: `$CLASP create-deployment --versionNumber 〇〇 --description "vps internal"`。出てきた deploymentId を `GAS_INTERNAL_URL`（`https://script.google.com/macros/s/<id>/exec`）として控えます。同じ ID を、**ステージングと本番の両方の `.env`** に `PROD_GAS_INTERNAL_DEPLOYMENT_ID=<id>` として書きます（コードは変えません）。形（`AKfyc…`）とステージングの既知の ID でないことは起動時に確かめられ、production は `GAS_INTERNAL_URL` がこのデプロイでなければ起動せず、staging は `GAS_INTERNAL_URL` がこのデプロイなら起動しません（取り違えの歯止め）。ステージングは書いた後に `docker compose up -d api worker` で読み直し、`docker compose ps` で両方 `Up`（起動の確かめに通った）を確かめます。
   4. GAS エディタの「プロジェクトの設定 → スクリプト プロパティ」で 2 つ足します。`VPS_INTERNAL_TOKEN`＝本番の内部用トークン（32 字以上の乱数。`SEBASTIAN_API_TOKEN` とは別の値。手元の 〇〇 のファイルにも置く）、`VPS_ORIGIN`＝`https://overtime.lineworks-local.net`（当日 `enterMigrationModeForOvertime` が読む）。**`MIGRATED_TO_URL` は入れません**（入れた瞬間に移転モードになります）。
   5. GAS エディタで `showMigrationStatus` を 1 回実行し、権限の許可と今の状態を見ます（移転モード「なし」、内部用の token「あり」、トリガー 4 本、旧フォーム 21 本）。
 - [ ] **A-4 内部用の入口の確かめ**（手元から。何も書きません）。
@@ -218,42 +218,21 @@ GAS エディタで `removeAllTriggersForMigration` を実行します。
 
 ### B-8 控え（DB と台帳の複製）
 
-D 担当の `tools/cutover_backup.py` があればそれを使います。無ければ次を流します（委任トークンで Drive API の `files/{id}/copy`。複製はマイドライブの直下に置き、共有しません）。
+`tools/cutover_backup.py` で、この環境の DB スプレッドシートと蓄積台帳を Drive API の `files.copy`（委任トークン）で複製します。複製する元は許可リストの 2 つだけで（本番なら本番の DB と台帳。ID は引数で受け取りません）、複製はマイドライブの直下に置き、共有しません。出すのは ID・名前・タブごとの行数だけです。
 
 ```sh
 ssh lineworks-vps-user 'bash -s' <<'EOF'
 set -eu
 test "$(hostname)" = srv1508169 || { echo "WRONG HOST"; exit 9; }
 cd /opt/overtime
-sg docker -c "docker compose run --rm --no-deps -T -e PYTHONPATH=/app api python -" <<'PY'
-import json, urllib.parse, urllib.request
-from datetime import datetime
-from app.config import get_settings
-from app.google_delegate import get_access_token
-S = get_settings()
-H = {"Authorization": "Bearer " + get_access_token(), "Content-Type": "application/json"}
-def call(method, url, body=None):
-    req = urllib.request.Request(url, data=None if body is None else json.dumps(body).encode(), method=method, headers=H)
-    return json.load(urllib.request.urlopen(req))
-def tab_rows(sid):
-    meta = call("GET", f"https://sheets.googleapis.com/v4/spreadsheets/{sid}?fields=sheets.properties.title")
-    titles = [s["properties"]["title"] for s in meta["sheets"]]
-    q = "&".join("ranges=" + urllib.parse.quote(f"'{t}'!A:A") for t in titles)
-    vr = call("GET", f"https://sheets.googleapis.com/v4/spreadsheets/{sid}/values:batchGet?{q}&majorDimension=COLUMNS")
-    return {t: len((v.get("values") or [[]])[0]) for t, v in zip(titles, vr["valueRanges"])}
-stamp = datetime.now().strftime("%Y-%m-%d %H%M")
-for label, fid in (("DB", S.prod_spreadsheet_id), ("台帳", S.prod_ledger_spreadsheet_id)):
-    c = call("POST", f"https://www.googleapis.com/drive/v3/files/{fid}/copy?supportsAllDrives=true&fields=id,name",
-             {"name": f"【切替前の控え】残業・休日出勤申請 {label} {stamp}", "parents": ["root"]})
-    a, b = tab_rows(fid), tab_rows(c["id"])
-    print(label, "控えの ID:", c["id"], c["name"])
-    for t in a:
-        print("  ", "OK" if a[t] == b.get(t) else "NG", t, a[t], b.get(t))
-PY
+mkdir -p cutover
+R=cutover/backup_report_$(date +%Y%m%d_%H%M).json
+if sg docker -c "docker compose run --rm --no-deps -T -e PYTHONPATH=/app -v /opt/overtime/tools:/app/tools:ro api python tools/cutover_backup.py" > "$R"; then echo "exit=0"; else echo "exit=$?"; fi
+grep -E '"(label|copyId|ok)"' "$R"
 EOF
 ```
 
-確かめ: 2 冊とも、すべてのタブが `OK`（A 列の行数が元と控えで同じ）。控えの ID を引継ぎメモに書きます。`NG` があれば、もう一度複製します。
+確かめ: 終了コード 0（1 は行数が合わない冊がある、2 は止めた）、2 冊とも `"ok": true`（すべてのタブの A 列の行数が元と控えで同じ）。DB の控えの `copyId` を引継ぎメモに書きます（B-15・B-16・C 章で `tools/restore_tabs_from_copy.py --from-copy` に渡します）。`ok: false` なら、もう一度流します。
 
 ### B-9 VPS を止めて DB を控える
 
@@ -456,7 +435,20 @@ SQL
 EOF
 ```
 
-確かめ: `sync_masters: ok=True`（4 タブとも `ok`、作業員 50・工番 560・業務 NO 47・カレンダー 130 前後）、`sync_sheet_config: ok=True`。DB の 4 タブの行数と先頭の行が B-8 の控えと同じ（シートを開いて見る）。DeptApprovers 13 部署、管理者 2 人。戻す: 控えから 4 タブの値を写し戻す（D 担当の `tools/restore_tabs_from_copy.py`）。
+確かめ: `sync_masters: ok=True`（4 タブとも `ok`、作業員 50・工番 560・業務 NO 47・カレンダー 130 前後）、`sync_sheet_config: ok=True`。DB の 4 タブの行数と先頭の行が B-8 の控えと同じ（シートを開いて見る）。DeptApprovers 13 部署、管理者 2 人。マスタ同期はシートへ書く前の関所を通ります（B-14 の `gas_ping` が 10 分以内で `migrationMode: True` のときだけ書く）。`writeBlocked` が出たら、`sg docker -c "docker compose exec -T api python -m app.worker run gas_ping"` をもう一度流してから B-15 をやり直します。戻す: 控えから 4 タブの値を写し戻す（下のコマンド。先に `--apply` なしで差の数を見る）。
+
+```sh
+ssh lineworks-vps-user 'bash -s' <<'EOF'
+set -eu
+test "$(hostname)" = srv1508169 || { echo "WRONG HOST"; exit 9; }
+cd /opt/overtime
+COPY=〇〇   # B-8 の DB の控えの copyId
+T="作業員マスタ,工番マスタ,社内カレンダーマスタ,業務NOマスタ"
+sg docker -c "docker compose run --rm --no-deps -T -e PYTHONPATH=/app -v /opt/overtime/tools:/app/tools:ro api python tools/restore_tabs_from_copy.py --from-copy $COPY --tabs $T"
+# 差の数を確かめてから:
+# sg docker -c "docker compose run --rm --no-deps -T -e PYTHONPATH=/app -v /opt/overtime/tools:/app/tools:ro api python tools/restore_tabs_from_copy.py --from-copy $COPY --tabs $T --apply"
+EOF
+```
 
 ### B-16 worker を起動して、行の反映と照合を確かめる
 
@@ -465,6 +457,7 @@ ssh lineworks-vps-user 'bash -s' <<'EOF'
 set -eu
 test "$(hostname)" = srv1508169 || { echo "WRONG HOST"; exit 9; }
 cd /opt/overtime
+grep -q '^SKIP_DAILY_ON_STARTUP=1$' .env || echo 'SKIP_DAILY_ON_STARTUP=1' >> .env   # 起動時に枠の中の毎日の予定を飛ばす
 sg docker -c "docker compose up -d"
 sleep 60
 sg docker -c "docker compose ps"
@@ -479,7 +472,7 @@ sg docker -c "docker compose logs --since 2m worker" | grep -iE 'error|exception
 EOF
 ```
 
-確かめ: `sheet_reconcile: ok=True` で A 区分の差 0、`row_sync_pending 0`・`blocked 0`、jobs は 0 件（まだ誰も操作していない）、最新の `gas_ping` が `ok = t`。シートの `DeptApprovers`・`Settings` が B-8 の控えと同じ（VPS は書かない）。戻す: `sg docker -c "docker compose stop worker"`、控えから写し戻して C へ。
+確かめ: `sheet_reconcile: ok=True` で A 区分の差 0、`row_sync_pending 0`・`blocked 0`、jobs は 0 件（まだ誰も操作していない）、最新の `gas_ping` が `ok = t`。管理者の画面の「運用」欄（`ops_getStatus`）の `sheetWriteGate.allowed` が `true`（`blocked` なら理由の欄を読む。本番は GAS が移転モードでないと、行の反映・照合・マスタ同期はシートへ書きません）。シートの `DeptApprovers`・`Settings` が B-8 の控えと同じ（VPS は書かない）。worker の起動のときは `SKIP_DAILY_ON_STARTUP=1` で、0:30・2:10・6:50 の枠の中で起動しても、その回の毎日の予定は動きません（`sync_runs` に `skipped`）。次の起動からは通常どおり動かしたいので、確かめが済んだら `.env` の `SKIP_DAILY_ON_STARTUP=1` の行を消します（次に起動し直すまで効き目は変わりません）。戻す: `sg docker -c "docker compose stop worker"`、控えから写し戻して（`tools/restore_tabs_from_copy.py --from-copy <控え> --tabs all`。`DeptApprovers`・`Settings` は名前を書いたときだけ戻ります）C へ。
 
 ### B-17 Sebastian の転送
 
@@ -594,7 +587,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://overtime.lineworks-local.net/he
    ssh lineworks-vps-user 'test "$(hostname)" = srv1508169 || exit 9; cd /opt/overtime && sg docker -c "docker compose stop api" && sg docker -c "docker compose ps"'
    ```
 
-2. **C-2 worker の待ちを流しきる**。行の反映の待ち 0、GAS の仕事の待ち 0（GAS が動いていれば数分）になるまで、次を繰り返します。照合を `--check` で 1 回流し、差 0 を確かめます。`failed` や流しきれない GAS の仕事は、申請 ID と action を控えます（C-5 で使う）。**最後に worker を止めます**（止めないと、GAS が戻ってから書いた行を、毎晩の照合が DB の値で書き直します）。
+2. **C-2 worker の待ちを流しきる**。行の反映の待ち 0、GAS の仕事の待ち 0（GAS が動いていれば数分）になるまで、次を繰り返します。照合を `--check` で 1 回流し、差 0 を確かめます。`failed` や流しきれない GAS の仕事は、申請 ID と action を控えます（C-5 で使う）。**blocked も 0 にします**（blocked の行は流しきれないので、そのまま戻すと VPS で入った内容がシートに出ません。下のコマンドの `reappend` で末尾に書き直します）。**最後に worker を止め、コンテナを消します**（`docker compose rm -sf worker`。止めるだけだと、後の `docker compose up -d` で勝手に戻ります。なお、本番の worker は GAS が移転モードでない間はシートへ書きません＝書き込みの関所。戻した後に誤って起動しても、GAS の書いた行を照合が書き直すことはありません）。
 
    ```sh
    ssh lineworks-vps-user 'bash -s' <<'EOF'
@@ -607,8 +600,11 @@ curl -s -o /dev/null -w '%{http_code}\n' https://overtime.lineworks-local.net/he
    SELECT id, request_id, kind, state, attempts, left(last_error, 120) FROM jobs WHERE state NOT IN ('done', 'skipped') ORDER BY id;
    SQL
    EOF
-   # 待ちが 0 になったら:
-   ssh lineworks-vps-user 'test "$(hostname)" = srv1508169 || exit 9; cd /opt/overtime && sg docker -c "docker compose exec -T worker python -m app.worker run sheet_reconcile --check" && sg docker -c "docker compose stop worker"'
+   # blocked が 1 以上なら（人がシートの行を消したなど）、末尾に新しい行として書き直してから待ちを流す:
+   #   sg docker -c "docker compose exec -T worker python -m app.services.row_sync status"
+   #   sg docker -c "docker compose exec -T worker python -m app.services.row_sync reappend requests <requestId>"
+   # 待ちと blocked が 0 になったら:
+   ssh lineworks-vps-user 'test "$(hostname)" = srv1508169 || exit 9; cd /opt/overtime && sg docker -c "docker compose exec -T worker python -m app.worker run sheet_reconcile --check" && sg docker -c "docker compose rm -sf worker"'
    ```
 
 3. **C-3 GAS を戻す**: GAS エディタで `exitMigrationMode`（Sebastian の転送も外れます。内部用の入口は token が無ければ何もしないので残してよい）→ `restoreTriggersAfterRollback`（朝バッチとマスタ同期の 2 本。同じ関数のトリガーが既にあれば作りません）。旧フォームは決定 #11 のとおり閉じたままにします。**オーナーが旧フォームも戻すと決めたときだけ**、`restoreTriggersAfterRollback` の代わりに `reopenFormsAfterRollback` → `restoreAllTriggersAfterRollback`（4 本）を実行します。確かめ: `showMigrationStatus` で移転モード「なし」、トリガーが 2 本（フォームも戻したなら 4 本）。
@@ -679,4 +675,5 @@ EOF
 - 本番の内部用トークンの手元のファイル名（A-3・B-13）。
 - `DB_SHEET_TIMEZONE` の値（A-4・B-12）。
 - リハーサルで控えた件数（B-11・B-12 の比べる相手）。
-- `tools/cutover_backup.py`・`tools/restore_tabs_from_copy.py`（D 担当）が出来上がったら、B-8・B-15 をそれに置き換える。
+- B-8 の DB の控えの `copyId`（B-15・B-16・C 章の写し戻しで使う）。
+- `PROD_GAS_INTERNAL_DEPLOYMENT_ID` を両方の環境の `.env` に書いたこと（A-3）。

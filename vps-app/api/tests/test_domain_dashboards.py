@@ -59,8 +59,15 @@ def test_top_dashboard_skips_unparseable_target_and_reports_errors(db, monkeypat
         raise RuntimeError("WorkLogsに requestId 列がありません。")
 
     monkeypatch.setattr(dashboards.store, "worklog_map", boom)
+    # 想定外の例外の文は画面に出さない（セキュリティ確認 低-1）。RpcError の文はそのまま
     assert dashboards.api_getDashboard(ctx(db, now=NOW)) == {
-        "today": "", "overtime": [], "holiday": [], "error": "WorkLogsに requestId 列がありません。"}
+        "today": "", "overtime": [], "holiday": [], "error": "データを取得できませんでした。"}
+
+    def rpc_boom(db):
+        raise dashboards.RpcError("WorkLogsに requestId 列がありません。")
+
+    monkeypatch.setattr(dashboards.store, "worklog_map", rpc_boom)
+    assert dashboards.api_getDashboard(ctx(db, now=NOW))["error"] == "WorkLogsに requestId 列がありません。"
 
 
 def test_approver_dashboard_conditions(db):
@@ -98,3 +105,12 @@ def test_approver_dashboard_errors_and_string_dept(db):
     assert dashboards.api_getApproverDashboard(ctx(db, email=USER), "製造1課")["error"] == "部署「製造1課」の承認権限がありません。"
     res = dashboards.api_getApproverDashboard(ctx(db, email=ADMIN), " 製造９課 ")
     assert res["isAdmin"] is True and res["selectedDepts"] == ["製造9課"] and "error" not in res
+
+
+def test_approver_dashboard_hides_internal_exception_text(db, monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("psycopg.errors.UndefinedTable: work_logs")
+
+    monkeypatch.setattr(dashboards.store, "requests_in_sheet_order", boom)
+    res = dashboards.api_getApproverDashboard(ctx(db, email=ADMIN, now=NOW), "製造1課")
+    assert res["error"] == "データを取得できませんでした。" and "psycopg" not in str(res)

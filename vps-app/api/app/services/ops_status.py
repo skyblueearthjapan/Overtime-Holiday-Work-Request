@@ -19,7 +19,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import jobs, models, timeutil
-from app.services import gas_jobs
+from app.config import get_settings
+from app.services import gas_jobs, write_gate
 
 ROW_SYNC_DELAY_ALERT = timedelta(minutes=5)
 LAST_RUN_KINDS = ("morning_batch", "manual_batch_pdfs", "morning_batch_check", "sync_masters", "sync_sheet_config",
@@ -113,6 +114,13 @@ def _fixed_rows(run: dict | None) -> int | None:
     return None
 
 
+def _orphan_pdfs(db: Session) -> list[dict]:
+    R = models.SyncRun
+    rows = db.scalars(select(R).where(R.kind == gas_jobs.ORPHAN_PDF_KIND).order_by(R.started_at.desc(), R.id.desc())
+                      .limit(20))
+    return [{"at": _t(r.started_at), **_plain(r.summary_json or {})} for r in rows]
+
+
 def _exhausted(db: Session) -> list[dict]:
     R = models.SyncRun
     rows = db.scalars(select(R).where(R.kind == gas_jobs.EXHAUSTED_KIND).order_by(R.started_at.desc(), R.id.desc())
@@ -129,8 +137,11 @@ def get_ops_status(db: Session) -> dict:
         "rowSync": _row_sync(db, now),
         "gasJobs": _gas_jobs(db),
         "gasPing": _gas_ping(db, now),
+        # シートへ書く前の関所（データ安全 高-3）。blocked なら行の反映・照合・マスタ同期は書かない
+        "sheetWriteGate": write_gate.status(db, get_settings(), now),
         "lastRuns": last_runs,
         "reconcileFixedRows": _fixed_rows(last_runs.get("sheet_reconcile")),
         "exhausted": _exhausted(db),
+        "orphanPdfs": _orphan_pdfs(db),
         "pdfMode": pdf_mode.value if pdf_mode is not None else "",
     }

@@ -30,11 +30,12 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app import timeutil
+from app import sheet_queue, timeutil
 from app.jsutil import js_string, normalize_gas
 from app.models import SYNCED_TABLES, SheetSyncState, SyncRun
 from app.safety import UnsafeWriteError
 from app.services import sheet_codec as codec
+from app.services import write_gate
 from app.services.sheets_api import SheetsApi, SheetsError, column_letter, quote_sheet, sheet_id_by_title, spreadsheet_timezone
 
 log = logging.getLogger(__name__)
@@ -50,8 +51,15 @@ GRID_FIELDS = "sheets(data(startRow,startColumn,rowData(values(userEnteredValue,
 RUN_KIND = "row_sync"
 
 
+GATE_RECHECK_SECONDS = 30  # 書き込みの関所で止めたときは早めに確かめ直す
+
+
 class LaneHalt(RuntimeError):
     """レーンを止める理由（見出しの違い・時間帯の違い・安全装置の拒否）。再試行しない。"""
+
+
+class GateClosed(LaneHalt):
+    """書き込みの関所（write_gate）で止めた。"""
 
 
 # ===== レーンの状態（worker の 1 つのプロセスの中だけ。止めたことは sync_runs にも残す） =====
@@ -400,6 +408,10 @@ def place_rows(ctx: TabContext, works: list[RowWork], claimed: dict[int, tuple[s
 
     for w in works:
         key = db_id(spec, w.values)
+        if w.sheet_row is not None and _blank_id(key) and w.sheet_row <= ctx.last_data_row:
+            # ID が空の行は、行がずれても見分けられない（別の空の ID の行に書く恐れ）ので書かない（データ安全 低-2）
+            w.blocked = f"{spec.tab} の {w.sheet_row} 行目は ID が空のため、位置を確かめられません（書きません）"
+            continue
         if w.sheet_row is not None:
             if w.sheet_row in ctx.id_rows and _same_id(spec, ctx.id_rows[w.sheet_row], key):
                 w.target_row = w.sheet_row
@@ -430,11 +442,11 @@ def _retry_delay(attempts: int) -> int:
     return RETRY_DELAYS[min(attempts, len(RETRY_DELAYS)) - 1] if attempts >= 1 else RETRY_DELAYS[0]
 
 
-def _record_halt(session_factory, reason: str) -> None:
+def _record_halt(session_factory, reason: str, recheck_seconds: int = RECHECK_SECONDS) -> None:
     now = timeutil.now_utc()
     first = _lane.halted != reason
     _lane.halted = reason
-    _lane.recheck_at = now + timedelta(seconds=RECHECK_SECONDS)
+    _lane.recheck_at = now + timedelta(seconds=recheck_seconds)
     log.error("row_sync halted: %s", reason)
     if first:
         with session_factory() as db:
@@ -585,6 +597,12 @@ def run_once(session_factory: Callable[[], Session], limit: int = 50, *, api: Sh
     result: dict = {"ok": True, "written": 0, "failed": 0, "blocked": 0}
     processed: list[RowWork] = []  # 書き終えた表の行（途中で止めても、書いた分は記録する）
     try:
+        if works:
+            # 書く前の関所（データ安全 高-3）: GAS が移転モードでなければ書かない
+            with session_factory() as db:
+                allowed, reason = write_gate.check(db, settings, now)
+            if not allowed:
+                raise GateClosed("書き込みの関所: " + reason)
         if api is None:
             api = api_factory(session_factory, settings)
         meta = check_timezone(api, sid, settings)
@@ -609,7 +627,8 @@ def run_once(session_factory: Callable[[], Session], limit: int = 50, *, api: Sh
             write_rows(api, sid, ctx, todo, tz, purpose="row_sync")
             processed.extend(group)
     except (LaneHalt, UnsafeWriteError) as halt:
-        _record_halt(session_factory, str(halt))
+        _record_halt(session_factory, str(halt),
+                     GATE_RECHECK_SECONDS if isinstance(halt, GateClosed) else RECHECK_SECONDS)
         done = _save_results(session_factory, processed, [], timeutil.now_utc()) if processed else {"written": 0}
         return {"ok": False, "halted": str(halt), "written": done["written"]}
     except SheetsError as error:
@@ -663,5 +682,64 @@ def unblock(db: Session, table: str, pk: str) -> bool:
     return True
 
 
+def reappend_blocked(db: Session, table: str, pk: str) -> bool:
+    """blocked の行（人がシートの行を消したなど）を、シートの末尾に新しい行として書き直す印にする（データ安全 中-2）。
+
+    sheet_row を空にし、synced_values を空にして版を進める。次の行の反映が末尾に全部の列を書く。commit は呼ぶ側。
+    戻しの前（計画書 C-2）に blocked を 0 にするために使う。
+    """
+    st = db.get(SheetSyncState, (table, str(pk)))
+    if st is None or st.state != "blocked":
+        return False
+    model = SYNCED_TABLES[table]
+    row = db.get(model, pk if table == "requests" else int(pk))
+    if row is None:
+        return False
+    row.sheet_row = None
+    st.state, st.attempts, st.last_error = "ok", 0, ""
+    st.synced_values = {}
+    st.next_try_at = timeutil.now_utc()
+    db.flush()
+    sheet_queue.mark_dirty(db, table, str(pk))
+    return True
+
+
+def main(argv: list[str] | None = None) -> int:
+    """管理者の手での操作（VPS: docker compose exec worker python -m app.services.row_sync <操作> ...）。
+
+    status                  反映待ち・blocked の一覧
+    unblock  <table> <pk>   blocked の行をもう一度試す（行を直した後）
+    reappend <table> <pk>   blocked の行を末尾に新しい行として書き直す（行が消された後）
+    """
+    import argparse
+    import json
+
+    from app.db import get_sessionmaker
+
+    parser = argparse.ArgumentParser(prog="python -m app.services.row_sync")
+    parser.add_argument("op", choices=["status", "unblock", "reappend"])
+    parser.add_argument("table", nargs="?", choices=list(SYNCED_TABLES))
+    parser.add_argument("pk", nargs="?")
+    args = parser.parse_args(argv)
+    factory = get_sessionmaker()
+    with factory() as db:
+        if args.op == "status":
+            print(json.dumps(status(db), ensure_ascii=False, indent=1, default=str))
+            return 0
+        if not args.table or not args.pk:
+            parser.error("table と pk が要ります")
+        fn = unblock if args.op == "unblock" else reappend_blocked
+        done = fn(db, args.table, args.pk)
+        db.commit()
+    print("ok" if done else "blocked の行が見つかりません")
+    return 0 if done else 1
+
+
 def register_worker() -> None:
     """行の反映のレーンは worker が run_once を直接呼ぶ（app.worker._resolve_row_sync）。登録するものは無い。"""
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())

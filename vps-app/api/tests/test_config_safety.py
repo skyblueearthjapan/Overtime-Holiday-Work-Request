@@ -369,3 +369,73 @@ def test_config_defines_the_fixed_constants():
                  "PROD_PDF_FOLDER_ID_FIXED", "PROD_LEDGER_SPREADSHEET_ID_FIXED"):
         assert re.fullmatch(r"[A-Za-z0-9_-]{25,}", getattr(config, name))
     assert not (PRODUCTION_IDS & KNOWN_STAGING_IDS)
+
+
+# ===== Sebastian の token の強さ（セキュリティ確認 中-1） =====
+
+
+@pytest.mark.parametrize("app_env", ["staging", "production"])
+def test_short_sebastian_token_refuses_to_start(app_env, monkeypatch):
+    monkeypatch.delenv("SEBASTIAN_API_TOKEN", raising=False)
+    values = {k.lower(): v for k, v in TEST_ENV.items()}
+    values.update(app_env=app_env, sebastian_api_token="x" * 31)
+    if app_env == "production":
+        values.update(gas_internal_url="https://script.google.com/macros/s/AKfycbPRODinternal/exec")
+    with pytest.raises(ValidationError):
+        config.Settings(_env_file=None, **values)  # type: ignore[call-arg]
+    values["sebastian_api_token"] = "x" * 32
+    assert config.Settings(_env_file=None, **values).sebastian_api_token == "x" * 32  # type: ignore[call-arg]
+
+
+def test_sebastian_token_must_differ_from_gas_internal_token():
+    with pytest.raises(ValidationError, match="同じ値"):
+        make_settings(sebastian_api_token=TEST_ENV["GAS_INTERNAL_TOKEN"])
+
+
+# ===== 本番の内部用の GAS のデプロイ（データ安全 低-6） =====
+
+PROD_INTERNAL = "AKfycbPRODinternalDeployment0123456789abcdefXYZ"
+
+
+def _prod_values(**kw):
+    values = {k.lower(): v for k, v in TEST_ENV.items()}
+    values.update(app_env="production", gas_internal_url=f"https://script.google.com/macros/s/{PROD_INTERNAL}/exec")
+    values.update(kw)
+    return values
+
+
+def test_prod_internal_deployment_id_must_match_in_production(monkeypatch):
+    for k in ("APP_ENV", "GAS_INTERNAL_URL"):
+        monkeypatch.delenv(k, raising=False)
+    s = config.Settings(_env_file=None, **_prod_values(prod_gas_internal_deployment_id=PROD_INTERNAL))
+    assert PROD_INTERNAL in s.prod_gas_deployment_ids
+    with pytest.raises(ValidationError, match="PROD_GAS_INTERNAL_DEPLOYMENT_ID"):
+        config.Settings(_env_file=None, **_prod_values(
+            prod_gas_internal_deployment_id=PROD_INTERNAL,
+            gas_internal_url="https://script.google.com/macros/s/AKfycbOTHERdeployment0123456789abcdefgh/exec"))
+
+
+def test_staging_refuses_the_configured_prod_internal_deployment():
+    with pytest.raises(ValidationError, match="本番の GAS のデプロイ"):
+        make_settings(prod_gas_internal_deployment_id=PROD_INTERNAL,
+                      gas_internal_url=f"https://script.google.com/macros/s/{PROD_INTERNAL}/exec")
+    assert make_settings(prod_gas_internal_deployment_id=PROD_INTERNAL).prod_gas_internal_deployment_id == PROD_INTERNAL
+
+
+@pytest.mark.parametrize("bad", ["not-an-id", "AKfycshort", config.STAGING_GAS_DEPLOYMENT_IDS_KNOWN[0]])
+def test_prod_internal_deployment_id_is_validated(bad):
+    with pytest.raises(ValidationError):
+        make_settings(prod_gas_internal_deployment_id=bad)
+
+
+def test_gas_client_refuses_other_prod_deployment(monkeypatch):
+    from app.services.gas_client import GasClientConfigError, assert_gas_url_allowed
+
+    for k in ("APP_ENV", "GAS_INTERNAL_URL"):
+        monkeypatch.delenv(k, raising=False)
+    s = config.Settings(_env_file=None, **_prod_values(prod_gas_internal_deployment_id=PROD_INTERNAL))
+    with pytest.raises(GasClientConfigError):
+        assert_gas_url_allowed("https://script.google.com/macros/s/AKfycbOTHERdeployment0123456789abcdefgh/exec", s)
+    staging = make_settings(prod_gas_internal_deployment_id=PROD_INTERNAL)
+    with pytest.raises(GasClientConfigError):
+        assert_gas_url_allowed(f"https://script.google.com/macros/s/{PROD_INTERNAL}/exec", staging)

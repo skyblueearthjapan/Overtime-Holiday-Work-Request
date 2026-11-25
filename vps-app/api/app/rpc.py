@@ -149,7 +149,7 @@ _FIRST_ARG_REQUEST_IDS = frozenset({"api_approveRequestsBatch", "api_secondaryAp
 
 IDEMPOTENCY_HEADER = "X-Idempotency-Key"
 IDEMPOTENCY_TTL = timedelta(hours=24)
-_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}\Z")
 
 ERR_SHAPE = "呼び出しの形が正しくありません。"
 ERR_FORBIDDEN_ORIGIN = "この画面からは操作できません。"
@@ -293,8 +293,14 @@ def error_response(message: str, status_code: int) -> Response:
 
 
 def _call(ctx: RpcContext, handler: Handler, args: list[Any]) -> Any:
+    sig = inspect.signature(handler)
+    params = list(sig.parameters.values())
+    if not any(p.kind == p.VAR_POSITIONAL for p in params):
+        # GAS（JS）は余った引数を黙って捨てるので、同じく切り詰める（正しさ 低-7）
+        positional = [p for p in params if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        args = list(args)[:max(0, len(positional) - 1)]
     try:
-        bound = inspect.signature(handler).bind(ctx, *args)
+        bound = sig.bind(ctx, *args)
     except TypeError as exc:
         raise RpcError(ERR_ARGS) from exc
     return handler(*bound.args, **bound.kwargs)

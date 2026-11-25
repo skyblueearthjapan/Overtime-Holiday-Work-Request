@@ -10,14 +10,17 @@
 from __future__ import annotations
 
 import functools
+import logging
 from datetime import timedelta
 from typing import Any
 
 from app import permissions, timeutil
 from app.jsutil import js_sort_key, normalize_gas
-from app.rpc import RpcContext
+from app.rpc import RpcContext, RpcError
 
 from . import store
+
+log = logging.getLogger(__name__)
 from .jsdate import days_ago, is_retroactive, js_truthy, label_ja, label_md_dow
 
 
@@ -106,11 +109,22 @@ def build_dashboard(ctx: RpcContext) -> dict:
     return {"today": today, "overtime": overtime, "holiday": holiday}
 
 
+# 想定外の例外の画面向けの文（DB の例外の文・表の名前を画面に出さない。詳細はログだけ。セキュリティ確認 低-1）
+DASHBOARD_ERROR = "データを取得できませんでした。"
+
+
+def _error_text(exc: Exception, where: str) -> str:
+    if isinstance(exc, RpcError):
+        return exc.message
+    log.exception("%s failed", where)
+    return DASHBOARD_ERROR
+
+
 def api_getDashboard(ctx: RpcContext):
     try:
         return build_dashboard(ctx)
     except Exception as exc:  # noqa: BLE001 - GAS と同じく 200 で {error}
-        return {"today": "", "overtime": [], "holiday": [], "error": str(exc)}
+        return {"today": "", "overtime": [], "holiday": [], "error": _error_text(exc, "api_getDashboard")}
 
 
 def api_getApproverDashboard(ctx: RpcContext, depts_or_dept=None):
@@ -186,7 +200,8 @@ def api_getApproverDashboard(ctx: RpcContext, depts_or_dept=None):
         return {"today": today, "overtime": overtime, "holiday": holiday, "isAdmin": admin,
                 "selectedDepts": dept_list}
     except Exception as exc:  # noqa: BLE001 - H2 の癖のまま（isAdmin:true）
-        return {"today": "", "overtime": [], "holiday": [], "isAdmin": True, "error": str(exc)}
+        return {"today": "", "overtime": [], "holiday": [], "isAdmin": True,
+                "error": _error_text(exc, "api_getApproverDashboard")}
 
 
 HANDLERS = {

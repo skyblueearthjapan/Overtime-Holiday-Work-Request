@@ -12,11 +12,11 @@ import functools
 import uuid
 
 from app import timeutil
-from app.jsutil import js_sort_key, normalize_gas
+from app.jsutil import js_array_like_items, js_object_key_order, js_property_key, js_sort_key, normalize_gas
 from app.rpc import RpcContext, RpcError
 
 from . import gasjobs, store
-from .jsdate import MISSING, days_ago, is_retroactive, js_new_date
+from .jsdate import MISSING, days_ago, is_retroactive, js_new_date, js_truthy
 
 
 def _lt(a: str, b: str) -> bool:
@@ -107,10 +107,11 @@ def api_secondaryApprove(ctx: RpcContext, request_id=None):
 
 
 def api_secondaryApproveBatch(ctx: RpcContext, request_ids=None):
-    if not request_ids:
+    # GAS: `!requestIds || requestIds.length === 0` → 空。配列でない値は包まない（正しさ 低-5）:
+    # 文字列は 1 字ずつの ID（JS の添字）、数・オブジェクトは length が無いので対象なし。
+    if not js_truthy(request_ids) or (isinstance(request_ids, (list, tuple)) and len(request_ids) == 0):
         return {"ok": True, "results": []}
-    if not isinstance(request_ids, list):
-        request_ids = [request_ids]
+    request_ids = js_array_like_items(request_ids)
     if len(request_ids) > 50:
         raise RpcError("一括承認は50件までです。")
     email = ctx.require_admin()
@@ -118,7 +119,7 @@ def api_secondaryApproveBatch(ctx: RpcContext, request_ids=None):
 
     target: dict[str, bool] = {}
     for rid in request_ids:
-        target[rid if isinstance(rid, str) else str(rid)] = True
+        target[js_property_key(rid)] = True  # targetSet[requestIds[k]]（キーは String(x)。正しさ 低-6）
     locked = store.lock_requests(db, list(target))
     if store.request_count(db) == 0:
         return {"ok": True, "results": []}
@@ -147,7 +148,7 @@ def api_secondaryApproveBatch(ctx: RpcContext, request_ids=None):
             store.mark_request(db, req)
             results.append({"requestId": rid, "ok": True, "approvedBy2": email, "approvedAt2": stamp})
         del target[rid]
-    for missing in target:
+    for missing in js_object_key_order(list(target)):
         results.append({"requestId": missing, "ok": False, "error": "見つかりません"})
 
     # GAS: PDF の作り直し（6 件以上は 500ms ずつ）→ 新しく二次承認した分の台帳。作り直しの仕事が台帳も書く。

@@ -45,7 +45,7 @@ TEST_ENV = {
     "GAS_INTERNAL_URL": "https://script.google.com/macros/s/AKfycbTESTstagingInternal/exec",
     "GAS_INTERNAL_TOKEN": "test-gas-internal-token-0123456789abcdef",
     "GAS_CALL_TIMEOUT_SECONDS": "330",
-    "SEBASTIAN_API_TOKEN": "test-sebastian-token",
+    "SEBASTIAN_API_TOKEN": "test-sebastian-token-0123456789abcdef0123",
     "SEBASTIAN_PDF_WAIT_SECONDS": "40",
     "DB_SHEET_TIMEZONE": "Asia/Tokyo",
     "PORTAL_URL": "https://portal.example.lineworks-local.info/",
@@ -113,6 +113,17 @@ def db(session_factory) -> Session:
     s = session_factory()
     yield s
     s.close()
+
+
+@pytest.fixture(autouse=True)
+def _open_write_gate(request, monkeypatch):
+    """シートへ書く前の関所（データ安全 高-3）は、ほかの試験では開けておく。関所そのものの試験は
+    @pytest.mark.real_write_gate を付ける（tests/test_write_gate.py）。"""
+    if request.node.get_closest_marker("real_write_gate"):
+        return
+    from app.services import write_gate
+
+    monkeypatch.setattr(write_gate, "check", lambda *a, **k: (True, ""))
 
 
 @pytest.fixture(autouse=True)

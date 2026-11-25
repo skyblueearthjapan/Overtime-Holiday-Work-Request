@@ -9,6 +9,7 @@
 """
 from __future__ import annotations
 
+import hmac
 import re
 from functools import lru_cache
 from typing import Literal
@@ -30,7 +31,8 @@ PROD_PDF_FOLDER_ID_FIXED = "1Bs1FvgRvlCAkpARZ0XN3YkXJS9eoIN1B"
 # 蓄積台帳（VPS は書かない。GAS が書く）
 PROD_LEDGER_SPREADSHEET_ID_FIXED = "1tKlT57SJxJijgfDVGafZ434sdVjscJJqN2uQ7P3sUyU"
 # 本番 GAS の公開版（画面用 @131）。ステージングの GAS_INTERNAL_URL がこれを指していれば起動しない。
-# 本番の内部用のデプロイを作ったら、その deploymentId もここに足す。
+# 本番の内部用のデプロイの deploymentId は、作った後に .env の PROD_GAS_INTERNAL_DEPLOYMENT_ID で渡す
+# （両方の環境の .env に書く。Settings.prod_gas_deployment_ids がこの定数と合わせて使う。データ安全 低-6）。
 PROD_GAS_DEPLOYMENT_IDS_FIXED: tuple[str, ...] = (
     "AKfycbwHnaECeni3FmmgtVzBZIM_xDMH3bw9Qx5sQMrW9J3XoRCOs_RmdyBensZX5Xta6sfIxA",
 )
@@ -62,8 +64,9 @@ KNOWN_STAGING_IDS: frozenset[str] = frozenset({
     *STAGING_GAS_DEPLOYMENT_IDS_KNOWN,
 })
 
-GAS_INTERNAL_URL_RE = re.compile(r"^https://script\.google\.com/macros/s/([A-Za-z0-9_-]+)/exec$")
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
+GAS_DEPLOYMENT_ID_RE = re.compile(r"^AKfyc[A-Za-z0-9_-]{30,}\Z")
+GAS_INTERNAL_URL_RE = re.compile(r"^https://script\.google\.com/macros/s/([A-Za-z0-9_-]+)/exec\Z")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\Z")
 
 
 def split_emails(value: str | None) -> list[str]:
@@ -112,10 +115,17 @@ class Settings(BaseSettings):
     gas_internal_url: str = Field(min_length=1)
     gas_internal_token: str = Field(min_length=32)
     gas_call_timeout_seconds: float = Field(default=330, gt=0, le=600)
+    # 本番の内部用の GAS のデプロイの deploymentId（作ったら両方の環境に書く。空なら未設定）。
+    # production: GAS_INTERNAL_URL がこれと違えば起動しない。staging: GAS_INTERNAL_URL がこれなら起動しない。
+    prod_gas_internal_deployment_id: str = ""
 
-    # Sebastian の入口（実装仕様 4-4）
-    sebastian_api_token: str = Field(min_length=1)
+    # Sebastian の入口（実装仕様 4-4）。社外から認証なしで届く入口なので 32 字以上を必須にする
+    # （本番・ステージングとも。GAS の内部用の token と同じ値は拒む。セキュリティ確認 中-1）
+    sebastian_api_token: str = Field(min_length=32)
     sebastian_pdf_wait_seconds: float = Field(default=40, gt=0, le=300)
+
+    # シートへ書く前の関所（services/write_gate。データ安全 高-3）: 合格した gas_ping がこの分数より古ければ書かない
+    sheet_write_ping_max_minutes: int = Field(default=10, ge=1, le=60)
 
     # DB スプレッドシートの時間帯（IANA 名。シートの値と違えば行の反映を止める）
     db_sheet_timezone: str = Field(min_length=1)
@@ -152,6 +162,16 @@ class Settings(BaseSettings):
     @classmethod
     def _strip(cls, v: str) -> str:
         return v.strip()
+
+    @field_validator("prod_gas_internal_deployment_id")
+    @classmethod
+    def _prod_deployment(cls, v: str) -> str:
+        v = v.strip()
+        if v and not GAS_DEPLOYMENT_ID_RE.match(v):
+            raise ValueError("PROD_GAS_INTERNAL_DEPLOYMENT_ID が GAS の deploymentId の形（AKfyc…）ではありません")
+        if v in KNOWN_STAGING_IDS:
+            raise ValueError("PROD_GAS_INTERNAL_DEPLOYMENT_ID がステージングの GAS のデプロイです")
+        return v
 
     @field_validator("gas_internal_url")
     @classmethod
@@ -194,6 +214,8 @@ class Settings(BaseSettings):
         for email in self.bootstrap_admin_list:
             if not _EMAIL_RE.match(email):
                 raise ValueError("BOOTSTRAP_ADMINS にメールアドレスでない値があります")
+        if hmac.compare_digest(self.sebastian_api_token.encode(), self.gas_internal_token.encode()):
+            raise ValueError("SEBASTIAN_API_TOKEN と GAS_INTERNAL_TOKEN に同じ値を使わないでください")
         if not self.delegate_email.endswith("@" + self.allowed_domain):
             raise ValueError("DELEGATE_EMAIL は社内ドメインのアドレスにしてください")
 
@@ -212,15 +234,23 @@ class Settings(BaseSettings):
                     raise ValueError(f"{name} が本番の ID を指しています")
             if len(set(staging_values.values())) != len(staging_values):
                 raise ValueError("ステージングの DB・台帳・PDF フォルダの ID が重なっています")
-            if deployment in PRODUCTION_IDS:
+            if deployment in PRODUCTION_IDS or deployment in self.prod_gas_deployment_ids:
                 raise ValueError("ステージングの GAS_INTERNAL_URL が本番の GAS のデプロイを指しています")
         else:
             if deployment in KNOWN_STAGING_IDS:
                 raise ValueError("本番の GAS_INTERNAL_URL がステージングの GAS のデプロイを指しています")
+            if self.prod_gas_internal_deployment_id and deployment != self.prod_gas_internal_deployment_id:
+                raise ValueError("本番の GAS_INTERNAL_URL が PROD_GAS_INTERNAL_DEPLOYMENT_ID のデプロイと違います")
             for name, value in staging_values.items():
                 if value and value in PRODUCTION_IDS:
                     raise ValueError(f"{name} が本番の ID を指しています")
         return self
+
+    @property
+    def prod_gas_deployment_ids(self) -> tuple[str, ...]:
+        """本番 GAS のデプロイ（定数の画面用＋設定した内部用）。"""
+        extra = (self.prod_gas_internal_deployment_id,) if self.prod_gas_internal_deployment_id else ()
+        return PROD_GAS_DEPLOYMENT_IDS_FIXED + extra
 
     @property
     def bootstrap_admin_list(self) -> list[str]:

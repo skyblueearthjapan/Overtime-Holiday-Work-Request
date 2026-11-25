@@ -27,11 +27,12 @@ def _config(url: str) -> Config:
     return cfg
 
 
-def test_single_initial_revision():
+def test_revision_chain_is_linear():
     script = ScriptDirectory.from_config(_config("sqlite://"))
     revisions = list(script.walk_revisions())
-    assert [r.revision for r in revisions] == ["0001"]
-    assert Path(revisions[0].path).name == "0001_initial_schema.py"
+    assert [r.revision for r in revisions] == ["0002", "0001"]
+    assert Path(revisions[-1].path).name == "0001_initial_schema.py"
+    assert revisions[0].down_revision == "0001" and len(script.get_heads()) == 1
 
 
 def test_upgrade_head_matches_models_and_downgrades(tmp_path):

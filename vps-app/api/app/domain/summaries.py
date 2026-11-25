@@ -53,6 +53,9 @@ def build_monthly_summary(ctx: RpcContext, year_month: Any, dept_filter: Any) ->
     if not js_truthy(y) or not js_truthy(m) or m < 1 or m > 12:
         raise RpcError("yearMonthは yyyy-mm で指定してください")
     year, month = _js_int(y), _js_int(m)
+    if not 1 <= year <= 9998:
+        # Python の日付は 1〜9999 年だけ。範囲外は 500 にせず同じ文の 400（GAS は空の集計。仕様 8-2。正しさ 低-16）
+        raise RpcError("yearMonthは yyyy-mm で指定してください")
     start = date(year, month, 1)
     end = add_months(start, 1)
 
@@ -278,6 +281,8 @@ def api_getClosingSummary(ctx: RpcContext, year_month=None, dept=None, worker_to
     if not js_truthy(y) or not js_truthy(m) or m < 1 or m > 12:
         raise RpcError("yearMonth は yyyy-MM で指定してください: " + js_string(year_month))
     year, month = _js_int(y), _js_int(m)
+    if not 1 <= year <= 9998:  # 正しさ 低-16（上と同じ）
+        raise RpcError("yearMonth は yyyy-MM で指定してください: " + js_string(year_month))
     period_from = date(year, month, 16)
     period_to = add_months(period_from, 1)
     ym_label = f"{year}-{month:02d}"

@@ -28,11 +28,15 @@ x-api-env: &api-env
   GAS_INTERNAL_URL: ${GAS_INTERNAL_URL}
   GAS_INTERNAL_TOKEN: ${GAS_INTERNAL_TOKEN}
   GAS_CALL_TIMEOUT_SECONDS: ${GAS_CALL_TIMEOUT_SECONDS:-330}
+  PROD_GAS_INTERNAL_DEPLOYMENT_ID: ${PROD_GAS_INTERNAL_DEPLOYMENT_ID:-}
   SEBASTIAN_API_TOKEN: ${SEBASTIAN_API_TOKEN}
   SEBASTIAN_PDF_WAIT_SECONDS: ${SEBASTIAN_PDF_WAIT_SECONDS:-40}
   DB_SHEET_TIMEZONE: ${DB_SHEET_TIMEZONE}
   PORTAL_URL: ${PORTAL_URL}
   SHEET_CONFIG_SYNC_MINUTES: ${SHEET_CONFIG_SYNC_MINUTES:-5}
+  SHEET_WRITE_PING_MAX_MINUTES: ${SHEET_WRITE_PING_MAX_MINUTES:-10}
+  # 1 にすると、worker の起動時に枠の中にある毎日の予定（0:30・2:10・6:50 など）をその回だけ飛ばす（切り替えの夜に使う）
+  SKIP_DAILY_ON_STARTUP: ${SKIP_DAILY_ON_STARTUP:-0}
   TZ: Asia/Tokyo
   # uvicorn が X-Forwarded-* を信じる相手（web コンテナの固定 IP だけ）
   FORWARDED_ALLOW_IPS: ${FORWARDED_ALLOW_IPS:-10.93.0.10}
@@ -65,6 +69,9 @@ services:
     container_name: overtime-api
     restart: unless-stopped
     environment: *api-env
+    # 権限を持たない（ポート 8000 は特権の要らない番号。セキュリティ 低-4）
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       db:
         condition: service_healthy
@@ -76,6 +83,8 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "app.worker"]
     environment: *api-env
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       disable: true
     depends_on:

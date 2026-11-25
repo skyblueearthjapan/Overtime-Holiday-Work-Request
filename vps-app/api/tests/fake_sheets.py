@@ -28,6 +28,10 @@ from app.services.sheets_api import API_BASE, SheetsApi
 _EPOCH = datetime(1899, 12, 30)
 
 
+class FormulaCell(str):
+    """USER_ENTERED で式として入ったセル（試験で「式になった」ことを見分ける印）。"""
+
+
 def serial(text: str) -> float:
     """'yyyy-MM-dd HH:mm:ss[.fff]'・'yyyy-MM-dd'（シートの壁時計）→ シリアル値。"""
     for fmt in ("%Y-%m-%d %H:%M:%S.%f", "%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%Y-%m-%d"):
@@ -187,6 +191,7 @@ class FakeBook:
     sid: str
     tz: str = "Asia/Tokyo"
     tabs: dict[str, FakeTab] = field(default_factory=dict)
+    title: str = ""  # スプレッドシートの名前（空なら sid）
 
     def add_tab(self, title: str, values: list[list], formats: dict | None = None, row_count: int | None = None,
                 col_count: int | None = None) -> FakeTab:
@@ -284,7 +289,7 @@ class FakeSheets:
             sheets.append({"properties": {"sheetId": tab.sheet_id, "title": tab.title, "index": i,
                                           "gridProperties": {"rowCount": tab.row_count,
                                                              "columnCount": tab.col_count}}})
-        meta = {"properties": {"title": sid, "timeZone": book.tz, "locale": "en_US"}, "sheets": sheets}
+        meta = {"properties": {"title": book.title or sid, "timeZone": book.tz, "locale": "en_US"}, "sheets": sheets}
         if ("includeGridData", "true") in plist:
             ranges = [v for k, v in plist if k == "ranges"]
             out = []
@@ -340,6 +345,10 @@ class FakeSheets:
     def _user_entered(self, v):
         if not isinstance(v, str):
             return v, None
+        if v.startswith("'"):
+            return v[1:], None  # 先頭の ' は「文字として入れる」印（値には残らない）
+        if v[:1] == "=" or (v[:1] in "+-" and not re.fullmatch(r"[+-]\d*\.?\d+", v.strip())):
+            return FormulaCell(v if v[:1] == "=" else "=" + v), None  # 本物と同じく式になる
         s = v.strip()
         if s == "":
             return "", None

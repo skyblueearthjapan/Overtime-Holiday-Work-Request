@@ -95,6 +95,35 @@ def assert_writable(spreadsheet_id: str, tab: str, purpose: str, settings: Setti
     return sid
 
 
+# 戻しの道具（tools/restore_tabs_from_copy.py）が控えから写し戻してよいタブ。
+# B 区分の 3 タブは、道具の引数でタブの名前をはっきり書いたときだけ（protected_listed=True）。
+RESTORE_PROTECTED_TABS = frozenset({"Settings", "DeptApprovers", "ApproverMap"})
+RESTORE_TABS = A_TABS | C_TABS
+
+
+def assert_restore_target(spreadsheet_id: str, tab: str, settings: Settings | None = None, *,
+                          protected_listed: bool = False) -> str:
+    """戻しの道具の書き込み先の確かめ。この環境の DB スプレッドシートの、A・C 区分（と名前を書いた B 区分の 3 タブ）
+    だけ。api・worker はこの関数を使わない（PURPOSE_TABS にも入れない）。"""
+    s = _settings(settings)
+    sid = (spreadsheet_id or "").strip()
+    if sid in never_writable_ids(s):
+        raise UnsafeWriteError("マスタ元・蓄積台帳・PDF フォルダへは書き込めません")
+    if s.is_staging and sid in _config.PRODUCTION_IDS:
+        raise UnsafeWriteError("ステージングから本番のスプレッドシートへは書き込めません")
+    if not s.is_staging and sid in _config.KNOWN_STAGING_IDS:
+        raise UnsafeWriteError("本番からステージングのスプレッドシートへは書き込めません")
+    if not sid or sid != writable_spreadsheet_id(s):
+        raise UnsafeWriteError("戻し先はこの環境の DB スプレッドシートだけです")
+    if tab in RESTORE_TABS:
+        return sid
+    if tab in RESTORE_PROTECTED_TABS:
+        if not protected_listed:
+            raise UnsafeWriteError(f"タブ「{tab}」は --tabs に名前を書いたときだけ戻せます")
+        return sid
+    raise UnsafeWriteError(f"タブ「{tab}」は戻しの道具で書けません")
+
+
 def assert_write_method(method: str, tab: str) -> None:
     """書き方の許可リスト。values.batchClear は C 区分だけ、appendDimension は A 区分だけ。"""
     if method not in WRITE_METHODS:

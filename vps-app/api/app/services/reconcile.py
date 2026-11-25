@@ -23,11 +23,13 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import timeutil
-from app.models import SYNCED_TABLES, SheetSyncState, SyncRun
+from app.jsutil import normalize_gas
+from app.models import SYNCED_TABLES, Job, SheetSyncState, SyncRun
 from app.safety import UnsafeWriteError
 from app.services import row_sync
 from app.services import sheet_codec as codec
-from app.services.sheets_api import SheetsApi, SheetsError, quote_sheet, sheet_id_by_title
+from app.services import write_gate
+from app.services.sheets_api import SheetsApi, SheetsError, quote_sheet
 
 log = logging.getLogger(__name__)
 
@@ -115,17 +117,44 @@ def compare_tab(spec: codec.TableSpec, unformatted: list, formatted: list, db_ro
             "dbRows": len(db_rows), "compared": compared, "col": col}
 
 
+def gas_busy_request_ids(db: Session) -> set[str]:
+    """GAS の仕事が待ち・実行中の申請（照合で比べない）。"""
+    rows = db.scalars(select(Job.request_id).where(Job.lane == "gas", Job.state.in_(("pending", "running")),
+                                                   Job.request_id != "")).all()
+    return {normalize_gas(r) for r in rows}
+
+
+# GAS が書く PDF の 3 列。照合はシートに値がある所を DB の空で上書きしない（データ安全 高-2）
+PDF_HEADERS = ("pdfFileId", "pdfFolderId", "pdfGeneratedAt")
+
+
+def split_protected_diffs(table: str, diffs: list[dict]) -> tuple[list[dict], list[dict]]:
+    """差を「直す」と「直さない（シートの PDF の列に値があり、DB が空）」に分ける。"""
+    if table != "requests":
+        return diffs, []
+    fix, keep = [], []
+    for d in diffs:
+        if d["header"] in PDF_HEADERS and codec.is_blank(d.get("db")) and not codec.is_blank(d.get("sheet")):
+            keep.append(d)
+        else:
+            fix.append(d)
+    return fix, keep
+
+
 def db_rows_for(db: Session, table: str) -> list[dict]:
     """DB の行を compare_tab の形に（反映待ち・blocked は skip）。"""
     spec = codec.TABLES[table]
     model = SYNCED_TABLES[table]
     states = {s.pk: s for s in db.scalars(select(SheetSyncState).where(SheetSyncState.table_name == table))}
+    busy = gas_busy_request_ids(db) if table in ("requests", "work_logs") else set()
     out = []
     for row in db.scalars(select(model)):
         pk = str(row.request_id if table == "requests" else row.id)
         st = states.get(pk)
         dirty = bool(st and st.desired_version > st.synced_version)
         blocked = bool(st and st.state == "blocked")
+        if busy and normalize_gas(getattr(row, "request_id", "")) in busy:
+            blocked = True  # GAS の仕事の途中の申請は比べない（GAS がシートに書いた列が DB にまだ無い。データ安全 中-1）
         synced = (st.synced_values if st else {}) or {}
         out.append({"pk": pk, "sheet_row": row.sheet_row, "version": int(row.row_version),
                     "values": {c.header: codec.db_value(c, row) for c in spec.columns},
@@ -149,13 +178,6 @@ def _fix_tab(api: SheetsApi, sid: str, spec: codec.TableSpec, meta: dict, unform
              rows: list[dict], session_factory, tz) -> int:
     """差のあるセルを DB の値で書き直す。書き直した行の数。"""
     by_pk = {d["pk"]: d for d in rows}
-    grid = {}
-    for s in meta.get("sheets", []):
-        if s["properties"]["title"] == spec.tab:
-            grid = s["properties"].get("gridProperties") or {}
-    ctx = row_sync.TabContext(spec=spec, sheet_id=sheet_id_by_title(meta, spec.tab), col=result["col"], id_rows={},
-                              last_data_row=len(unformatted), row_count=int(grid.get("rowCount") or 0),
-                              col_count=int(grid.get("columnCount") or 26))
     headers_by_pk: dict[str, list[str]] = {}
     for diff in result["diffs"]:
         headers_by_pk.setdefault(diff["pk"], [])
@@ -178,6 +200,18 @@ def _fix_tab(api: SheetsApi, sid: str, spec: codec.TableSpec, meta: dict, unform
         works.append(row_sync.RowWork(table=spec.table, pk=pk, version=d["version"], values=d["values"],
                                       kinds=d["kinds"], synced=d["synced"], sheet_row=d["sheet_row"], seq=0,
                                       first_dirty_at=None, attempts=0, target_row=d["sheet_row"], headers=headers))
+    if not works:
+        return 0
+    # 書く直前に ID の列を読み直し、読んだ後に並べ替えられた行には書かない（データ安全 低-1）
+    ctx = row_sync.load_tab(api, sid, spec, meta, tz, need_tail=False)
+    moved = [w for w in works
+             if w.sheet_row not in ctx.id_rows
+             or row_sync._blank_id(row_sync.db_id(spec, w.values))
+             or not row_sync._same_id(spec, ctx.id_rows[w.sheet_row], row_sync.db_id(spec, w.values))]
+    if moved:
+        log.warning("reconcile: %s の %d 行は比べた後に位置が変わったので書きません", spec.tab, len(moved))
+        moved_ids = {id(w) for w in moved}
+        works = [w for w in works if id(w) not in moved_ids]
     if not works:
         return 0
     row_sync.load_refs(api, sid, ctx, timeutil.now_utc())
@@ -246,10 +280,24 @@ def run(session_factory: Callable[[], Session], *, check_only: bool = False, api
             return {k: v for k, v in summary.items() if not k.startswith("_")}
         fixed = 0
         if not check_only and total:
+            # 書く前の関所（データ安全 高-3）: GAS が移転モードでなければ書かずに報告だけ
+            with session_factory() as db:
+                allowed, reason = write_gate.check(db, settings)
+            if not allowed:
+                summary.update({"ok": False, "fixedRows": 0, "writeBlocked": reason,
+                                "stopped": "書き込みの関所で止めました（差は報告だけ）: " + reason})
+                _record(session_factory, False, summary)
+                return {k: v for k, v in summary.items() if not k.startswith("_")}
+            kept: list[dict] = []
             for table in codec.TABLE_ORDER:
-                if results[table]["diffs"]:
-                    fixed += _fix_tab(api, sid, codec.TABLES[table], meta, reads[table][0], results[table],
-                                      db_tables[table], session_factory, tz)
+                to_fix, keep = split_protected_diffs(table, results[table]["diffs"])
+                kept.extend(keep)
+                if to_fix:
+                    fixed += _fix_tab(api, sid, codec.TABLES[table], meta, reads[table][0],
+                                      {**results[table], "diffs": to_fix}, db_tables[table], session_factory, tz)
+            if kept:
+                # シートの PDF の列は残し、管理者が見られるように報告する（DB に記録されていない PDF）
+                summary["pdfKeptOnSheet"] = kept[:MAX_LISTED]
         summary["fixedRows"] = fixed
         ok = (total == 0 and mismatched == 0) if check_only else mismatched == 0
         summary["ok"] = ok
