@@ -191,6 +191,7 @@ class FakeBook:
     sid: str
     tz: str = "Asia/Tokyo"
     tabs: dict[str, FakeTab] = field(default_factory=dict)
+    title: str = ""  # スプレッドシートの名前（空なら sid）
 
     def add_tab(self, title: str, values: list[list], formats: dict | None = None, row_count: int | None = None,
                 col_count: int | None = None) -> FakeTab:
@@ -288,7 +289,7 @@ class FakeSheets:
             sheets.append({"properties": {"sheetId": tab.sheet_id, "title": tab.title, "index": i,
                                           "gridProperties": {"rowCount": tab.row_count,
                                                              "columnCount": tab.col_count}}})
-        meta = {"properties": {"title": sid, "timeZone": book.tz, "locale": "en_US"}, "sheets": sheets}
+        meta = {"properties": {"title": book.title or sid, "timeZone": book.tz, "locale": "en_US"}, "sheets": sheets}
         if ("includeGridData", "true") in plist:
             ranges = [v for k, v in plist if k == "ranges"]
             out = []
