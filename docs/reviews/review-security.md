@@ -306,7 +306,7 @@ var fn = ALLOWED_HANDLERS[name] ? global[name] : null;
 | 指摘 | 結果 | コミット・試験 |
 |---|---|---|
 | 高-1 数式の差し込み | 直した（VPS 側。利用者の文字は拒まず変えない。行の反映・照合は `stringValue`、マスタ同期は `= + - @` で始まる文字に `'` を付ける、戻しの道具は RAW。台帳・PDF のひな形への書き込みは GAS の担当） | 96902d3・`tests/test_formula_safety.py` |
-| 中-1 Sebastian の token と例外の文 | 直した（`SEBASTIAN_API_TOKEN` は本番・ステージングとも 32 字以上、GAS の内部用 token と同じ値は拒む。想定外の例外は `internal error` だけ返す。nginx で `/api/sebastian` を 1 IP 1 分 30 回に） | 257b45e・5ada45a・`test_short_sebastian_token_refuses_to_start`・`test_unexpected_exception_does_not_leak_internal_text`・`test_nginx_sebastian_and_auth_limits_*` |
+| 中-1 Sebastian の token と例外の文 | 直した（`SEBASTIAN_API_TOKEN` はステージングで 32 字以上。本番は Sebastian が今使う値をそのまま使うため 8 字以上で起動し、32 字未満はログと管理者の欄に警告＝verify-fixes R-2。GAS の内部用 token と同じ値は拒む。想定外の例外は `internal error` だけ返す。nginx で `/api/sebastian` を 1 IP 1 分 30 回に） | 257b45e・5ada45a・`test_short_sebastian_token_refuses_to_start`・`test_unexpected_exception_does_not_leak_internal_text`・`test_nginx_sebastian_and_auth_limits_*` |
 | 中-2 GAS の `vpsTryTrash_` | 直さない（GAS の担当） | — |
 | 中-3 委任トークンの drive の許可 | 直さない（控えの道具 `tools/cutover_backup.py` が Drive の複製に drive の許可を使うため。許可を分ける作りは切り替えの後に決める） | — |
 | 中-4 90 日のセッション | 一部（ログインの成功・失敗をログに残す。全員の取り消し手順を RUNBOOK に書いた。端末の一覧の画面は作っていない） | 5ada45a・9c36d54 |

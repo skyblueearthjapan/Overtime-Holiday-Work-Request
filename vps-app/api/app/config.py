@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import hmac
+import logging
 import re
 from functools import lru_cache
 from typing import Literal
@@ -64,6 +65,10 @@ KNOWN_STAGING_IDS: frozenset[str] = frozenset({
     *STAGING_GAS_DEPLOYMENT_IDS_KNOWN,
 })
 
+log = logging.getLogger(__name__)
+
+SEBASTIAN_TOKEN_MIN_PRODUCTION = 8
+SEBASTIAN_TOKEN_RECOMMENDED = 32
 GAS_DEPLOYMENT_ID_RE = re.compile(r"^AKfyc[A-Za-z0-9_-]{30,}\Z")
 GAS_INTERNAL_URL_RE = re.compile(r"^https://script\.google\.com/macros/s/([A-Za-z0-9_-]+)/exec\Z")
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\Z")
@@ -119,9 +124,12 @@ class Settings(BaseSettings):
     # production: GAS_INTERNAL_URL がこれと違えば起動しない。staging: GAS_INTERNAL_URL がこれなら起動しない。
     prod_gas_internal_deployment_id: str = ""
 
-    # Sebastian の入口（実装仕様 4-4）。社外から認証なしで届く入口なので 32 字以上を必須にする
-    # （本番・ステージングとも。GAS の内部用の token と同じ値は拒む。セキュリティ確認 中-1）
-    sebastian_api_token: str = Field(min_length=32)
+    # Sebastian の入口（実装仕様 4-4）。社外から認証なしで届く入口（セキュリティ 中-1・verify-fixes R-2）:
+    # - staging: 32 字以上を必須（ステージング用に作った乱数）。
+    # - production: Sebastian が今使っている token（GAS のプロパティの値）をそのまま使うので変えられない。
+    #   8 字以上なら起動し、32 字未満は WARNING をログ（値は出さない）と管理者の欄（ops_getStatus）に出す。
+    # GAS の内部用の token と同じ値はどちらでも拒む。
+    sebastian_api_token: str = Field(min_length=SEBASTIAN_TOKEN_MIN_PRODUCTION)
     sebastian_pdf_wait_seconds: float = Field(default=40, gt=0, le=300)
 
     # シートへ書く前の関所（services/write_gate。データ安全 高-3）: 合格した gas_ping がこの分数より古ければ書かない
@@ -214,6 +222,11 @@ class Settings(BaseSettings):
         for email in self.bootstrap_admin_list:
             if not _EMAIL_RE.match(email):
                 raise ValueError("BOOTSTRAP_ADMINS にメールアドレスでない値があります")
+        if self.is_staging and len(self.sebastian_api_token) < SEBASTIAN_TOKEN_RECOMMENDED:
+            raise ValueError(f"ステージングの SEBASTIAN_API_TOKEN は {SEBASTIAN_TOKEN_RECOMMENDED} 字以上にしてください")
+        if self.sebastian_token_is_weak:
+            log.warning("SEBASTIAN_API_TOKEN が %d 字未満です（Sebastian と一緒に入れ替えることをすすめます）",
+                        SEBASTIAN_TOKEN_RECOMMENDED)
         if hmac.compare_digest(self.sebastian_api_token.encode(), self.gas_internal_token.encode()):
             raise ValueError("SEBASTIAN_API_TOKEN と GAS_INTERNAL_TOKEN に同じ値を使わないでください")
         if not self.delegate_email.endswith("@" + self.allowed_domain):
@@ -245,6 +258,11 @@ class Settings(BaseSettings):
                 if value and value in PRODUCTION_IDS:
                     raise ValueError(f"{name} が本番の ID を指しています")
         return self
+
+    @property
+    def sebastian_token_is_weak(self) -> bool:
+        """Sebastian の token が 32 字未満か（本番だけ起こりうる。値は出さない。管理者の欄の警告に使う）。"""
+        return len(self.sebastian_api_token) < SEBASTIAN_TOKEN_RECOMMENDED
 
     @property
     def prod_gas_deployment_ids(self) -> tuple[str, ...]:

@@ -374,17 +374,49 @@ def test_config_defines_the_fixed_constants():
 # ===== Sebastian の token の強さ（セキュリティ確認 中-1） =====
 
 
-@pytest.mark.parametrize("app_env", ["staging", "production"])
-def test_short_sebastian_token_refuses_to_start(app_env, monkeypatch):
-    monkeypatch.delenv("SEBASTIAN_API_TOKEN", raising=False)
+def _env_values(app_env, token):
     values = {k.lower(): v for k, v in TEST_ENV.items()}
-    values.update(app_env=app_env, sebastian_api_token="x" * 31)
+    values.update(app_env=app_env, sebastian_api_token=token)
     if app_env == "production":
         values.update(gas_internal_url="https://script.google.com/macros/s/AKfycbPRODinternal/exec")
+    return values
+
+
+def test_staging_requires_32_char_sebastian_token(monkeypatch):
+    monkeypatch.delenv("SEBASTIAN_API_TOKEN", raising=False)
+    with pytest.raises(ValidationError, match="32 字以上"):
+        config.Settings(_env_file=None, **_env_values("staging", "x" * 31))  # type: ignore[call-arg]
+    s = config.Settings(_env_file=None, **_env_values("staging", "x" * 32))  # type: ignore[call-arg]
+    assert s.sebastian_token_is_weak is False
+
+
+def test_production_accepts_existing_short_sebastian_token_with_warning(monkeypatch, caplog):
+    """verify-fixes R-2: 本番は Sebastian が今使う token をそのまま使う（8 字以上なら起動、32 字未満は警告）。"""
+    import logging
+
+    monkeypatch.delenv("SEBASTIAN_API_TOKEN", raising=False)
+    monkeypatch.delenv("APP_ENV", raising=False)
+    monkeypatch.delenv("GAS_INTERNAL_URL", raising=False)
+    secret = "abcDEF1234"  # 10 字
+    with caplog.at_level(logging.WARNING, logger="app.config"):
+        s = config.Settings(_env_file=None, **_env_values("production", secret))  # type: ignore[call-arg]
+    assert s.sebastian_token_is_weak is True
+    assert any("SEBASTIAN_API_TOKEN" in r.getMessage() for r in caplog.records)
+    assert all(secret not in r.getMessage() for r in caplog.records)  # 値はログに出さない
     with pytest.raises(ValidationError):
-        config.Settings(_env_file=None, **values)  # type: ignore[call-arg]
-    values["sebastian_api_token"] = "x" * 32
-    assert config.Settings(_env_file=None, **values).sebastian_api_token == "x" * 32  # type: ignore[call-arg]
+        config.Settings(_env_file=None, **_env_values("production", "x" * 7))  # type: ignore[call-arg]
+    with pytest.raises(ValidationError):
+        config.Settings(_env_file=None, **_env_values("production", ""))  # type: ignore[call-arg]
+    assert config.Settings(_env_file=None, **_env_values("production", "y" * 32)).sebastian_token_is_weak is False
+
+
+def test_weak_sebastian_token_is_shown_in_ops_status(db, monkeypatch):
+    from app.services import ops_status
+
+    weak = type("S", (), {"sebastian_token_is_weak": True, "is_staging": False, "sheet_write_ping_max_minutes": 10})()
+    monkeypatch.setattr(ops_status, "get_settings", lambda: weak)
+    warnings = ops_status.get_ops_status(db)["warnings"]
+    assert warnings and "32 字未満" in warnings[0]
 
 
 def test_sebastian_token_must_differ_from_gas_internal_token():
