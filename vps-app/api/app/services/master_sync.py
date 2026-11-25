@@ -12,7 +12,8 @@ GAS と同じにすること（syncMasters.gs の行）:
 - Date は「JST の 0 時ちょうど → 'yyyy-MM-dd'、それ以外 → 'yyyy-MM-dd HH:mm:ss'」（normalizeDatesForWrite_・26f81a5）。
   UNFORMATTED で読み、マスタ元のファイルの時間帯の壁時計で日時に直してから JST で同じ規則の文字にする
   （日付のセルかは FORMATTED の表示で見分ける）。
-- 書くのは 1 行目から、setValues と同じ USER_ENTERED。読み取りは失敗したら 2 秒待って 3 回まで（readSheetData_）。
+- 書くのは 1 行目から、setValues と同じ USER_ENTERED（ただし = + - @ で始まる文字は ' を付けて文字にする。
+  式にしない＝セキュリティ 高-1。GAS はマスタ元の計算結果の文字が = で始まれば式として書いていた）。読み取りは失敗したら 2 秒待って 3 回まで（readSheetData_）。
 - タブごとに失敗を握り、ほかのタブは続ける（83-85 行）。
 
 変えたこと（実装仕様 11-1・6-8）:
@@ -121,6 +122,23 @@ def as_gas_reads(value: Any) -> str:
     return js_string(value)
 
 
+# USER_ENTERED で式として読まれる先頭の文字（セキュリティ 高-1）
+FORMULA_LEADS = ("=", "+", "-", "@")
+
+
+def formula_safe(value: Any) -> Any:
+    """USER_ENTERED で書く値を、式にならない形にする。
+
+    '=' '+' '-' '@' で始まる文字（ただの数 '-5'・'+3' を除く）は、先頭に ' を付けて文字のセルにする
+    （' は Sheets の「文字として入れる」印で、セルの値には残らない）。数・日付・ほかの文字は GAS の setValues と同じ。
+    """
+    if value is None:
+        return ""
+    if isinstance(value, str) and value[:1] in FORMULA_LEADS and not _NUMBER_RE.match(value.strip()):
+        return "'" + value
+    return value
+
+
 def _index(header: list, label: str) -> int:
     for i, h in enumerate(header):
         if js_trim(js_string(h)) == label:
@@ -200,7 +218,7 @@ def write_tab(api: SheetsApi, sid: str, dst: str, data: list[list], meta: dict) 
             grid = s["properties"].get("gridProperties") or {}
     row_count = int(grid.get("rowCount") or rows)
     col_count = int(grid.get("columnCount") or cols)
-    values = [["" if v is None else v for v in row] for row in data]
+    values = [[formula_safe(v) for v in row] for row in data]
     api.values_batch_update(sid, [{"range": f"{q}!A1:{column_letter(cols - 1)}{rows}", "values": values}],
                             tab=dst, purpose="master_sync", input_option="USER_ENTERED")
     clear = []
