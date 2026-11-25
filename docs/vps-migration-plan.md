@@ -152,6 +152,7 @@
 | ステージングの GAS（DB に紐づいたコピー） | scriptId `1y027cB_59N1P2o3toawpCyPZ2k_W6mPETtgiDpPFtpY7TKgBWslnyLNM`。トリガーなし。初回の実行にはオーナーの「許可」が要る | 作成済み（2026-11-26） |
 | ステージングの台帳（コピー） | `16M5PxyozS_tTEpQmR6jizICgZov4SoK2M1IO4TG1oHI` | 作成済み（2026-11-26） |
 | ステージングの PDF フォルダ | `1KsWanVEQr-gMsb_N9mxzplEjKFibsnrc` | 作成済み（2026-11-26） |
+| ステージングの GAS の公開版 | `AKfycbw9uPC4C5zlY5S3YqR9Yo0TECZETvUUgGY2ih447eL8E8XS0_VhVpwtftinTr4Nj5A` @2（team-g-gas `8524708` を clasp push）。オーナーの許可と `VPS_INTERNAL_TOKEN` の設定が要る | 作成済み（2026-11-26） |
 | Cloudflare | Tunnel `overtime-vps`（id `1e31b48e…`）、DNS `overtime.lineworks-local.net` → `http://web:80`。TUNNEL_TOKEN は `~/.secrets/overtime/tunnel-token.env` | 作成済み（2026-11-26） |
 | VPS の置き場 | `/opt/overtime`（lineworks 所有、750） | 作成済み（2026-11-26） |
 | OAuth クライアント | GCP `sebastian01` で作る途中。GCP の画面が本人確認のパスワードを求めたため、オーナーの手が要る | 未（2026-11-26） |
