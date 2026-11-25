@@ -27,6 +27,9 @@
   - 移行先の表（業務・B 区分・sheet_sync_state・jobs・idempotency_keys・sync_runs・sessions）のどれかに行があれば止める。
     --truncate を付けたときだけ、それらをすべて空にしてから入れる（罠 24b）。1 トランザクションで入れる。
   - 入れた後に連番を最大値の先へ進める（罠 9）。
+  - APP_ENV=staging では、申請の pdfFileId・pdfFolderId を空にし、元の値を source_pdf_file_id・source_pdf_folder_id に
+    残す（参照用。仕事は使わない）。ステージングの GAS が本番の PDF をゴミ箱へ移さないため（データ安全 高-1）。
+    その行は反映待ちにするので、行の反映がステージングのシートの 2 列も空にする。
   - Requests・WorkLogs・Settings のどれかが 0 行なら止める（--dry-run でも。罠 49）。
 終了コード: 0＝成功、2＝止めた、1＝入れた後の照合が合わない。
 """
@@ -319,7 +322,33 @@ def sync_state_rows(tables: dict) -> list[dict]:
     return out
 
 
-def insert_tables(engine: Any, tables: dict, *, truncate: bool) -> None:
+def blank_pdf_ids_for_staging(tables: dict, states: list[dict]) -> int:
+    """ステージングへの移行: 申請の pdfFileId・pdfFolderId を空にし、元の値は source_pdf_* に残す（データ安全 高-1）。
+
+    ステージングの GAS が本番の PDF を「古い PDF」としてゴミ箱へ移さないため（oldPdfFileId は DB の値から作る）。
+    synced_values はシートの今の値（本番の ID）のまま、行を反映待ちにするので、行の反映がステージングのシートの
+    2 列も空にする。空にした行の数を返す。
+    """
+    by_pk = {st["pk"]: st for st in states if st["table_name"] == "requests"}
+    now = datetime.now().astimezone()
+    n = 0
+    for row in tables["requests"]:
+        file_id, folder_id = row.get("pdf_file_id") or "", row.get("pdf_folder_id") or ""
+        row.setdefault("source_pdf_file_id", "")
+        row.setdefault("source_pdf_folder_id", "")
+        if not file_id and not folder_id:
+            continue
+        row["source_pdf_file_id"], row["source_pdf_folder_id"] = file_id, folder_id
+        row["pdf_file_id"], row["pdf_folder_id"] = "", ""
+        row["row_version"] = int(row.get("row_version") or 1) + 1
+        st = by_pk[str(row["request_id"])]
+        st.update(desired_version=row["row_version"], first_dirty_at=now)
+        st["next_try_at"] = now
+        n += 1
+    return n
+
+
+def insert_tables(engine: Any, tables: dict, *, truncate: bool, states: list[dict] | None = None) -> None:
     """1 つのトランザクションで入れる。表に行があれば止める（--truncate なら先に空にする）。"""
     from sqlalchemy import delete, func, select, text
 
@@ -340,7 +369,8 @@ def insert_tables(engine: Any, tables: dict, *, truncate: bool) -> None:
         for t in ("requests", "work_logs", "batch_logs", "settings", "dept_approvers", "approver_map_rows"):
             if tables[t]:
                 conn.execute(targets[t].insert(), tables[t])
-        states = sync_state_rows(tables)
+        if states is None:
+            states = sync_state_rows(tables)
         if states:
             conn.execute(targets["sheet_sync_state"].insert(), states)
         advance_sequences(conn)
@@ -400,7 +430,7 @@ def verify_in_db(engine: Any, tables: dict, reads: dict) -> tuple[list, dict]:
 
 
 def run(reads: dict, engine: Optional[Any], *, dry_run: bool, truncate: bool = False,
-        expected_tz: str | None = None) -> dict:
+        expected_tz: str | None = None, app_env: str = "production") -> dict:
     if expected_tz and reads["tz"] != expected_tz:
         raise MigrationStop(f"DB スプレッドシートの時間帯（{reads['tz']}）が DB_SHEET_TIMEZONE（{expected_tz}）と違います")
     prepared = prepare(reads)
@@ -419,10 +449,13 @@ def run(reads: dict, engine: Optional[Any], *, dry_run: bool, truncate: bool = F
         "settingsOverlaps": prepared["settingsOverlaps"],
         "settingsForEnv": {k: settings.get(k, "") for k in REPORTED_SETTING_KEYS},
     }
+    states = sync_state_rows(tables)  # シートの今の値（空にする前）
+    if app_env == "staging":
+        report["stagingPdfIdsBlanked"] = blank_pdf_ids_for_staging(tables, states)
     if not dry_run:
         if engine is None:
             raise MigrationStop("移行先の DB（--database-url か DATABASE_URL）が未設定です。")
-        insert_tables(engine, tables, truncate=truncate)
+        insert_tables(engine, tables, truncate=truncate, states=states)
         report["verifyProblems"], report["postMigrationDiffs"] = verify_in_db(engine, tables, reads)
     return report
 
@@ -461,10 +494,11 @@ def main(argv: Optional[list] = None) -> int:
         from app.db import make_engine
 
         expected_tz = get_settings().db_sheet_timezone
+        app_env = get_settings().app_env
         engine = make_engine(args.database_url)
         reads = read_sheets(_sheets_api(engine), args.spreadsheet_id)
         report = run(reads, None if args.dry_run else engine, dry_run=args.dry_run, truncate=args.truncate,
-                     expected_tz=expected_tz)
+                     expected_tz=expected_tz, app_env=app_env)
     except (MigrationStop, SheetsError) as error:
         print(f"止めました: {error}", file=sys.stderr)
         return 2

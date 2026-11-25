@@ -210,3 +210,36 @@ def test_next_insert_after_migration_does_not_collide(tool, settings, engine, db
     db.add(w)
     db.flush()
     assert w.id == 5
+
+
+# ===== データ安全 高-1: ステージングへの移行は本番の PDF の ID を空にする =====
+
+
+def test_staging_migration_blanks_production_pdf_ids(tool, settings, engine, db, session_factory, monkeypatch):
+    from app.services import row_sync
+    from sheet_fixtures import REQUEST_HEADERS, STAGING_SID
+
+    fake = make_fake()
+    report = migrate(fake, engine, settings, app_env="staging")
+    assert report["verifyProblems"] == [] and report["stagingPdfIdsBlanked"] >= 1
+    r1 = db.get(Request, R1)
+    assert r1.pdf_file_id == "" and r1.pdf_folder_id == ""
+    assert r1.source_pdf_file_id == "pdf-file-1" and r1.source_pdf_folder_id
+    st = db.get(SheetSyncState, ("requests", R1))
+    assert st.desired_version == r1.row_version == 2 and st.synced_version == 1
+    assert st.synced_values["pdfFileId"] == "pdf-file-1"  # シートの今の値
+    # 行の反映がステージングのシートの 2 列も空にする
+    row_sync.reset_lane()
+    result = row_sync.run_once(session_factory, api=fake.api(settings), app_settings=settings)
+    assert result["ok"] and result["written"] >= 1
+    tab = fake.books[STAGING_SID].tabs["Requests"]
+    assert tab.get(1, REQUEST_HEADERS.index("pdfFileId")).value in (None, "")
+    assert tab.get(1, REQUEST_HEADERS.index("pdfFolderId")).value in (None, "")
+    row_sync.reset_lane()
+
+
+def test_production_migration_keeps_pdf_ids(tool, settings, engine, db):
+    report = migrate(make_fake(), engine, settings, app_env="production")
+    assert "stagingPdfIdsBlanked" not in report
+    r1 = db.get(Request, R1)
+    assert r1.pdf_file_id == "pdf-file-1" and r1.source_pdf_file_id == ""

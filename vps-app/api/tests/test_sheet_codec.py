@@ -155,7 +155,8 @@ def test_header_index_like_gas():
 def test_rules_cover_every_db_column():
     from app.models import BatchLog, Request, WorkLog
 
-    for spec, model, extra in ((c.REQUESTS, Request, {"old_pdf_file_id_pending", "target_date_text"}),
+    for spec, model, extra in ((c.REQUESTS, Request, {"old_pdf_file_id_pending", "target_date_text",
+                                                     "source_pdf_file_id", "source_pdf_folder_id"}),
                                (c.WORK_LOGS, WorkLog, {"id"}), (c.BATCH_LOGS, BatchLog, {"id", "target_date_text"})):
         attrs = {r.attr for r in spec.columns}
         columns = {col.name for col in model.__table__.columns} - {"row_version", "sheet_row", "cell_kinds"}
