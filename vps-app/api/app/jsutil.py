@@ -17,6 +17,8 @@ _JS_WHITESPACE = (
     "\u0009\u000a\u000b\u000c\u000d          "
     "        　﻿"
 )
+# JS の正規表現の \s と同じ文字の組（Python の \s は U+001C・U+0085 を含み U+FEFF を含まない）
+JS_WHITESPACE_RE = re.compile("[" + re.escape(_JS_WHITESPACE) + "]+")
 _FULLWIDTH_ALNUM = re.compile(r"[Ａ-Ｚａ-ｚ０-９]")
 
 

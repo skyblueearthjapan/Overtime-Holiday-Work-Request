@@ -158,3 +158,10 @@ def test_retry_job_accepts_only_integer_ids(db, value):
     with pytest.raises(RpcError) as e:
         ops.ops_retryJob(ctx(db, email=ADMIN), value)
     assert e.value.message == "仕事の番号が正しくありません。"
+
+
+def test_worker_label_split_uses_js_whitespace():
+    """正しさ 低-11。"""
+    assert rq.parse_worker_choice("001﻿山田") == ("001", "山田")
+    assert rq.parse_worker_choice("001\x1c山田") == ("001\x1c山田", "")
+    assert rq.parse_worker_choice("001 山田 太郎") == ("001", "山田 太郎")

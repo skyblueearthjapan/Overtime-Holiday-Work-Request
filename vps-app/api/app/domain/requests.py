@@ -14,7 +14,7 @@ from typing import Any
 
 from app import timeutil
 from app.constants import HD_HOURS, OT_HOURS
-from app.jsutil import js_round, js_string, normalize_gas
+from app.jsutil import JS_WHITESPACE_RE, js_round, js_string, normalize_gas
 from app.models import Request, WorkLog
 from app import sheet_queue
 from app.rpc import RpcContext, RpcError
@@ -54,12 +54,10 @@ def planned_minutes_holiday(label: Any) -> int:
 
 
 def parse_worker_choice(label: str) -> tuple[str, str]:
-    import re
-
     s = normalize_gas(label)
     if not s:
         return "", ""
-    pieces = re.split(r"\s+", s)
+    pieces = JS_WHITESPACE_RE.split(s)  # JS の /\s+/ と同じ文字で分ける（正しさ 低-11）
     return pieces[0] or "", " ".join(pieces[1:]) or ""
 
 
