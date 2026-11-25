@@ -36,6 +36,12 @@ ACTIONS = frozenset({
     "internal.batchPdf",
     "internal.ledgerRewriteDay",
     "internal.ledgerRebuild",
+    # G の src/Internal.gs が実際に持つ vps.* の名前（internal.ledgerUpsert の別名が無いため vps.upsertLedger を使う。担当 M）
+    "vps.ping",
+    "vps.renderPdf",
+    "vps.upsertLedger",
+    "vps.removeLedgerRow",
+    "vps.ledgerRewriteDay",
 })
 
 
