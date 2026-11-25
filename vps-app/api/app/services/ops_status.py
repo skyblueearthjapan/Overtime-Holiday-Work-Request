@@ -114,6 +114,15 @@ def _fixed_rows(run: dict | None) -> int | None:
     return None
 
 
+def _config_warnings(settings) -> list[str]:
+    """設定の警告（値は出さない）。"""
+    out = []
+    if getattr(settings, "sebastian_token_is_weak", False):
+        out.append("SEBASTIAN_API_TOKEN が 32 字未満です。Sebastian（Hermès）側と一緒に 32 字以上の乱数へ"
+                   "入れ替えることをすすめます（セキュリティ 中-1）。")
+    return out
+
+
 def _orphan_pdfs(db: Session) -> list[dict]:
     R = models.SyncRun
     rows = db.scalars(select(R).where(R.kind == gas_jobs.ORPHAN_PDF_KIND).order_by(R.started_at.desc(), R.id.desc())
@@ -139,6 +148,7 @@ def get_ops_status(db: Session) -> dict:
         "gasPing": _gas_ping(db, now),
         # シートへ書く前の関所（データ安全 高-3）。blocked なら行の反映・照合・マスタ同期は書かない
         "sheetWriteGate": write_gate.status(db, get_settings(), now),
+        "warnings": _config_warnings(get_settings()),
         "lastRuns": last_runs,
         "reconcileFixedRows": _fixed_rows(last_runs.get("sheet_reconcile")),
         "exhausted": _exhausted(db),

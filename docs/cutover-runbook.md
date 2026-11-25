@@ -131,7 +131,13 @@ psql_q() { sg docker -c "docker compose exec -T db psql -U overtime -d overtime 
 - [ ] **A-6 トリガーの持ち主**: GAS の「トリガー」画面で「すべての人のトリガー」を表示し、imaizumi@ 以外の持ち物が無いこと（gap-4 F-17）。あれば、その人に消してもらう段取りを決めておく。
 - [ ] **A-7 部署の共有アカウント**: 13 部署の共有アカウントが新しい URL（ステージング）でログインできること。翌朝のピーク（6〜8 時）に初めてのログインが重ならないよう、前日の業務中に各部署の端末で 1 回開いてもらうかを、オーナーと決める（gap-2 S2・Q7）。
 - [ ] **A-8 旧フォーム**: 21 本の直近の回答が 0 件であること（決定 #11 の条件）。`showMigrationStatus` の `POLL_LAST_TS` を控える。
-- [ ] **A-9 `.env` の下書き**: 本番で変えるキーは `APP_ENV`・`GAS_INTERNAL_URL`・`GAS_INTERNAL_TOKEN`・`APP_IMAGE_TAG` だけ。`SEBASTIAN_API_TOKEN` が本番の GAS のプロパティ `SEBASTIAN_API_TOKEN` と同じ値であることを確かめておく（gap-4 F-16）。
+- [ ] **A-9 `.env` の下書き**: 本番で変えるキーは `APP_ENV`・`GAS_INTERNAL_URL`・`GAS_INTERNAL_TOKEN`・`APP_IMAGE_TAG` だけ。`SEBASTIAN_API_TOKEN` が本番の GAS のプロパティ `SEBASTIAN_API_TOKEN` と同じ値であることを確かめておく（gap-4 F-16）。本番の `SEBASTIAN_API_TOKEN` は Sebastian が今使っている値をそのまま写します（今は入れ替えません。verify-fixes R-2）。長さだけを確かめ、値は画面にもログにも出しません:
+
+  ```sh
+  ssh lineworks-vps-user 'cd /opt/overtime && awk -F= '"'"'$1=="SEBASTIAN_API_TOKEN"{print "length", length(substr($0, index($0,"=")+1))}'"'"' .env'
+  ```
+
+  確かめ: `length` が 8 以上（8 未満なら本番の api は起動しません）。32 未満でも起動しますが、起動時のログに WARNING が出て、管理者の欄（`ops_getStatus`）の `warnings` に「32 字未満」が出ます。切り替えが落ち着いたら、Sebastian（Hermès）側と一緒に 32 字以上の乱数へ入れ替えます。ステージングは自分で作った 32 字以上の乱数を使います（32 字未満なら起動しません）。
 - [ ] **A-10 オーナーへの声かけ**（下の「オーナーへの連絡」の 1・2）。当日の開始時刻を決め、「切り替えを始めます」の了承をもらう。
 
 ---
