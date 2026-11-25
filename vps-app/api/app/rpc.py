@@ -149,7 +149,7 @@ _FIRST_ARG_REQUEST_IDS = frozenset({"api_approveRequestsBatch", "api_secondaryAp
 
 IDEMPOTENCY_HEADER = "X-Idempotency-Key"
 IDEMPOTENCY_TTL = timedelta(hours=24)
-_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9._:-]{8,128}\Z")
 
 ERR_SHAPE = "呼び出しの形が正しくありません。"
 ERR_FORBIDDEN_ORIGIN = "この画面からは操作できません。"

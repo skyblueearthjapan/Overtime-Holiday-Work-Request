@@ -38,8 +38,8 @@ class _Missing:
 
 MISSING: Any = _Missing()
 
-YMD_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
-HM_RE = re.compile(r"^[0-9]{2}:[0-9]{2}$")
+YMD_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
+HM_RE = re.compile(r"^[0-9]{2}:[0-9]{2}\Z")
 
 
 def js_truthy(value: Any) -> bool:
@@ -52,7 +52,12 @@ def js_truthy(value: Any) -> bool:
     return True
 
 
-_NUM_RE = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$")
+_NUM_RE = re.compile(r"^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?\Z")
+
+
+_HEX_DIGITS = re.compile(r"[0-9A-Fa-f]+")
+_OCT_DIGITS = re.compile(r"[0-7]+")
+_BIN_DIGITS = re.compile(r"[01]+")
 
 
 def js_number(value: Any) -> float:
@@ -71,12 +76,12 @@ def js_number(value: Any) -> float:
     if text == "":
         return 0.0
     low = text.lower()
-    for prefix, base in (("0x", 16), ("0o", 8), ("0b", 2)):
+    for prefix, base, digits in (("0x", 16, _HEX_DIGITS), ("0o", 8, _OCT_DIGITS), ("0b", 2, _BIN_DIGITS)):
         if low.startswith(prefix):
-            try:
-                return float(int(text[2:], base))
-            except ValueError:
+            # Number() は '_'・空白・符号を許さない（int() は '1_0' や ' 1' も読むので先に確かめる。正しさ 低-9）
+            if not digits.fullmatch(text[2:]):
                 return math.nan
+            return float(int(text[2:], base))
     if text in ("Infinity", "+Infinity"):
         return math.inf
     if text == "-Infinity":
@@ -95,13 +100,13 @@ def js_int_or_float(value: float) -> int | float:
 
 # ===== new Date(...) =====
 
-_ISO_DATE = re.compile(r"^([0-9]{4})(?:-([0-9]{2})(?:-([0-9]{2}))?)?$")
+_ISO_DATE = re.compile(r"^([0-9]{4})(?:-([0-9]{2})(?:-([0-9]{2}))?)?\Z")
 _ISO_DATETIME = re.compile(
     r"^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2})(?::([0-9]{2})(?:\.([0-9]{1,3}))?)?"
-    r"(Z|[+-][0-9]{2}:[0-9]{2})?$"
+    r"(Z|[+-][0-9]{2}:[0-9]{2})?\Z"
 )
 _LEGACY = re.compile(
-    r"^([0-9]{4})[/-]([0-9]{1,2})[/-]([0-9]{1,2})(?:[ T]+([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?)?$"
+    r"^([0-9]{4})[/-]([0-9]{1,2})[/-]([0-9]{1,2})(?:[ T]+([0-9]{1,2}):([0-9]{2})(?::([0-9]{2}))?)?\Z"
 )
 
 
@@ -115,8 +120,12 @@ def _build(y: int, mo: int, d: int, h: int, mi: int, s: int, ms: int, tz) -> dat
         return None
     if not (0 <= mi <= 59 and 0 <= s <= 59):
         return None
-    base = datetime(y, mo, 1, tzinfo=tz) + timedelta(days=d - 1)
-    return base + timedelta(hours=h, minutes=mi, seconds=s, milliseconds=ms)
+    try:
+        base = datetime(y, mo, 1, tzinfo=tz) + timedelta(days=d - 1)
+        return base + timedelta(hours=h, minutes=mi, seconds=s, milliseconds=ms)
+    except (ValueError, OverflowError):
+        # Python の datetime は 1〜9999 年だけ。範囲外は Invalid Date の扱い（500 にしない。正しさ 低-8）
+        return None
 
 
 def js_new_date(value: Any) -> datetime | None:
@@ -173,6 +182,10 @@ def jst_ymd(moment: datetime) -> str:
 
 def valid_ymd_text(ymd: str) -> bool:
     """new Date(ymd + 'T00:00:00+09:00') が有効か（形は呼び出し側で ^\\d{4}-\\d{2}-\\d{2}$ を確かめる）。"""
+    if ymd[:4] == "0000":
+        # JS では 0 年も有効な日付（Python の datetime は 1 年から）。0 年は 2000 年と同じくうるう年なので、
+        # 月日の確かめは 2000 年で行う（「有効だが年度の前」として扱われる。正しさ 低-8）
+        return js_new_date(f"2000{ymd[4:]}T00:00:00+09:00") is not None
     return js_new_date(f"{ymd}T00:00:00+09:00") is not None
 
 
@@ -209,7 +222,7 @@ def label_md_dow(ymd: str) -> str:
 def label_ja(ymd: Any, today_ymd: Any) -> str:
     """fmtDateLabelJa_（今年なら '11/7(土)'、年が違えば '2025/11/7(土)'。読めなければそのまま）。"""
     text = js_string(ymd) if ymd is not None else ""
-    m = re.match(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})$", text)
+    m = re.match(r"^([0-9]{4})-([0-9]{2})-([0-9]{2})\Z", text)
     if not m:
         return text
     y, mo, d = int(m.group(1)), int(m.group(2)), int(m.group(3))

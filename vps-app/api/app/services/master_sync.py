@@ -105,7 +105,7 @@ def prepare(unformatted: list, formatted: list, source_tz, max_rows: int | None)
     return data
 
 
-_NUMBER_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)$")
+_NUMBER_RE = re.compile(r"^[+-]?(\d+\.?\d*|\.\d+)\Z")
 
 
 def as_gas_reads(value: Any) -> str:

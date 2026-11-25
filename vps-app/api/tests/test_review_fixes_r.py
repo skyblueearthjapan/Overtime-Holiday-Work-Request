@@ -89,3 +89,72 @@ def test_worklog_with_spaces_is_found_like_gas(db):
     add_wl(db, " R-2", end="2026-11-26 19:00:00")
     assert store.first_worklog(db, "R-2").request_id == " R-2"
     assert store.worklog_view(db, "R-2").actualEndAt == "2026-11-26 19:00:00"
+
+
+# ===== 正しさ 低-1・低-8・低-9・低-10・低-16・低-17、セキュリティ 低-2 =====
+
+from app.domain import ops, summaries, worklog  # noqa: E402
+from app.domain import requests as rq  # noqa: E402
+from app.domain.jsdate import HM_RE, YMD_RE, js_number, valid_ymd_text  # noqa: E402
+
+
+def test_regex_end_anchor_rejects_trailing_newline():
+    assert not HM_RE.match("19:30\n") and not YMD_RE.match("2026-11-26\n")
+    assert HM_RE.match("19:30") and YMD_RE.match("2026-11-26")
+
+
+def test_manual_time_with_newline_is_ignored_like_gas(db):
+    add_request(db, "H9", request_type="holiday")
+    now = jst(2026, 11, 26, 9, 5)
+    req, start = worklog.core_holiday_start(db, "H9", "08:00\n", now,
+                                            msgs=worklog.SEBASTIAN, email=None, updated_by="t")
+    assert start == now  # 形に合わないので今の時刻（G13）
+
+
+def test_js_number_rejects_loose_radix_literals():
+    import math
+
+    assert math.isnan(js_number("0x1_0")) and math.isnan(js_number("0x 1")) and math.isnan(js_number("0x"))
+    assert js_number("0x10") == 16 and js_number("0b11") == 3 and js_number("0o17") == 15
+
+
+def _base(**kw):
+    data = {"requestType": "holiday", "dept": "製造1課", "workerLabel": "A001 山田 太郎", "targetDate": "2026-11-28",
+            "reason": "急ぎ作業を要するため", "hours": "半日"}
+    data.update(kw)
+    return data
+
+
+def test_year_zero_is_valid_but_before_fiscal_year(db):
+    assert valid_ymd_text("0000-02-29") and not valid_ymd_text("0000-13-01")
+    res = rq.api_submitRequest(ctx(db, now=NOW), _base(targetDate="0000-01-01"))
+    assert res == {"ok": False, "error": "年度開始日（2026-03-16）より前の日付は申請できません。"}
+
+
+@pytest.mark.parametrize("hours", ["1e308", "1e20"])
+def test_huge_planned_hours_are_rejected_not_500(db, hours):
+    with pytest.raises(RpcError) as e:
+        rq.api_submitRequest(ctx(db, now=NOW), _base(requestType="overtime", hours=hours, targetDate=""))
+    assert e.value.message == f"残業の予定時間が不正です: {hours}"
+
+
+def test_text_longer_than_a_sheet_cell_is_refused_like_gas(db):
+    with pytest.raises(RpcError) as e:
+        rq.api_submitRequest(ctx(db, now=NOW), _base(workContent="あ" * 50001))
+    assert e.value.message == "業務内容が長すぎます（50000字まで）。"
+    assert rq.api_submitRequest(ctx(db, now=NOW), _base(workContent="あ" * 50000))["ok"] is True
+
+
+@pytest.mark.parametrize("ym", ["9999-12", "10000-01", "0.5-01"])
+def test_out_of_range_year_in_summaries_is_400_not_500(db, ym):
+    with pytest.raises(RpcError):
+        summaries.api_adminMonthlySummary(ctx(db, email=ADMIN, now=NOW), ym, "ALL")
+    with pytest.raises(RpcError):
+        summaries.api_getClosingSummary(ctx(db, email=ADMIN, now=NOW), ym)
+
+
+@pytest.mark.parametrize("value", [1.9, True, " 3 ", "3.0", None])
+def test_retry_job_accepts_only_integer_ids(db, value):
+    with pytest.raises(RpcError) as e:
+        ops.ops_retryJob(ctx(db, email=ADMIN), value)
+    assert e.value.message == "仕事の番号が正しくありません。"

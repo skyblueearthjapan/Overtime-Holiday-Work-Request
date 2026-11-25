@@ -22,10 +22,13 @@ def ops_getStatus(ctx: RpcContext):
 
 
 def ops_retryJob(ctx: RpcContext, job_id=None):
-    try:
+    # bool でない int か、数字だけの文字だけを受ける（1.9・true・' 3 ' は拒む。正しさ 低-17）
+    if isinstance(job_id, int) and not isinstance(job_id, bool):
+        jid = job_id
+    elif isinstance(job_id, str) and job_id.isascii() and job_id.isdigit():
         jid = int(job_id)
-    except (TypeError, ValueError) as exc:
-        raise RpcError("仕事の番号が正しくありません。") from exc
+    else:
+        raise RpcError("仕事の番号が正しくありません。")
     if not jobs.retry_failed(ctx.db, jid):
         raise RpcError("失敗した仕事が見つかりません。")
     return {"ok": True}
@@ -53,7 +56,7 @@ def ops_regeneratePdf(ctx: RpcContext, request_id=None):
     return {"ok": True, "jobId": job_id}
 
 
-_YMD = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}$")
+_YMD = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}\Z")
 
 
 def ops_batchPdfForDate(ctx: RpcContext, ymd=None):

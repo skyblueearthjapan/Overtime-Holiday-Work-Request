@@ -236,7 +236,7 @@ _DT_FORMATS = (
     "%m/%d/%Y %H:%M:%S", "%m/%d/%Y %H:%M", "%Y-%m-%dT%H:%M:%S",
 )
 _D_FORMATS = ("%Y-%m-%d", "%Y/%m/%d", "%m/%d/%Y")
-_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_YMD_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\Z")
 
 
 def parse_jst_datetime(text: str) -> datetime | None:
@@ -244,7 +244,7 @@ def parse_jst_datetime(text: str) -> datetime | None:
     s = js_trim(text or "")
     if not s:
         return None
-    m = re.match(r"^(.*?)(Z|[+-]\d{2}:?\d{2})$", s)
+    m = re.match(r"^(.*?)(Z|[+-]\d{2}:?\d{2})\Z", s)
     if m and "T" in s:
         try:
             return datetime.fromisoformat(s.replace("Z", "+00:00")).astimezone(UTC)

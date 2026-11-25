@@ -63,8 +63,8 @@ KNOWN_STAGING_IDS: frozenset[str] = frozenset({
     *STAGING_GAS_DEPLOYMENT_IDS_KNOWN,
 })
 
-GAS_INTERNAL_URL_RE = re.compile(r"^https://script\.google\.com/macros/s/([A-Za-z0-9_-]+)/exec$")
-_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+$")
+GAS_INTERNAL_URL_RE = re.compile(r"^https://script\.google\.com/macros/s/([A-Za-z0-9_-]+)/exec\Z")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\Z")
 
 
 def split_emails(value: str | None) -> list[str]:

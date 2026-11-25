@@ -48,7 +48,7 @@ TRANSPORT_TRIES = 3
 TRANSPORT_WAIT_SECONDS = 30.0
 ITEM_SPACING_SECONDS = 0.5
 ITEM_SPACING_MIN_ITEMS = 6  # GAS: if (items.length > 5) Utilities.sleep(500)
-_YMD = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_YMD = re.compile(r"^\d{4}-\d{2}-\d{2}\Z")
 # 今の朝バッチで「台帳を開けない」は直さない限り続く（7-5 の 4: failed にして管理者へ）
 LEDGER_PERMANENT_ERRORS = ("ledger_unavailable", "ledger_header_mismatch", "bad_request", "unauthorized")
 

@@ -32,9 +32,14 @@ def _field(data: dict, key: str, default_empty: bool = False) -> str:
     return normalize_gas(value)
 
 
+MAX_PLANNED_MINUTES = 2**31 - 1
+MAX_CELL_CHARS = 50000  # Google スプレッドシートの 1 セルの上限
+
+
 def planned_minutes_overtime(h_str: Any) -> int:
     n = js_number(normalize_gas(h_str))
-    if math.isnan(n) or math.isinf(n) or n <= 0:
+    if math.isnan(n) or math.isinf(n) or n <= 0 or not math.isfinite(n * 60) or n * 60 >= MAX_PLANNED_MINUTES:
+        # 列（整数）に入らない大きさも不正にする（GAS は Infinity を書く。受け入れる差＝仕様 8-2。正しさ 低-10）
         raise RpcError(f"残業の予定時間が不正です: {js_string(h_str)}")
     return js_round(n * 60)
 
@@ -159,6 +164,14 @@ def api_submitRequest(ctx: RpcContext, data=None):
     approved_minutes = (planned_minutes_overtime(hours) if request_type == "overtime"
                         else planned_minutes_holiday(hours))
     enriched = enrich_work_nos(ctx.db, work_no1, work_no2, work_no3)
+
+    # Google スプレッドシートのセルは 50,000 字まで。GAS も appendRow が例外で失敗するので、書く前に止める
+    # （上限は GAS が失敗する所だけ。文字の中身は変えない。セキュリティ 低-2）
+    for label, text in (("部署", dept), ("作業員", worker_name), ("作業員コード", worker_code),
+                        ("業務NO.1", work_no1), ("業務NO.2", work_no2), ("業務NO.3", work_no3), ("理由", reason),
+                        ("補足理由", reason_detail), ("業務内容", work_content)):
+        if len(text) > MAX_CELL_CHARS:
+            raise RpcError(f"{label}が長すぎます（{MAX_CELL_CHARS}字まで）。")
 
     request_id = str(uuid.uuid4())
     parsed = strict_date(target_date)
