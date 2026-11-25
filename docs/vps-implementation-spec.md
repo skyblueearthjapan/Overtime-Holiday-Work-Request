@@ -327,7 +327,7 @@ GAS の `<?= X ?>`（自動エスケープ）は `{{ X }}`、`<?!= X ?>` は 3-6
 | 14 | `api_getApproverDashboard(deptsOrDept)` | `{today, overtime, holiday, isAdmin, selectedDepts}`。item の `submittedAt` は `yyyy-MM-dd HH:mm:ss`、`targetDateLabel` は `fmtDateLabelJa_`。部署なし `{today:'', overtime:[], holiday:[], isAdmin, error:'部署が指定されていません。'}`、権限なし `error:'部署「X」の承認権限がありません。'`、例外のとき `{…, isAdmin:true, error}`（H2 の癖は今のまま） | 部署ごとに `can_approve_dept` | 読む。canceled の当日分も出す（Q4） | — |
 | 15 | `api_approveRequest(id)` | `{ok:true, requestId, approvedBy, approvedAt:'yyyy-MM-dd HH:mm:ss'}`。承認済みなら `{ok:true, message:'既に承認済みです。'}` | `can_approve_dept(email, 申請の部署)` | 書く: status=`approved`、`approvedAt`（日時）、`approvedBy`。WorkLogs に `actualEndAt` があれば積む: `internal.afterApprove` | 2 つのタブで押しても 2 回目は `既に承認済みです。`、仕事は 1 回だけ |
 | 16 | `api_rejectRequest(id)` | `{ok:true, requestId}` | 同上 | 書く: status=`canceled`、`approvedBy`=`<email>(却下)`、`approvedAt`。台帳・PDF は触らない | submitted 以外は `未承認状態でのみ却下可能です（現在: X）。` |
-| 17 | `api_approveRequestsBatch(ids)` | `{ok:true, results:[{requestId, ok, message?｜error?, approvedBy?, approvedAt?}]}`（`approval.gs:388-475` の形と順） | 1 件ずつ `can_approve_dept` | 15 と同じを 1 件ずつ。行ロックは ID を並べ替えて取る。結果の並びは渡された順 | 50 件を超えると 400 `一括承認は50件までです。` |
+| 17 | `api_approveRequestsBatch(ids)` | `{ok:true, results:[{requestId, ok, message?｜error?, approvedBy?, approvedAt?}]}`（`approval.gs:388-475` の形と順） | 1 件ずつ `can_approve_dept` | 15 と同じを 1 件ずつ。行ロックは ID を並べ替えて取る。結果の並びは Requests の行の順、その後に見つからなかった ID（JS のオブジェクトのキーの順＝数字だけのキーが先）。配列でない引数は包まない（文字列は 1 字ずつの ID、数・オブジェクトは対象なし＝GAS と同じ） | 50 件を超えると 400 `一括承認は50件までです。` |
 | 18 | `api_approverMonthlySummary(ym, deptsOrDept)` | `buildMonthlySummary_` の形（[01 §5.1]）。`charts.dept` は作り直さない（H14） | 全部署で `can_approve_dept` | 読む | — |
 | 19 | `api_getSecondaryApprovalList(ymd)` | `{date, items:[…]}`（`approval.gs:651-668` のキー。`submittedAt`・`approvedAt`・`approvedAt2` は `yyyy-MM-dd HH:mm`、`isRetroactive`・`daysAgo` 付き。並びは同じ） | 管理者 | 読む（GAS の見出しの自動追加は写さない＝Q17） | — |
 | 20 | `api_secondaryApprove(id)` | `{ok:true, requestId, approvedBy2, approvedAt2:'yyyy-MM-dd HH:mm:ss', pdfRegenerated:false}`（PDF は後で作るので常に `false`。画面は使っていない）。済みなら `{ok:true, message:'既に二次承認済みです。'}` | 管理者 | 書く: `approvedBy2`・`approvedAt2`（日時）。PDF があれば 3 列を空にして積む: `internal.regenerate`（`reason:"secondary"`）。無ければ積む: `internal.ledgerUpsert`（単票はいつも台帳を書く） | 一次承認前は `一次承認が完了していません（現在: X）。` |
@@ -339,7 +339,7 @@ GAS の `<?= X ?>`（自動エスケープ）は `{{ X }}`、`<?!= X ?>` は 3-6
 | 26 | `api_adminManualComplete(id, end, start?)` | `{ok:true, actualMinutes, breakMinutes, netMinutes}` | 管理者 | 書く: WorkLogs（`updatedBy`=メール）。積む: `internal.afterComplete`（`source:"admin"`、`wlOverride`） | `end <= start` は `終了時刻は開始時刻より後にしてください。`（エラー文は [01 §1.4]） |
 | 27 | `api_adminSpecialClauseCount(ymd, dept)` | `{fiscalYear:'YYYY-04-01 ~ YYYY+1-03-31', list:[…]}` | 管理者 | 読む | — |
 | 28 | `api_adminPendingWatch()` | 配列（[01 §5.4] のキー） | 管理者 | 読む | — |
-| 29 | `api_getClosingSummary(ym, dept, workerToken)` | [01 §5.5] の `personal`／`list` の形。データが無ければ `null` | なし | 読む | — |
+| 29 | `api_getClosingSummary(ym, dept, workerToken)` | [01 §5.5] の `personal`／`list` の形（データが無くても `null` は返さない。`{mode:'list', people:[]}` など） | なし | 読む | — |
 
 「読む」の関数も 1 回の呼び出しの中で同じ時刻・同じスナップショットを使う。`api_getDashboard` などのサーバーの「今日」は JST（8-1）。
 
@@ -640,6 +640,34 @@ GAS の `morningBatchNoMail_`（`mail.gs:1454-1468`）→ `batchGeneratePdfs_`�
 - 休憩は**時刻窓方式**（`breaks.calc_break_by_clock_time(start, end)`。`worklog.gs:111-129` を写す）: 開始・終了を JST の `HH:mm` にし（秒は捨てる）、分で比べる。窓 10:00-10:10、12:15-13:00、15:00-15:10、17:10-17:20、19:20-19:30、21:30-21:40。`開始 <= 窓開始 かつ 終了 >= 窓終了` の窓だけ足す。日をまたぐと終了の分が小さくなり 0。
 - **Sebastian の残業完了も同じ時刻窓方式**（9-1 #23。切り替えの日から。過去の行は直さない）。休憩マスタは使わない。
 - 総務の手動入力: 開始は引数、無ければ残業 `17:20`、休日は WorkLogs の `actualStartAt` の最初の `HH:mm`。開始・終了とも対象日の時刻。`end <= start` はエラー。
+- 対象日（Requests の `targetDate`）が空・読めない申請で、残業完了・休日の開始と完了・総務の手動入力を押したとき、VPS は 400 `作業実施日が無効です: <値>` を返す（GAS は `Utilities.formatDate` の英語の例外文になる見込み。受け入れる差。正しさレビュー 中-1）。
+- 手入力の時刻・日付の形の確かめは文字列の末尾まで（`\Z`）。末尾に改行がある値は形に合わないので、GAS と同じく黙って今の時刻にする。
+
+### 8-2a. そのほかの受け入れる差（2026-11-26 のレビューで決めた。正しさ・セキュリティ・データ安全）
+
+| 場面 | GAS | VPS |
+|---|---|---|
+| Sebastian の本文が `null` | TypeError で HTML のエラー画面 | `{"error":"unauthorized"}` |
+| Sebastian で想定外の例外 | 例外の文を `{error, action}` で返す | `{"error":"internal error", action}`（詳細はログだけ。セキュリティ 中-1） |
+| Sebastian で完了を確定した後、PDF の結果待ちに例外 | — | `ok:true` のまま `pdf:{error:"PDF作成の結果を確かめられませんでした（作成は続いている可能性があります）"}`（再送による二重の完了を防ぐ） |
+| ダッシュボードで想定外の例外 | 例外の文を `error` に入れる | `データを取得できませんでした。`（詳細はログだけ。RpcError の文はそのまま） |
+| 残業の予定時間が整数の列に入らない大きさ（`1e20`・`1e308`） | `Infinity` などを書く | 400 `残業の予定時間が不正です: X` |
+| 集計の年が 1〜9998 の外（`9999-12`・`0.5-01`） | 空の集計 | 400（同じ形の文の `yearMonth…で指定してください`） |
+| 申請の文字の項目が 50,000 字を超える | `appendRow` が例外（シートのセルの上限） | 400 `<項目>が長すぎます（50000字まで）。`（GAS も失敗する所だけ。中身は変えない） |
+| `api_submitRequest(null)`・`api_editRequest(id, null)` | TypeError | `{}` として扱う（`申請種別が不正です: ` など） |
+| 引数が多すぎる RPC | 余りを捨てる | 400 `引数の数が正しくありません。`（画面は余分な引数を送らない） |
+| マスタに見出しが無い | 例外 | 空の一覧（表の作りが固定なので起きない見込み） |
+| `ops_retryJob` の番号 | （GAS に無い） | bool でない整数か、数字だけの文字だけを受ける |
+| 0000 年の日付 | 有効な日付として年度の検査で拒む | 同じ（Python の日付は 1 年からなので 0 年は月日だけ確かめる） |
+| 一括承認の ID が `null`・`1.0` | キーは `"null"`・`"1"` | 同じ（`js_property_key`） |
+| 申請 ID の前後の空白（シートの行の ID） | `normalize_(行の ID) === 引数` で探す | 同じく行の ID の前後の空白を無視して探す（引数は正規化しない） |
+
+### 8-2b. シートへ書く値は式にしない（セキュリティ 高-1）
+
+- 行の反映・照合は `updateCells` の `stringValue`（文字のセル）で書くので、`=1+1`・`+81-90-…`・`-部品`・`@x` は文字のまま入る（`formulaValue` はどこでも使わない。試験 `tests/test_formula_safety.py`）。
+- マスタ同期は GAS の `setValues` と同じ USER_ENTERED で書くが、`=` `+` `-` `@` で始まる文字（ただの数の `-5`・`+3` を除く）は先頭に `'` を付けて文字のセルにする。
+- 戻しの道具（`tools/restore_tabs_from_copy.py`）は RAW で書く。移行の道具はシートを読むだけ。
+- 台帳と PDF のひな形へ書く GAS の側は GAS の担当が直す。
 
 ### 8-3. 丸め（gap-1 G5）
 
@@ -667,6 +695,8 @@ GAS の `morningBatchNoMail_`（`mail.gs:1454-1468`）→ `batchGeneratePdfs_`�
 8. 残業: `作業実施日の形式が不正です（yyyy-MM-dd）: X`・`作業実施日が無効です: X`・`未来日は申請できません: X`・`年度開始日（yyyy-MM-dd）より前の日付は申請できません。`
 9. 休日: 年度開始より前を拒む。遡及なら未来日を拒む（`遡及申請では未来日を選択できません: X`）。通常の休日は未来の上限なし
 10. 400（例外）: `作業員コードが取得できません。`・`残業の予定時間が不正です: X`・`休日の予定時間が不正です: X`
+
+11. 400（例外）: 文字の項目（部署・作業員・業務 NO.・理由・補足理由・業務内容）が 50,000 字を超えると `<項目>が長すぎます（50000字まで）。`（シートのセルの上限。GAS も書き込みで失敗する。8-2a）
 
 1〜9 は `{ok:false, error}` を 200 で返す。`isRetroactive` は `true` か文字の `'true'`（大文字小文字を無視）で真。予定時間は一覧と照合しない（Q13。編集だけ照合）。理由も一覧と照合しない。
 
