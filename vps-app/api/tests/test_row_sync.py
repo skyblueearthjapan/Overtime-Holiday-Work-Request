@@ -492,3 +492,32 @@ def test_with_real_record_pdf_result_pdf_columns_are_not_rewritten(env, db):
     assert env.run()["written"] == 1
     cols = {c for _, c in touched_columns(env.fake, env.book.tabs["Requests"].sheet_id)}
     assert cols == {REQUEST_HEADERS.index("approvedBy2")}
+
+
+def test_reappend_blocked_row_writes_a_new_row_at_the_end(env, db):
+    """データ安全 中-2: 消された行は、末尾に新しい行として書き直せる（戻しの前に blocked を 0 にする）。"""
+    tab = env.book.tabs["Requests"]
+    tab.cell(2, 0).value = "someone-else"
+    r2 = db.get(Request, R2)
+    r2.reason_detail = "変えた"
+    sheet_queue.mark_dirty(db, "requests", R2)
+    db.commit()
+    assert env.run()["blocked"] == 1
+    last_before = tab.last_row()
+    assert row_sync.reappend_blocked(db, "requests", R2)
+    assert not row_sync.reappend_blocked(db, "requests", R2)  # もう blocked ではない
+    db.commit()
+    assert env.run()["written"] == 1
+    db.refresh(r2)
+    assert r2.sheet_row == last_before + 1
+    assert req_cell(env.book, r2.sheet_row, "requestId").value == R2
+    assert req_cell(env.book, r2.sheet_row, "reasonDetail").value == "変えた"
+    assert row_sync.status(db)["blocked"] == []
+
+
+def test_cli_status_and_reappend(env, db, monkeypatch, capsys):
+    import app.db as app_db
+
+    monkeypatch.setattr(app_db, "get_sessionmaker", lambda: env.sf)
+    assert row_sync.main(["status"]) == 0 and '"blocked": []' in capsys.readouterr().out
+    assert row_sync.main(["reappend", "requests", R2]) == 1  # blocked ではない

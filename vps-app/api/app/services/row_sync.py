@@ -30,7 +30,7 @@ from typing import Any
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from app import timeutil
+from app import sheet_queue, timeutil
 from app.jsutil import js_string, normalize_gas
 from app.models import SYNCED_TABLES, SheetSyncState, SyncRun
 from app.safety import UnsafeWriteError
@@ -678,5 +678,64 @@ def unblock(db: Session, table: str, pk: str) -> bool:
     return True
 
 
+def reappend_blocked(db: Session, table: str, pk: str) -> bool:
+    """blocked の行（人がシートの行を消したなど）を、シートの末尾に新しい行として書き直す印にする（データ安全 中-2）。
+
+    sheet_row を空にし、synced_values を空にして版を進める。次の行の反映が末尾に全部の列を書く。commit は呼ぶ側。
+    戻しの前（計画書 C-2）に blocked を 0 にするために使う。
+    """
+    st = db.get(SheetSyncState, (table, str(pk)))
+    if st is None or st.state != "blocked":
+        return False
+    model = SYNCED_TABLES[table]
+    row = db.get(model, pk if table == "requests" else int(pk))
+    if row is None:
+        return False
+    row.sheet_row = None
+    st.state, st.attempts, st.last_error = "ok", 0, ""
+    st.synced_values = {}
+    st.next_try_at = timeutil.now_utc()
+    db.flush()
+    sheet_queue.mark_dirty(db, table, str(pk))
+    return True
+
+
+def main(argv: list[str] | None = None) -> int:
+    """管理者の手での操作（VPS: docker compose exec worker python -m app.services.row_sync <操作> ...）。
+
+    status                  反映待ち・blocked の一覧
+    unblock  <table> <pk>   blocked の行をもう一度試す（行を直した後）
+    reappend <table> <pk>   blocked の行を末尾に新しい行として書き直す（行が消された後）
+    """
+    import argparse
+    import json
+
+    from app.db import get_sessionmaker
+
+    parser = argparse.ArgumentParser(prog="python -m app.services.row_sync")
+    parser.add_argument("op", choices=["status", "unblock", "reappend"])
+    parser.add_argument("table", nargs="?", choices=list(SYNCED_TABLES))
+    parser.add_argument("pk", nargs="?")
+    args = parser.parse_args(argv)
+    factory = get_sessionmaker()
+    with factory() as db:
+        if args.op == "status":
+            print(json.dumps(status(db), ensure_ascii=False, indent=1, default=str))
+            return 0
+        if not args.table or not args.pk:
+            parser.error("table と pk が要ります")
+        fn = unblock if args.op == "unblock" else reappend_blocked
+        done = fn(db, args.table, args.pk)
+        db.commit()
+    print("ok" if done else "blocked の行が見つかりません")
+    return 0 if done else 1
+
+
 def register_worker() -> None:
     """行の反映のレーンは worker が run_once を直接呼ぶ（app.worker._resolve_row_sync）。登録するものは無い。"""
+
+
+if __name__ == "__main__":
+    import sys
+
+    sys.exit(main())
