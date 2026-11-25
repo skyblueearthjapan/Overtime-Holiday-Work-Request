@@ -290,7 +290,8 @@ const RPC = {
   ops_batchPdfForDate: () => ({ ok: true, jobId: 102 }),
   ops_rebuildLedger: () => ({ ok: true, jobId: 103 }),
   ops_recalcBreaks: () => ({ ok: true, changed: 0 }),
-  ops_revokeSessions: () => ({ ok: true, revoked: 1 })
+  ops_revokeSessions: () => ({ ok: true, revoked: 1 }),
+  ops_runSheetIntake: () => ({ ok: true, active: true, ingested: [], skipped: [] })
 };
 const READ_ONLY = ['api_getDeptList', 'api_getWorkersByDept', 'api_getWorkerInfo', 'api_getOrderList', 'api_getHolidayCandidateDates',
   'api_getDashboard', 'api_getApproverDepts', 'api_getApproverDashboard', 'api_approverMonthlySummary', 'api_getSecondaryApprovalList',

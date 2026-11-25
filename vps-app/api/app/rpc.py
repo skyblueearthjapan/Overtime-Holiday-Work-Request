@@ -96,6 +96,7 @@ OPS_FUNCTIONS: tuple[str, ...] = (
     "ops_rebuildLedger",
     "ops_recalcBreaks",
     "ops_revokeSessions",
+    "ops_runSheetIntake",
 )
 RPC_FUNCTIONS: tuple[str, ...] = SCREEN_FUNCTIONS + OPS_FUNCTIONS
 
@@ -121,6 +122,7 @@ WRITE_FUNCTIONS = frozenset({
     "ops_rebuildLedger",
     "ops_recalcBreaks",
     "ops_revokeSessions",
+    "ops_runSheetIntake",
 })
 READ_ONLY_FUNCTIONS = frozenset(RPC_FUNCTIONS) - WRITE_FUNCTIONS
 

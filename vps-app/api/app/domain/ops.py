@@ -42,6 +42,11 @@ def ops_runMasterSync(ctx: RpcContext):
     return gasjobs.service("master_sync").sync_masters(ctx.db)
 
 
+def ops_runSheetIntake(ctx: RpcContext):
+    """シートの取り込み（決定 #26）を今すぐ 1 回。Sebastian が Requests へ直接足した行を DB へ入れる（シートは読むだけ）。"""
+    return gasjobs.service("sheet_intake").run_now(ctx.db)
+
+
 def ops_regeneratePdf(ctx: RpcContext, request_id=None):
     """管理者の作り直し（7-4）: 3 列を空にして old_pdf_file_id_pending、internal.regenerate（reason=admin）。"""
     gas_jobs = gasjobs.service("gas_jobs")
@@ -125,6 +130,7 @@ HANDLERS = {
     "ops_retryJob": ops_retryJob,
     "ops_syncSheetConfigNow": ops_syncSheetConfigNow,
     "ops_runMasterSync": ops_runMasterSync,
+    "ops_runSheetIntake": ops_runSheetIntake,
     "ops_regeneratePdf": ops_regeneratePdf,
     "ops_batchPdfForDate": ops_batchPdfForDate,
     "ops_rebuildLedger": ops_rebuildLedger,

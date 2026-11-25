@@ -112,13 +112,33 @@ def test_kind_difference_is_reported(env):
     assert c.value == "2026-03-07"
 
 
-def test_stops_without_writing_when_db_has_fewer_rows(env, db):
+def test_stops_without_writing_when_db_has_fewer_rows(env, db, monkeypatch):
+    """DB に無い requestId の行が FOREIGN_TOLERANCE を超えたら、1 行も書かずに止める（罠 49）。"""
+    monkeypatch.setattr(reconcile, "FOREIGN_TOLERANCE", 1)
     tab = env.book.tabs["Requests"]
     tab.rows.append([Cell("eeeeeeee-0000-4000-8000-000000000001"), Cell("overtime"), Cell("submitted")])
+    tab.rows.append([Cell("eeeeeeee-0000-4000-8000-000000000002"), Cell("overtime"), Cell("submitted")])
     cell(env.book, 3, "workerName").value = "人が直した名前"
     result = env.run()
     assert result["ok"] is False and "少ない" in result["stopped"]
     assert env.fake.writes() == []
+
+
+def test_not_yet_ingested_rows_are_ignored(env, db):
+    """取り込み待ちの外の行（Sebastian の追記。決定 #26）は歯止めに数えず、触らずに notInDb に出す。DB の行は直す。"""
+    tab = env.book.tabs["Requests"]
+    foreign = [Cell("eeeeeeee-0000-4000-8000-000000000001"), Cell("overtime"), Cell("submitted"), Cell("機械加工")]
+    tab.rows.append(foreign)
+    cell(env.book, 3, "workerName").value = "人が直した名前"
+    result = env.run()
+    assert "stopped" not in result
+    assert result["tabs"]["Requests"]["notInDb"] == [{"row": 6, "id": ["eeeeeeee-0000-4000-8000-000000000001"]}]
+    assert result["fixedRows"] == 1 and cell(env.book, 3, "workerName").value == "試験 二郎"
+    assert [c.value for c in tab.rows[5]] == ["eeeeeeee-0000-4000-8000-000000000001", "overtime", "submitted", "機械加工"]
+    for req in env.fake.batch_requests():
+        body = req.get("updateCells")
+        if body:
+            assert body["start"]["rowIndex"] != 5  # 外の行（6 行目）には書かない
 
 
 @pytest.mark.parametrize("model", [Request, WorkLog])

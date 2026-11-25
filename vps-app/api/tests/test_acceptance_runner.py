@@ -51,7 +51,7 @@ def test_function_lists_match_rpc(acc):
 
     assert acc.SCREEN_FUNCTIONS == rpc.SCREEN_FUNCTIONS
     assert acc.OPS_FUNCTIONS == rpc.OPS_FUNCTIONS
-    assert len(acc.RPC_FUNCTIONS) == 38
+    assert len(acc.RPC_FUNCTIONS) == 39
     assert acc.WRITE_FUNCTIONS == rpc.WRITE_FUNCTIONS
 
 
@@ -268,7 +268,8 @@ def test_runner_read_only_against_app(acc, live, session_factory):
                  "F-api_approveRequest", "SB-1", "SB-2", "SB-3", "SB-4", "SB-5"):
         assert items[must].status == "PASS", (must, items[must].detail)
     skipped = {i.id for i in rep.items if i.status == "SKIP"}
-    assert skipped == {"F-ops_syncSheetConfigNow", "F-ops_runMasterSync", "F-ops_recalcBreaks", "F-ops_rebuildLedger"}
+    assert skipped == {"F-ops_syncSheetConfigNow", "F-ops_runMasterSync", "F-ops_recalcBreaks", "F-ops_rebuildLedger",
+                       "F-ops_runSheetIntake"}
     assert runner.me == "owner@lineworks-local.info"
     # 書かなかった（申請も仕事も無い）
     from app.models import Job, Request

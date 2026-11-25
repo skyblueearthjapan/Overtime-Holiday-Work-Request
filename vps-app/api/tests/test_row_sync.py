@@ -60,8 +60,16 @@ def assert_only_allowed_requests(fake):
     for req in fake.batch_requests():
         (kind,) = req.keys()
         assert kind in ("updateCells", "appendDimension")
-    for method, url, _ in fake.writes():
+    for method, url, body in fake.writes():
+        if url.endswith(":append"):
+            # Requests の新しい行の requestId だけ（RAW・OVERWRITE。決定 #26）
+            assert STAGING_SID in url and "%27Requests%27%21A%3AA" in url
+            assert all(len(r) == 1 and isinstance(r[0], str) for r in body["values"])
+            continue
         assert url.endswith(":batchUpdate") and STAGING_SID in url and "values:" not in url
+    for method, url, params, _ in fake.calls:
+        if url.endswith(":append"):
+            assert params["valueInputOption"] == "RAW" and params["insertDataOption"] == "OVERWRITE"
 
 
 def test_nothing_dirty_reads_only_timezone_once(env):
@@ -140,9 +148,25 @@ def test_appends_rows_when_grid_is_full(env, db):
     sheet_queue.mark_dirty(db, "requests", "bbbbbbbb-0000-4000-8000-000000000001")
     db.commit()
     assert env.run()["written"] == 1
-    appends = [r["appendDimension"] for r in env.fake.batch_requests() if "appendDimension" in r]
-    assert appends == [{"sheetId": env.book.tabs["Requests"].sheet_id, "dimension": "ROWS", "length": 1}]
+    # Requests の新しい行は values.append（OVERWRITE）で取るので、シートの末尾なら append が行を足す（決定 #26）
+    assert env.book.tabs["Requests"].row_count == 6
     assert env.book.tabs["Requests"].row_values(6)[0] == "bbbbbbbb-0000-4000-8000-000000000001"
+    assert env.book.tabs["Requests"].get(5, REQUEST_HEADERS.index("targetDate")).formatted() == "2026-11-28"
+
+
+def test_appends_rows_when_grid_is_full_worklogs(env, db):
+    """WorkLogs（values.append を使わないタブ）は今までどおり appendDimension で足してから書く。"""
+    env.book.tabs["WorkLogs"].row_count = 6
+    wl = WorkLog(request_id=R4, updated_at="2026-11-26 12:00:00", updated_by="formSubmit",
+                 cell_kinds={"updatedAt": "serial"})
+    db.add(wl)
+    db.flush()
+    sheet_queue.mark_dirty(db, "work_logs", str(wl.id))
+    db.commit()
+    assert env.run()["written"] == 1
+    appends = [r["appendDimension"] for r in env.fake.batch_requests() if "appendDimension" in r]
+    assert appends == [{"sheetId": env.book.tabs["WorkLogs"].sheet_id, "dimension": "ROWS", "length": 1}]
+    assert wl_cell(env.book, 7, "requestId").value == R4
 
 
 def test_adopts_a_row_written_before_a_crash(env, db):
@@ -382,7 +406,9 @@ def test_new_rows_wait_for_an_earlier_failed_new_row(env, db, monkeypatch):
     result = env.run()
     assert result["failed"] == 1 and result["written"] == 0
     assert db.get(Request, ids[0]).sheet_row is None and db.get(Request, ids[1]).sheet_row is None
-    assert env.book.tabs["Requests"].last_row() == 5  # 後ろの新しい行だけ先に書かない
+    # 行は values.append で requestId だけ取ってある。後ろの新しい行の中身は先に書かない
+    assert env.book.tabs["Requests"].row_values(6) == [ids[0]]
+    assert env.book.tabs["Requests"].row_values(7) == [ids[1]]
     env.fake.fail_write_rows.clear()
     with env.sf() as s:
         works, _ = row_sync.select_work(s, 50, NOW + timedelta(seconds=5))
@@ -390,7 +416,9 @@ def test_new_rows_wait_for_an_earlier_failed_new_row(env, db, monkeypatch):
     freeze_now(monkeypatch, NOW + timedelta(seconds=11))
     assert env.run()["written"] == 2
     rows = env.book.tabs["Requests"]
-    assert [rows.row_values(6)[0], rows.row_values(7)[0]] == ids
+    assert [rows.row_values(6)[0], rows.row_values(7)[0]] == ids  # 取ってあった行を使う（2 行にしない）
+    assert rows.last_row() == 7 and len(rows.row_values(7)) > 1
+    assert [db.get(Request, i).sheet_row for i in ids] == [6, 7]
 
 
 def test_status_reports_lag(env, db, monkeypatch):

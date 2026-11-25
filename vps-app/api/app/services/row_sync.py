@@ -13,6 +13,9 @@ worker の行の反映のレーン（全体で 1 本。2 秒ごと）が run_onc
 4. 今ある行は sheet_row に書く。書く前にその行の ID の列（Requests・WorkLogs は requestId、BatchLogs は
    実行日時とバッチ名）を読んで確かめ、違えば ID の列から探し直して sheet_row を直す。見つからなければ
    書かずに state='blocked'。新しい行は「最後のデータ行の次」に作った順で書く（行数が足りなければ appendDimension）。
+   Requests の新しい行だけは、先に requestId を values.append（RAW・OVERWRITE）で書いて Google に行を決めさせ、
+   残りの列をその行へ書く（reserve_new_rows。Sebastian が同じタブへ直接追記するのと行を取り合わない。決定 #26）。
+   DB に無い行（Sebastian が足してまだ取り込んでいない行）は、どの DB の行の位置にもならないので書かない。
 5. 1 回の spreadsheets.batchUpdate（updateCells だけ）でタブごとにまとめて書く。失敗したら行ごとに書き直し、
    失敗した行だけ 10 秒・30 秒・1 分・2 分・5 分、以後 5 分ごとに再試行する。
 6. 書けたら synced_version＝読んだ時点の row_version、synced_values を更新する（GAS の仕事は requires で待つ）。
@@ -438,6 +441,31 @@ def place_rows(ctx: TabContext, works: list[RowWork], claimed: dict[int, tuple[s
         taken[w.target_row] = (w.pk, key)
 
 
+def reserve_new_rows(api: SheetsApi, sid: str, ctx: TabContext, works: list[RowWork]) -> int:
+    """Requests の新しい行の位置を、requestId だけを values.append（RAW・OVERWRITE）で書いて Google に決めさせる。
+
+    Sebastian（外のシステム）は同じタブへ values.append（INSERT_ROWS）で直接追記する（決定 #26）。「最後のデータ行の
+    次」を読んでから updateCells で書くと、その間に Sebastian が同じ行へ追記したとき、その行を上書きしてしまう。
+    append はシートの側で「表の次の行」を決めて書くので、2 つの追記が同じ行を取り合わない。残りの列は、この後の
+    updateCells で同じ行へ書く。間で落ちても、次の回に place_rows が requestId で見つけて使う（adopted）。
+    requestId が A 列でないときは今までどおり（最後のデータ行の次）。取った行の数を返す。
+    """
+    spec = ctx.spec
+    if spec.table != "requests" or ctx.col.get(spec.id_headers[0]) != 0:
+        return 0
+    new = [w for w in works if not w.blocked and w.sheet_row is None and not w.adopted]
+    ids = [js_string(w.values.get(spec.id_headers[0])) for w in new]
+    if not new or any(i == "" for i in ids):
+        return 0
+    first = api.append_values(sid, spec.tab, [[i] for i in ids], purpose="row_sync")
+    for k, w in enumerate(new):
+        w.target_row = first + k
+        ctx.id_rows[w.target_row] = (normalize_gas(ids[k]),)
+    ctx.row_count = max(ctx.row_count, first + len(new) - 1)
+    ctx.last_data_row = max(ctx.last_data_row, first + len(new) - 1)
+    return len(new)
+
+
 def _retry_delay(attempts: int) -> int:
     return RETRY_DELAYS[min(attempts, len(RETRY_DELAYS)) - 1] if attempts >= 1 else RETRY_DELAYS[0]
 
@@ -619,6 +647,7 @@ def run_once(session_factory: Callable[[], Session], limit: int = 50, *, api: Sh
             with session_factory() as db:
                 claimed = _claimed_rows(db, table)
             place_rows(ctx, group, claimed)
+            reserve_new_rows(api, sid, ctx, group)
             todo = [w for w in group if not w.blocked]
             for w in todo:
                 w.headers = changed_headers(spec, w)

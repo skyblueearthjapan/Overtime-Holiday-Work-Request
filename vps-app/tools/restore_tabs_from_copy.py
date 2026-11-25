@@ -15,6 +15,9 @@
     表示形式は今のタブのまま。控えに式のセルがあれば値として書くので、報告の formulaCells に数を出す。
     控えより下・右の余った値は消す（値だけ。行・列・タブは消さない・作らない）。
   - worker を止めてから使う（行の反映・照合が同じタブを書かないように）。
+  - Requests に、控えに無い requestId の行（控えの後に Sebastian が直接足した行など。決定 #26）があれば、--apply を
+    止める（写し戻すとその行が消えるため）。報告の rowsNotInCopy に行番号と requestId を出す。それでも戻すと決めたときだけ
+    --drop-rows-not-in-copy を付ける（先にその行の中身を控えてから）。
 終了コード: 0＝成功（dry-run を含む）、2＝止めた。
 """
 from __future__ import annotations
@@ -31,6 +34,7 @@ from app import safety  # noqa: E402
 from app.services.sheets_api import API_BASE, column_letter, quote_sheet, sheet_titles  # noqa: E402
 
 BACKUP_DB_PREFIX = "【切替前の控え】残業・休日出勤申請 DB"
+ID_HEADERS = {"Requests": (1, "requestId")}  # 控えに無い行を確かめるタブ → (見出しの行, ID の列の見出し)
 ALL_TABS = ("Requests", "WorkLogs", "BatchLogs", "作業員マスタ", "工番マスタ", "社内カレンダーマスタ", "業務NOマスタ")
 
 
@@ -99,7 +103,31 @@ def plan_tab(api: Any, copy_id: str, target_id: str, tab: str) -> dict:
             if x != y:
                 diff += 1
     return {"tab": tab, "values": values, "rows": len(values), "cols": width, "currentRows": len(cur),
-            "currentCols": cur_width, "diffCells": diff, "formulaCells": formula_cells}
+            "currentCols": cur_width, "diffCells": diff, "formulaCells": formula_cells,
+            "rowsNotInCopy": rows_not_in_copy(tab, src, cur)}
+
+
+def _ids(tab: str, grid: list[list]) -> list[tuple[int, str]]:
+    header_row, header = ID_HEADERS[tab]
+    head = [str(v).strip() for v in (grid[header_row - 1] if len(grid) >= header_row else [])]
+    if header not in head:
+        return []
+    c = head.index(header)
+    out = []
+    for r in range(header_row, len(grid)):
+        v = grid[r][c] if c < len(grid[r]) else ""
+        text = str(v).strip() if v not in (None, "") else ""
+        if text:
+            out.append((r + 1, text))
+    return out
+
+
+def rows_not_in_copy(tab: str, src: list[list], cur: list[list]) -> list[dict]:
+    """今のタブにあって控えに無い ID の行（写し戻すと消える行）。ID の列を持つタブ（Requests）だけ。"""
+    if tab not in ID_HEADERS:
+        return []
+    in_copy = {i for _, i in _ids(tab, src)}
+    return [{"row": r, "requestId": i} for r, i in _ids(tab, cur) if i not in in_copy]
 
 
 def apply_tab(api: Any, target_id: str, plan: dict, meta: dict) -> None:
@@ -123,7 +151,8 @@ def apply_tab(api: Any, target_id: str, plan: dict, meta: dict) -> None:
         api._call("POST", f"{API_BASE}/{target_id}/values:batchClear", body={"ranges": clear})
 
 
-def run(api: Any, settings: Any, copy_id: str, tabs_arg: str, *, apply: bool) -> dict:
+def run(api: Any, settings: Any, copy_id: str, tabs_arg: str, *, apply: bool,
+        drop_rows_not_in_copy: bool = False) -> dict:
     copy_id = (copy_id or "").strip()
     target_id = safety.writable_spreadsheet_id(settings)
     tabs, explicit = parse_tabs(tabs_arg)
@@ -148,6 +177,12 @@ def run(api: Any, settings: Any, copy_id: str, tabs_arg: str, *, apply: bool) ->
     plans = [plan_tab(api, copy_id, target_id, t) for t in tabs]
     for p in plans:
         report["tabs"].append({k: v for k, v in p.items() if k != "values"})
+    lost = {p["tab"]: p["rowsNotInCopy"] for p in plans if p["rowsNotInCopy"]}
+    if apply and lost and not drop_rows_not_in_copy:
+        raise RestoreStop("控えに無い行があります（写し戻すと消えます。控えの後に Sebastian などが足した行）: "
+                          + "; ".join(f"{t}: " + ", ".join(f"{x['row']} 行目 {x['requestId']}" for x in rows[:20])
+                                      for t, rows in lost.items())
+                          + "。中身を控えてから、それでも戻すときだけ --drop-rows-not-in-copy を付けます")
     if apply:
         for p in plans:
             safety.assert_restore_target(target_id, p["tab"], settings, protected_listed=p["tab"] in explicit)
@@ -161,6 +196,8 @@ def main(argv: Optional[list] = None, *, api: Any = None, settings: Any = None) 
     parser.add_argument("--from-copy", required=True, help="tools/cutover_backup.py が出した DB の控えの ID")
     parser.add_argument("--tabs", required=True, help="カンマ区切りのタブの名前。all は A 区分と C 区分")
     parser.add_argument("--apply", action="store_true", help="本当に書く（無ければ確かめるだけ）")
+    parser.add_argument("--drop-rows-not-in-copy", action="store_true",
+                        help="控えに無い Requests の行（Sebastian の追記など）が消えてもよいときだけ付ける")
     args = parser.parse_args(argv)
     try:
         if settings is None:
@@ -175,7 +212,8 @@ def main(argv: Optional[list] = None, *, api: Any = None, settings: Any = None) 
 
             with Session(get_engine()) as db:
                 api = SheetsApi.for_db(db, settings)
-        report = run(api, settings, args.from_copy, args.tabs, apply=args.apply)
+        report = run(api, settings, args.from_copy, args.tabs, apply=args.apply,
+                     drop_rows_not_in_copy=args.drop_rows_not_in_copy)
     except RestoreStop as error:
         print(f"止めました: {error}", file=sys.stderr)
         return 2

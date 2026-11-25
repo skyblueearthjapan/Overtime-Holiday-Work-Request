@@ -5,7 +5,9 @@
   C 区分（作業員マスタ・工番マスタ・社内カレンダーマスタ・業務NOマスタ）は master_sync だけ。
 - どの環境も書かない: マスタ元・蓄積台帳（両方の環境）・PDF フォルダ・ほかのスプレッドシート、B・D・E 区分のタブ。
 - 使ってよい書き方: updateCells・values.batchUpdate・values.batchClear（C 区分の余りの行だけ）・
-  appendDimension（ROWS、A 区分の末尾だけ）。行・列・タブの挿入・削除・並べ替え・作り直しは使わない。
+  appendDimension（ROWS、A 区分の末尾だけ）・values.append（Requests の新しい行の requestId だけ。RAW・OVERWRITE＝
+  表の次の空の行に書く。行を挿入しない。決定 #26: Sebastian が同じタブへ追記するのと取り合わないため）。
+  行・列・タブの挿入・削除・並べ替え・作り直しは使わない。
 - Drive: api・worker は呼ばない（このモジュールに Drive の許可は無い）。
 
 確かめる時: 起動時（verify_startup。api と worker）と、書き込みの直前
@@ -42,7 +44,10 @@ PURPOSE_TABS: dict[str, frozenset[str]] = {
 # spreadsheets.batchUpdate で使ってよい要求の種類
 ALLOWED_BATCH_REQUESTS = frozenset({"updateCells", "appendDimension"})
 # 使ってよい書き方（SheetsApi の関数ごとの名前）
-WRITE_METHODS = frozenset({"updateCells", "values.batchUpdate", "values.batchClear", "appendDimension"})
+WRITE_METHODS = frozenset({"updateCells", "values.batchUpdate", "values.batchClear", "appendDimension",
+                           "values.append"})
+# values.append を使ってよいタブ（行の反映が新しい申請の行を取る。決定 #26）
+APPEND_VALUES_TABS = frozenset({"Requests"})
 
 
 def _settings(settings: Settings | None) -> Settings:
@@ -125,9 +130,11 @@ def assert_restore_target(spreadsheet_id: str, tab: str, settings: Settings | No
 
 
 def assert_write_method(method: str, tab: str) -> None:
-    """書き方の許可リスト。values.batchClear は C 区分だけ、appendDimension は A 区分だけ。"""
+    """書き方の許可リスト。values.batchClear は C 区分だけ、appendDimension は A 区分だけ、values.append は Requests だけ。"""
     if method not in WRITE_METHODS:
         raise UnsafeWriteError(f"使わない書き方です: {method}")
+    if method == "values.append" and tab not in APPEND_VALUES_TABS:
+        raise UnsafeWriteError("values.append は Requests の新しい行だけに使えます")
     if method == "values.batchClear" and tab not in C_TABS:
         raise UnsafeWriteError("値の消去はマスタのタブの余りの行だけに使えます")
     if method == "appendDimension" and tab not in A_TABS:

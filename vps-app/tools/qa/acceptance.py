@@ -77,7 +77,7 @@ SCREEN_FUNCTIONS: tuple[str, ...] = (
 )
 OPS_FUNCTIONS: tuple[str, ...] = (
     "ops_getStatus", "ops_retryJob", "ops_syncSheetConfigNow", "ops_runMasterSync", "ops_regeneratePdf",
-    "ops_batchPdfForDate", "ops_rebuildLedger", "ops_recalcBreaks", "ops_revokeSessions",
+    "ops_batchPdfForDate", "ops_rebuildLedger", "ops_recalcBreaks", "ops_revokeSessions", "ops_runSheetIntake",
 )
 RPC_FUNCTIONS: tuple[str, ...] = SCREEN_FUNCTIONS + OPS_FUNCTIONS
 WRITE_FUNCTIONS = frozenset({
@@ -85,7 +85,7 @@ WRITE_FUNCTIONS = frozenset({
     "api_deleteRequest", "api_approveRequest", "api_rejectRequest", "api_approveRequestsBatch",
     "api_secondaryApprove", "api_secondaryApproveBatch", "api_adminManualComplete", "ops_retryJob",
     "ops_syncSheetConfigNow", "ops_runMasterSync", "ops_regeneratePdf", "ops_batchPdfForDate", "ops_rebuildLedger",
-    "ops_recalcBreaks", "ops_revokeSessions",
+    "ops_recalcBreaks", "ops_revokeSessions", "ops_runSheetIntake",
 })
 
 # GAS の仕事の種類（services/gas_jobs.py の jobs.kind）
@@ -679,13 +679,13 @@ class Runner:
                             r.status == 200 and r.result == {"ok": False, "error": "部署が指定されていません。"},
                             r.brief())
         for fn, why in (("ops_syncSheetConfigNow", "--write のときに呼ぶ"), ("ops_runMasterSync", "--write のときに呼ぶ"),
-                        ("ops_recalcBreaks", "--write のときに呼ぶ"),
+                        ("ops_recalcBreaks", "--write のときに呼ぶ"), ("ops_runSheetIntake", "--write のときに呼ぶ"),
                         ("ops_rebuildLedger", "台帳を作り直す重い処理なので手で確かめる（JEV）")):
             seen.add(fn)
             if not (self.write and fn != "ops_rebuildLedger"):
                 self.report.add(f"F-{fn}", f"{fn}()", None, why)
         missing = [fn for fn in RPC_FUNCTIONS if fn not in seen]
-        self.report.add("F-all", "38 関数をすべて確かめの対象にした", not missing, f"漏れ: {missing}")
+        self.report.add("F-all", f"{len(RPC_FUNCTIONS)} 関数をすべて確かめの対象にした", not missing, f"漏れ: {missing}")
 
     # ---- Sebastian ----
 
@@ -917,6 +917,10 @@ class Runner:
         rep.add("F-ops_runMasterSync", "ops_runMasterSync() が {ok, tabs}",
                 r.ok is True and isinstance(r.result, dict) and r.result.get("ok") is True and "tabs" in r.result,
                 r.brief())
+        r = self.rpc("ops_runSheetIntake")
+        rep.add("F-ops_runSheetIntake", "ops_runSheetIntake() が {ok, ingested, skipped}（シートは読むだけ。決定 #26）",
+                r.ok is True and isinstance(r.result, dict) and r.result.get("ok") is not False and
+                "ingested" in r.result and "skipped" in r.result, r.brief())
         r = self.rpc("ops_recalcBreaks")
         rep.add("F-ops_recalcBreaks", "ops_recalcBreaks() が {ok:true, changed:数}",
                 r.ok is True and isinstance(r.result, dict) and r.result.get("ok") is True and

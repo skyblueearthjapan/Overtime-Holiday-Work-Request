@@ -33,7 +33,7 @@ EOF
 | A-1 | 画面 5 ページ＋権限エラー、`?page=`、不明は top、`redirect` | 自動 U `test_pages.py`。acceptance P-1〜P-5、E-1・E-2。JEV: 各ページを開き、ヘッダーのリンクを全部押す（J-1） | 未 | |
 | A-2 | 入口の判定（admin・approve2・approver） | 自動 U `test_pages.py`。JEV: 承認者でない共有アカウントで approver・admin を開き、権限エラー（J-14） | 未 | |
 | A-3 | テンプレート変数・`DATE_PARAM` | 自動 U。JEV: `?page=approve2&date=2026-11-25`・`?page=admin&date=2026-11-25` で、その日が自動で出る（J-5・J-6） | 未 | |
-| A-4 | 29 関数の形・エラー文・失敗の 6 通り | 自動 W `test_domain_*.py`。acceptance F-*（38 関数すべて）、F-all、E-5〜E-9。SB: 同じ入力で GAS と VPS の返事を突き合わせる（日次一覧は GAS が null なので比べない） | 未 | |
+| A-4 | 29 関数の形・エラー文・失敗の 6 通り | 自動 W `test_domain_*.py`。acceptance F-*（39 関数すべて）、F-all、E-5〜E-9。SB: 同じ入力で GAS と VPS の返事を突き合わせる（日次一覧は GAS が null なので比べない） | 未 | |
 | A-5 | Sebastian の 4 action | 自動 W `test_sebastian.py`。acceptance SB-1〜SB-5。SB: 写しの GAS の転送を通して `ping`・完了。切り替え後に本物の Sebastian の完了 1 件（手順書 D 章） | 未 | |
 | A-6 | 状態の遷移・削除の副作用 | 自動 W。acceptance W-3〜W-16。JEV: 申請 → 承認 → 完了 → 二次承認 → 削除を 1 件通す（J-2〜J-9） | 未 | |
 | A-7 | 実績と休憩、Sebastian の休憩（#23） | 自動 W `test_domain_breaks.py`・`test_sebastian.py`。acceptance W-6（17:20〜18:20 で休憩 0） | 未 | |
@@ -72,6 +72,7 @@ EOF
 | A-40 | 移行の照合（計画書 5-4） | 自動 D `test_migrate_from_sheets.py`。手順書 B-11・B-12 の SQL | 未 | |
 | A-41 | 速さ（目安: 一覧 100ms 以下、承認 100ms 以下） | acceptance の最後の行「速さ（中央値 ms）」 | 未 | |
 | A-42 | 手順書のリハーサルと戻しの練習 | ディレクターが SB と staging で 2 回（手順書 A-2・C 章） | 未 | |
+| A-43 | Sebastian の直接の追記（決定 #26。実装仕様 6-10） | 自動 D2 `test_sheet_intake.py`・`test_reconcile.py`。SB と JEV は S-1〜S-4 | 未 | |
 
 ## 2. 入口と安全（acceptance.py が毎回見るもの）
 
@@ -108,9 +109,20 @@ EOF
 | J-15 | 総務の［表示中をCSV］、TOP の STEP 2 のサマリー、作業員の自動選択 | CSV が保存できる（BOM なし）。STEP 2 に過去日が出ない・自動選択が効かない（今のまま） | A-17・A-28 | 未 | |
 | J-16 | 氏名が `x');alert(1)//` と `"><img src=x onerror=alert(1)>` の申請を作り、5 画面を開く | 何も実行されず、文字のまま見える | A-27 | 未 | |
 | J-17 | 操作中にログインを切る（管理者の欄の［セッションの取り消し］か、別のタブでログアウト）→ 申請のモーダルで送信 | 「ログインが切れました…」の表示 → ログイン → 書きかけが戻る。二重に alert が出ない | A-23 | 未 | |
-| J-18 | 総務の画面の一番下の「運用（管理者）」欄を開き、［共有タブを今すぐ取り込む］［マスタ同期］を押す | 結果が出る。失敗した仕事・反映待ちの数が見える | A-13・A-14・A-32 | 未 | |
+| J-18 | 総務の画面の一番下の「運用（管理者）」欄を開き、［共有タブを今すぐ取り込む］［マスタ同期］［シートの取り込み（Sebastian の追記）］を押す | 結果が出る。失敗した仕事・反映待ちの数、`sheetIntake` の最後の回が見える | A-13・A-14・A-32・A-43 | 未 | |
 | J-19 | 5 ページのヘッダーのリンク・全ボタン・マウスを載せる表示を一通り押す | どれも動く（CSP で止まらない）。ブラウザのコンソールに CSP のエラーが出ない | A-1・A-25 | 未 | |
 | J-20 | 古いリンク（GAS の `/exec?page=approve2&date=…`）を開き、移転ページのボタンを押す（切り替えのリハーサルで） | 新しいアプリの同じ画面が最上位の窓で開く | A-24 | 未 | |
+
+## 3a. Sebastian の直接の追記（決定 #26。ステージングの写しで。切り替えの後に本番でも 1 件）
+
+Sebastian と同じ呼び方（`values().append(range='Requests!A:A', valueInputOption='USER_ENTERED', insertDataOption='INSERT_ROWS')`、`status='submitted'`、`submittedAt` は JST の `M/D/YYYY H:MM:SS`）で、ステージングの写しの Requests に 1 行足して確かめます。本番では、切り替えの後に Sebastian が作った最初の申請で S-1〜S-3 を見ます。
+
+| # | 操作 | 期待すること | 対応する A | 状態 | メモ |
+|---|---|---|---|---|---|
+| S-1 | Sebastian と同じ呼び方で Requests に 1 行足し、TOP（その部署の共有アカウント）と承認者画面を開く | **2 分以内に**一覧に出る（worker の 1 分ごとの取り込み。急ぐときは管理者の欄の［シートの取り込み（Sebastian の追記）］）。管理者の欄の `sheetIntake.ingested` にその requestId | A-43 | 未 | |
+| S-2 | S-1 の申請を承認者画面で承認する | 状態が承認済み。シートの**同じ行**の status・approvedAt・approvedBy だけが変わり、新しい行はできない。ほかの列（submittedAt の表示など）は変わらない | A-43 | 未 | |
+| S-3 | S-1 の申請の完了を Sebastian（または `/api/sebastian` の `completeOvertime`）で送る | 完了になり、実績が出る。WorkLogs に行ができる。PDF ができる（承認済みなら） | A-5・A-43 | 未 | |
+| S-4 | requestId が空の行、同じ requestId の 2 行を足す | 取り込まれず、管理者の欄の `sheetIntake.skipped` に行番号と理由が出る。シートのその行は変わらない（次の照合の後も） | A-43 | 未 | |
 
 ## 4. 実機（JEV では動かせないもの）
 

@@ -51,6 +51,7 @@ REGISTRATION_MODULES: tuple[str, ...] = (
     "app.services.gas_jobs",
     "app.services.morning_batch",
     "app.services.ops_status",
+    "app.services.sheet_intake",
 )
 
 TaskFn = Callable[..., Any]

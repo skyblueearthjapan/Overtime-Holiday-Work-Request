@@ -527,6 +527,35 @@ def _to_int(x: float) -> int:
     return int(math.floor(float(x) + 0.5))
 
 
+def decode_row(spec: TableSpec, col: dict[str, int], urow: list, frow: list, tz: Any,
+               sheet_row: int) -> tuple[dict, list[str]]:
+    """シートの 1 行（UNFORMATTED と FORMATTED）→ DB に入れる dict と、読めなかった列の文。
+
+    移行の道具（tools/migrate_from_sheets.py）とシートの取り込み（services/sheet_intake.py）が同じ決まりで使う。
+    dict は sheet_row・row_version=1・cell_kinds（型が混ざる列の行ごとの型）と、列の値（assign_db_value の形）。
+    """
+    record: dict = {"sheet_row": sheet_row, "row_version": 1, "cell_kinds": {}}
+    errors: list[str] = []
+    for rule in spec.columns:
+        c = col.get(rule.header, -1)
+        try:
+            value, kind = decode_cell(rule, cell_at(urow, c), cell_at(frow, c), tz)
+        except CodecError as error:
+            errors.append(f"{spec.tab} {sheet_row} 行目: {error}")
+            continue
+        assign_db_value(rule, record, value)
+        if rule.date_like and kind:
+            record["cell_kinds"][rule.header] = kind
+    return record, errors
+
+
+def synced_values_for(spec: TableSpec, record: Any) -> dict:
+    """シートから読んだ行の sheet_sync_state.synced_values（今シートにある値と型。反映済みの印）。"""
+    synced = snapshot(spec, record)
+    synced[KINDS_KEY] = row_kinds(record)
+    return synced
+
+
 # ===== 見出し =====
 
 

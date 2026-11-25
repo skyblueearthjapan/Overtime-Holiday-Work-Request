@@ -3,7 +3,8 @@
 - 書く関数はすべて、直前に safety.assert_writable(spreadsheet_id, tab, purpose) を通す
   （staging は STAGING_SPREADSHEET_ID だけ、production は PROD_SPREADSHEET_ID だけ。タブと目的の許可リスト）。
   spreadsheets.batchUpdate の要求は updateCells と appendDimension（ROWS）だけで、すべて tab のシート
-  （safety.assert_write_requests）。行・列・タブの挿入・削除・並べ替え・作り直しは出さない。
+  （safety.assert_write_requests）。values.append は Requests の requestId だけ（RAW・OVERWRITE。行を挿入しない）。
+  行・列・タブの挿入・削除・並べ替え・作り直しは出さない。
 - 読む関数は照合しない（マスタ元・本番 DB を読むのは許す）。
 - 429・5xx は指数的に待って 4 回まで送り直す。
 
@@ -13,6 +14,7 @@
     unformatted, formatted = api.batch_get_values(sid, ["'Requests'!A1:AZ"], "UNFORMATTED_VALUE"), ...
     api.batch_update(sid, [{"updateCells": {...}}], tab="Requests", purpose="row_sync")
     api.append_rows(sid, "Requests", 10)                               # 末尾に行を足す（appendDimension）
+    first_row = api.append_values(sid, "Requests", [[request_id]])     # 表の次の行を取る（RAW・OVERWRITE。決定 #26）
     api.values_batch_update(sid, [{"range": "'工番マスタ'!A1:H3", "values": [...]}],
                             tab="工番マスタ", purpose="master_sync", input_option="USER_ENTERED")
     api.values_batch_clear(sid, ["'工番マスタ'!A4:H"], tab="工番マスタ", purpose="master_sync")
@@ -159,6 +161,31 @@ class SheetsApi:
         return self._call("POST", f"{API_BASE}/{spreadsheet_id}/values:batchUpdate",
                           body={"valueInputOption": input_option, "data": list(data)})
 
+    def append_values(self, spreadsheet_id: str, tab: str, values: Sequence[Sequence[Any]], *,
+                      purpose: str = "row_sync") -> int:
+        """values.append（RAW・insertDataOption=OVERWRITE。範囲は '<tab>'!A:A）。書いた最初の行（1 始まり）を返す。
+
+        Google が「表の最後の行の次」を決めて書くので、Sebastian の追記（INSERT_ROWS）と同時でも同じ行を取り合わない
+        （決定 #26）。OVERWRITE は行を挿入しない（シートの末尾なら行が足される＝appendDimension と同じ）。
+        文字は RAW なので式にならない。Requests の新しい行の requestId だけに使う（safety が照合する）。
+        """
+        rows = [list(r) for r in values]
+        if not rows:
+            raise ValueError("書く行がありません")
+        for row in rows:
+            for v in row:
+                if not isinstance(v, str):
+                    raise safety.UnsafeWriteError("values.append は文字（requestId）だけを書きます")
+        self._guard(spreadsheet_id, tab, purpose, "values.append")
+        rng = f"{quote_sheet(tab)}!A:A"
+        safety.assert_ranges_in_tab([rng], tab)
+        data = self._call("POST", f"{API_BASE}/{spreadsheet_id}/values/{quote_a1(rng)}:append",
+                          params={"valueInputOption": "RAW", "insertDataOption": "OVERWRITE",
+                                  "includeValuesInResponse": "false"},
+                          body={"range": rng, "majorDimension": "ROWS", "values": rows})
+        updated = str(((data or {}).get("updates") or {}).get("updatedRange") or "")
+        return first_row_of_range(updated)
+
     def values_batch_clear(self, spreadsheet_id: str, ranges: Sequence[str], *, tab: str, purpose: str) -> dict:
         """values.batchClear（C 区分の余りの行の値だけ。行は消さない）。"""
         self._guard(spreadsheet_id, tab, purpose, "values.batchClear")
@@ -202,6 +229,16 @@ def sheet_id_by_title(meta: dict, title: str) -> int | None:
 def spreadsheet_timezone(meta: dict) -> str:
     """properties.timeZone（DB_SHEET_TIMEZONE と照合する。gap-5 高-2）。"""
     return str((meta.get("properties") or {}).get("timeZone") or "")
+
+
+def first_row_of_range(a1_range: str) -> int:
+    """'Requests'!A2336:A2337 → 2336（values.append の返事の updatedRange）。読めなければ SheetsError。"""
+    import re
+
+    m = re.search(r"!\$?[A-Z]+\$?(\d+)", a1_range or "")
+    if not m:
+        raise SheetsError(f"values.append の返事の範囲が読めません: {a1_range!r}")
+    return int(m.group(1))
 
 
 def quote_a1(a1_range: str) -> str:
