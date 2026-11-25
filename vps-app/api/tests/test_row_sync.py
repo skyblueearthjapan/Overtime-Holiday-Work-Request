@@ -521,3 +521,15 @@ def test_cli_status_and_reappend(env, db, monkeypatch, capsys):
     monkeypatch.setattr(app_db, "get_sessionmaker", lambda: env.sf)
     assert row_sync.main(["status"]) == 0 and '"blocked": []' in capsys.readouterr().out
     assert row_sync.main(["reappend", "requests", R2]) == 1  # blocked ではない
+
+
+def test_existing_row_with_blank_id_is_blocked_not_written(env, db):
+    """データ安全 低-2: ID が空の行は位置を確かめられないので書かない。"""
+    wl = db.scalars(select(WorkLog).where(WorkLog.request_id == R1)).one()
+    wl.request_id = ""
+    wl.updated_by = "変えた"
+    sheet_queue.mark_dirty(db, "work_logs", str(wl.id))
+    db.commit()
+    result = env.run()
+    assert result["blocked"] == 1 and result["written"] == 0
+    assert env.fake.writes() == []

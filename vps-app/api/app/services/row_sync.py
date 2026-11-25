@@ -408,6 +408,10 @@ def place_rows(ctx: TabContext, works: list[RowWork], claimed: dict[int, tuple[s
 
     for w in works:
         key = db_id(spec, w.values)
+        if w.sheet_row is not None and _blank_id(key) and w.sheet_row <= ctx.last_data_row:
+            # ID が空の行は、行がずれても見分けられない（別の空の ID の行に書く恐れ）ので書かない（データ安全 低-2）
+            w.blocked = f"{spec.tab} の {w.sheet_row} 行目は ID が空のため、位置を確かめられません（書きません）"
+            continue
         if w.sheet_row is not None:
             if w.sheet_row in ctx.id_rows and _same_id(spec, ctx.id_rows[w.sheet_row], key):
                 w.target_row = w.sheet_row

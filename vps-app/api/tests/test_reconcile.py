@@ -170,3 +170,20 @@ def test_db_rows_for_marks_blocked_as_skipped(env, db):
     db.commit()
     rows = {d["pk"]: d for d in reconcile.db_rows_for(db, "requests")}
     assert rows[R1]["skip"] is True and rows[R2]["skip"] is False
+
+
+def test_rows_moved_between_read_and_write_are_not_written(env, db, monkeypatch):
+    """データ安全 低-1: 比べた後・書く前に行が並べ替えられたら、その行には書かない。"""
+    cell(env.book, 3, "workerName").value = "人が直した名前"
+    original = reconcile.row_sync.load_tab
+
+    def swapped(api, sid, spec, meta, tz, *, need_tail):
+        tab = env.book.tabs["Requests"]
+        if spec.tab == "Requests":  # 書く直前に人が 2 行目と 3 行目を入れ替えた
+            tab.rows[1], tab.rows[2] = tab.rows[2], tab.rows[1]
+        return original(api, sid, spec, meta, tz, need_tail=need_tail)
+
+    monkeypatch.setattr(reconcile.row_sync, "load_tab", swapped)
+    result = env.run()
+    assert result["diffCount"] == 1 and result["fixedRows"] == 0
+    assert env.fake.batch_requests() == []

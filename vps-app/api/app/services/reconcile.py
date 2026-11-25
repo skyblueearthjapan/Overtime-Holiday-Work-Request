@@ -29,7 +29,7 @@ from app.safety import UnsafeWriteError
 from app.services import row_sync
 from app.services import sheet_codec as codec
 from app.services import write_gate
-from app.services.sheets_api import SheetsApi, SheetsError, quote_sheet, sheet_id_by_title
+from app.services.sheets_api import SheetsApi, SheetsError, quote_sheet
 
 log = logging.getLogger(__name__)
 
@@ -178,13 +178,6 @@ def _fix_tab(api: SheetsApi, sid: str, spec: codec.TableSpec, meta: dict, unform
              rows: list[dict], session_factory, tz) -> int:
     """差のあるセルを DB の値で書き直す。書き直した行の数。"""
     by_pk = {d["pk"]: d for d in rows}
-    grid = {}
-    for s in meta.get("sheets", []):
-        if s["properties"]["title"] == spec.tab:
-            grid = s["properties"].get("gridProperties") or {}
-    ctx = row_sync.TabContext(spec=spec, sheet_id=sheet_id_by_title(meta, spec.tab), col=result["col"], id_rows={},
-                              last_data_row=len(unformatted), row_count=int(grid.get("rowCount") or 0),
-                              col_count=int(grid.get("columnCount") or 26))
     headers_by_pk: dict[str, list[str]] = {}
     for diff in result["diffs"]:
         headers_by_pk.setdefault(diff["pk"], [])
@@ -207,6 +200,18 @@ def _fix_tab(api: SheetsApi, sid: str, spec: codec.TableSpec, meta: dict, unform
         works.append(row_sync.RowWork(table=spec.table, pk=pk, version=d["version"], values=d["values"],
                                       kinds=d["kinds"], synced=d["synced"], sheet_row=d["sheet_row"], seq=0,
                                       first_dirty_at=None, attempts=0, target_row=d["sheet_row"], headers=headers))
+    if not works:
+        return 0
+    # 書く直前に ID の列を読み直し、読んだ後に並べ替えられた行には書かない（データ安全 低-1）
+    ctx = row_sync.load_tab(api, sid, spec, meta, tz, need_tail=False)
+    moved = [w for w in works
+             if w.sheet_row not in ctx.id_rows
+             or row_sync._blank_id(row_sync.db_id(spec, w.values))
+             or not row_sync._same_id(spec, ctx.id_rows[w.sheet_row], row_sync.db_id(spec, w.values))]
+    if moved:
+        log.warning("reconcile: %s の %d 行は比べた後に位置が変わったので書きません", spec.tab, len(moved))
+        moved_ids = {id(w) for w in moved}
+        works = [w for w in works if id(w) not in moved_ids]
     if not works:
         return 0
     row_sync.load_refs(api, sid, ctx, timeutil.now_utc())
