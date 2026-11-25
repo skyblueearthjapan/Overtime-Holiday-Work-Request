@@ -273,7 +273,8 @@ def changed_headers(spec: codec.TableSpec, work: RowWork) -> list[str]:
             if cur != "":
                 out.append(rule.header)
             continue
-        if work.adopted or rule.header not in work.synced or work.synced.get(rule.header) != cur:
+        if (work.adopted or rule.header not in work.synced
+                or codec.canonical_stored(rule, work.synced.get(rule.header)) != cur):
             out.append(rule.header)
             continue
         if rule.date_like and rule.kind != "jst_text" and cur != "":

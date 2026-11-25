@@ -345,6 +345,21 @@ def canonical(rule: ColumnRule, value: Any) -> Any:
     return js_string(value)
 
 
+def canonical_stored(rule: ColumnRule, stored: Any) -> Any:
+    """synced_values に入っている値を canonical の形にそろえる。
+
+    担当 M の gas_jobs.record_pdf_result は日時を datetime.isoformat()（マイクロ秒あり・なし）で入れるので、
+    日時の列は ISO を読み直してミリ秒までの形にする（同じ時刻なら同じ値＝PDF の列を書き直さない）。
+    """
+    if rule.kind in ("datetime", "mixed_datetime") and isinstance(stored, str) and "T" in stored:
+        try:
+            parsed = datetime.fromisoformat(stored.replace("Z", "+00:00"))
+        except ValueError:
+            return stored
+        return canonical(rule, parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC))
+    return stored
+
+
 def snapshot(spec: TableSpec, row: Any) -> dict:
     """行の全列の canonical（見出し → 値）。synced_values の形。"""
     return {c.header: canonical(c, db_value(c, row)) for c in spec.columns}

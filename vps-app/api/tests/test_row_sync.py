@@ -471,3 +471,24 @@ def test_rows_written_before_a_halt_are_recorded(env, db):
     st = db.get(SheetSyncState, ("work_logs", str(wl.id)))
     db.refresh(st)
     assert st.synced_version < st.desired_version
+
+
+def test_with_real_record_pdf_result_pdf_columns_are_not_rewritten(env, db):
+    """担当 M の gas_jobs.record_pdf_result（synced_values を見出しの名前・UTC の ISO で入れる）と組み合わせても、
+    GAS がシートに書いた PDF の 3 列を行の反映が書き直さない。"""
+    from app.services import gas_jobs
+
+    req_cell(env.book, 3, "pdfFileId").value = "gas-pdf-2"
+    req_cell(env.book, 3, "pdfFolderId").value = "gas-folder-2"
+    assert gas_jobs.record_pdf_result(db, R2, {"pdfFileId": "gas-pdf-2", "pdfFolderId": "gas-folder-2",
+                                               "pdfGeneratedAt": "2026-11-26 11:30:00"})
+    db.commit()
+    assert env.run()["written"] == 0  # 版は進んだが、シートと同じ値なので何も書かない
+    assert env.fake.writes() == []
+    r2 = db.get(Request, R2)
+    r2.approved_by2 = "admin-a@lineworks-local.info"
+    sheet_queue.mark_dirty(db, "requests", R2)
+    db.commit()
+    assert env.run()["written"] == 1
+    cols = {c for _, c in touched_columns(env.fake, env.book.tabs["Requests"].sheet_id)}
+    assert cols == {REQUEST_HEADERS.index("approvedBy2")}
