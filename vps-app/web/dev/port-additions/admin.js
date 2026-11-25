@@ -10,6 +10,7 @@ var OPS_CALLS = {
   ops_runMasterSync: function(r){ r.ops_runMasterSync(); },
   ops_rebuildLedger: function(r){ r.ops_rebuildLedger(); },
   ops_recalcBreaks: function(r){ r.ops_recalcBreaks(); },
+  ops_runSheetIntake: function(r){ r.ops_runSheetIntake(); },
   ops_regeneratePdf: function(r, v){ r.ops_regeneratePdf(v); },
   ops_batchPdfForDate: function(r, v){ r.ops_batchPdfForDate(v); },
   ops_revokeSessions: function(r, v){ r.ops_revokeSessions(v); },

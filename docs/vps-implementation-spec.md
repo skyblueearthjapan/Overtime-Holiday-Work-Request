@@ -22,7 +22,7 @@
 3. 画面（5 ページ＋権限エラー）
 4. RPC（画面の 29 関数・管理用・Sebastian の入口）
 5. DB の表
-6. シートへの行単位の反映（決定 A）
+6. シートへの行単位の反映（決定 A）・シートの取り込み（6-10、決定 #26）
 7. GAS の内部用の入口と、きっかけごとの呼び順（決定 B）
 8. 同じにしなければならない業務の決まり
 9. 安全装置
@@ -289,7 +289,7 @@ GAS の `<?= X ?>`（自動エスケープ）は `{{ X }}`、`<?!= X ?>` は 3-6
   - 日時・日付は 4-3 の表の形の文字（JST、`T` も時差も付けない）。`null` を返すのは表に `null` と書いた所だけ。
   - 数は int。分の空はその関数が GAS で返していた値（多くは `Number('') = 0`）。
   - キーの並び順は気にしない（画面は名前で読む）。
-- 閉じたリスト `RPC_FUNCTIONS` = 4-3 の 29 関数＋4-2 の 9 関数（計 38）。`api_getFormUrl`・`api_getTodayRequestsForDept`・`api_getTodayRequestsForWorker` と、画面から呼ばれない保守の関数（`recalcWorkLogsBreakMinutes`・`rebuildAccumulationSS`・`syncAllMasters` ほか）は出さない（9-1 #11・#13）。保守は 4-2 の管理者だけの関数で行う。
+- 閉じたリスト `RPC_FUNCTIONS` = 4-3 の 29 関数＋4-2 の 10 関数（計 39。`ops_runSheetIntake` は決定 #26 で足した）。`api_getFormUrl`・`api_getTodayRequestsForDept`・`api_getTodayRequestsForWorker` と、画面から呼ばれない保守の関数（`recalcWorkLogsBreakMinutes`・`rebuildAccumulationSS`・`syncAllMasters` ほか）は出さない（9-1 #11・#13）。保守は 4-2 の管理者だけの関数で行う。
 
 ### 4-2. 管理者だけの関数（W が `domain/ops.py` に作る。すべて `permissions.is_admin` が真のときだけ）
 
@@ -304,6 +304,7 @@ GAS の `<?= X ?>`（自動エスケープ）は `{{ X }}`、`<?!= X ?>` は 3-6
 | `ops_rebuildLedger()` | `{ok:true, jobId}` | `gas_jobs.enqueue_ledger_rebuild(db)`（GAS の `rebuildAccumulationSS` を内部用の入口で呼ぶ） |
 | `ops_recalcBreaks()` | `{ok:true, changed:N}` | `recalcWorkLogsBreakMinutes`（`worklog.gs:712-806`）を写す。`end <= start` の行は飛ばす。変わった行だけ `breakMinutes`・`netMinutes`・`updatedAt`（文字）・`updatedBy='break-recalc'` |
 | `ops_revokeSessions(email)` | `{ok:true, revoked:N}` | `auth.revoke_sessions` |
+| `ops_runSheetIntake()` | `sheet_intake.run_now(db)` の結果（`{ok, active, ingested, skipped, …}`） | シートの取り込み（6-10、決定 #26）を今すぐ 1 回。シートは読むだけ。DB に申請を入れる（書く） |
 
 ### 4-3. 画面の 29 関数（すべて W。シムと画面は U）
 
@@ -478,6 +479,7 @@ alembic は `0001_initial_schema` 1 本。`test_migrations.py`（SQLite で upgr
 
 - 今ある行（移行した行と、一度書いた行）は `sheet_row` に書く。書く前にその行の ID の列（Requests・WorkLogs は `requestId`、BatchLogs は `実行日時` と `バッチ名`）を `batchGet` で読み、DB と同じか確かめる。違えば ID の列を全部読んで位置を探し直し、`sheet_row` を直してから書く。見つからなければ書かずに `state='blocked'`、管理者の欄に出す。
 - 新しい行は、ID の列を読んで「最後のデータ行の次」に書く（GAS の `appendRow` と同じ）。シートの行数が足りなければ `appendDimension`（ROWS、末尾に足すだけ）。書いた位置を `sheet_row` に入れる。
+- ただし Requests の新しい行は、先に requestId だけを `values.append`（範囲 `'Requests'!A:A`、RAW、`insertDataOption=OVERWRITE`）で書き、返事の `updatedRange` の行を `sheet_row` にして、残りの列をその行へ `updateCells` で書く（`row_sync.reserve_new_rows`。決定 #26）。Sebastian が同じタブへ `INSERT_ROWS` で追記するのと同時でも、行を決めるのはシートの側なので、互いの行を上書きしない。間で落ちた行（requestId だけの行）は、次の回に ID の列から見つけて使う。OVERWRITE は行を挿入しない（シートの末尾なら行が足される）。
 - 新しい行の日付・日時のセルの表示形式は、同じ列の最後のデータ行の `numberFormat` を写す（そのセルが文字なら、日付は `yyyy/MM/dd`、日時は `yyyy/MM/dd H:mm:ss`）。表示形式の無いシリアル値は、戻した GAS が数値として読み、未承認滞留 48h などが狂う（gap-4 F-1）。
 - 行・列・タブの挿入・削除・並べ替え・作り直しは使わない。申請の削除は値の書き換え（status=`canceled`、WorkLogs の 5 列を空）で表す。
 - 見出しの確かめ: 書く前に見出しを読み（WorkLogs は 2 行目。1 行目の説明に触れない）、`COLUMN_RULES` の見出しが 1 つでも無ければレーン全体を止めて知らせる（列を足さない。gap-1 G15）。決まりに無い右側の列には触れない。
@@ -500,8 +502,8 @@ alembic は `0001_initial_schema` 1 本。`test_migrations.py`（SQLite で upgr
 
 - A 区分の 3 タブを `UNFORMATTED_VALUE`（`SERIAL_NUMBER`）と `FORMATTED_VALUE` で全行読み、DB と 1 セルずつ比べる。日時は**秒の単位**で比べ（GAS が書いた時刻はミリ秒を持つため）、表示形式の種類（日付か文字か）も見る。
 - `desired_version > synced_version` の行（反映待ち）は比べない。
-- 差があれば DB の値でその行を書き直し、直した行・列・前後の値を `sync_runs.summary_json` と管理者の欄に残す。シートにあって DB に無い行（GAS や人が書いた行）は消さずに報告する。
-- 歯止め（罠 49）: DB の `requests` か `work_logs` が 0 行、またはシートより DB の行が少ないときは、1 行も書かずに止めて知らせる。
+- 差があれば DB の値でその行を書き直し、直した行・列・前後の値を `sync_runs.summary_json` と管理者の欄に残す。シートにあって DB に無い行（GAS や人が書いた行、Sebastian が足してまだ取り込んでいない行）は消さず・書かずに報告する（`extraRows`・`notInDb`）。
+- 歯止め（罠 49）: DB の `requests` か `work_logs` が 0 行、またはシートより DB の行が少ないときは、1 行も書かずに止めて知らせる。Requests の「DB に無い requestId の行」（取り込み待ち。6-10）は `FOREIGN_TOLERANCE`（20）行までは数から除く（超えたら止める）。
 - `python -m app.worker run sheet_reconcile --check` は書かずに数えるだけ（切り替えの B-16 と戻しの C-2 で使う）。
 
 ### 6-8. マスタ同期（決定 D。`master_sync.sync_masters`、0:30 ごろと手動）
@@ -517,6 +519,21 @@ alembic は `0001_initial_schema` 1 本。`test_migrations.py`（SQLite で upgr
 - `Settings`・`DeptApprovers`・`ApproverMap` を読んで 5-2 の表を全置換する。読めない・空・有効な行 0 なら上書きしない。
 - キーと見出しは前後の空白を取り、`normalize_gas`（前後の空白を取り、全角英数を半角に）を値にも当てて比べる（Settings はキーの前後の空白だけ。gap-4 F-11・F-14）。
 - Settings の `SOURCE_SSID`・`TEMPLATE_SSID`・`PDF_ROOT_FOLDER_ID`・`ACCUMULATION_SS_ID` が `.env` の値と違えば、`sync_runs` と管理者の欄に「食い違い」を出す（書き込み先は `.env` が決める）。
+
+### 6-10. シートの取り込み（`sheet_intake`、60 秒ごとと手動。決定 #26。担当 D2）
+
+Sebastian（同じ VPS の `/root/.hermes` の AI。こちらからは変えない）は、本番 DB スプレッドシートの Requests へ Sheets API で新しい申請を直接足す: `values().append(range='Requests!A:A', valueInputOption='USER_ENTERED', insertDataOption='INSERT_ROWS')`。行は見出しの名前から作り、`requestId`（uuid4）・`requestType`・`status='submitted'`・`dept`・`workerCode`・`workerName`・`workerEmail`（部署の共有アカウント）・`targetDate`（`yyyy-MM-dd`）・`submittedAt`（JST の `M/D/YYYY H:MM:SS`。USER_ENTERED なので日時のセルになる）・`approvedMinutes`・`reason`・`workContent`・`reasonDetail`・`workNo1..3`・`orderNo1..3`・`customer1..3`・`product1..3` を入れ、ほかは空。Requests を全列読んで requestId を探し、完了は GAS の `doPost`（切り替えの後は VPS の `/api/sebastian` へ転送）で送る。GAS の時代は何もしなくてもその行が全画面・集計に出た。VPS では DB が正なので、取り込まないと見えない。
+
+- **いつ動くか**: worker の予定 `sheet_intake`（`every_minutes=1`）、管理者の `ops_runSheetIntake()`、`/api/sebastian` の完了・開始が DB に無い requestId を指したとき（その場で 1 回取り込んでから処理する。GAS では追記の直後でも見つかったため）。
+- **関所**: production は `write_gate.check` が通る（新しい `gas_ping` が `migrated=true`）ときだけ。切り替えの前（GAS が正）と戻した後は取り込まない。staging はステージングの写しを読むだけなので、いつでも動く。
+- **鍵**: 同時に 1 つだけ（プロセスの中は `threading.Lock`、PostgreSQL は `pg_try_advisory_lock(739310002)`）。取れなければ `{busy:true}` で何もしない（手での実行と Sebastian の入口は少し待つ）。入れる前に DB にあるかを確かめ、主キーの重なりは「もうある」として飛ばす（冪等）。
+- **読む**: 時間帯を確かめ（`row_sync.check_timezone`）、`row_sync.load_tab` で見出しと requestId の列と行の数を読む（安い読み取り）。DB に無い requestId の行と、どの申請の行でもない requestId の空の行だけを、移行の道具と同じく UNFORMATTED と FORMATTED で読む（罠 11）。
+- **読み方**: `sheet_codec.decode_row`（移行の道具 `tools/migrate_from_sheets.py` と同じ関数）。入れる行は `sheet_row`＝その行、`row_version=1`、`cell_kinds`＝行ごとの型。`sheet_sync_state` は反映済み（`desired_version=synced_version=1`、`synced_values`＝`sheet_codec.synced_values_for`＝今シートにある値）なので、行の反映は書き直さない。後で承認などをすると、行の反映が requestId で行を確かめ、同じ行の変わった列だけを書く（ずれていれば探し直す）。
+- **入れない行**（入れずに記録し、その行へは書かない）: requestId が空・同じ requestId が 2 行以上・読めない値（`CodecError`）・`requestType` と `status` が決まりにない・`targetDate` が日付でない・`submittedAt`・`dept`・`workerCode` が空・requestId が 64 字を超える。staging では `pdfFileId`・`pdfFolderId` のある行も入れない。毎回読み直すので、人がシートを直せば次の回に入る。
+- **WorkLogs**: 作らない。GAS は Sebastian が足した行に何もしなかった（`ensureWorkLogRow_` は `api_submitRequest` と旧フォームの取り込みだけ）。実績を記録するとき `store.update_worklog` が行を作る（`updateWorkLog_` と同じ）。
+- **記録**: 予定の回は `sync_runs`（`schedule:sheet_intake`。3 日より古いものは取り込みが消す）、手での回は `sheet_intake`、取り込んだ申請は `sheet_intake_ingest`（消さない）。`ops_getStatus` の `sheetIntake`（最後の回の `ingested`・`skipped`・`stopped`）と `lastRuns.sheet_intake` に出る。
+- **シートは書かない**。DB に無い行（取り込み待ち・入れない行）は、行の反映・照合（6-7）・戻しの道具のどれも上書き・移動・削除しない。戻しの道具は Requests に控えに無い requestId の行があれば `--apply` を止める（`rowsNotInCopy`。`--drop-rows-not-in-copy` を付けたときだけ戻す）。控えの道具（`cutover_backup`）は複製を作るだけ。
+- **残る差**: Sebastian の追記から画面に出るまで最大 1 分ほど（予定の間隔）。Sebastian の `INSERT_ROWS` は、A 列の表の途中に空の行があるとそこへ行を挿入して下の行をずらす（GAS の時代も同じ）。ずれた行は行の反映が requestId で探し直す。照合は位置の違う行を `idMismatch` に出して書かない。
 
 ---
 
@@ -721,7 +738,7 @@ GAS の `morningBatchNoMail_`（`mail.gs:1454-1468`）→ `batchGeneratePdfs_`�
 | 書いてよいスプレッドシート | `PROD_SPREADSHEET_ID` だけ | `STAGING_SPREADSHEET_ID` だけ（本番 DB の「コピーを作成」で作ったサンドボックス） |
 | 書いてよいタブ | `Requests`・`WorkLogs`・`BatchLogs`（`row_sync`・`reconcile` だけ）、`作業員マスタ`・`工番マスタ`・`社内カレンダーマスタ`・`業務NOマスタ`（`master_sync` だけ） | 同じ |
 | 書いてはいけない（どの環境も） | マスタ元・蓄積台帳（両方の環境の ID）・PDF フォルダ・ほかのスプレッドシートすべて。B・D・E 区分のタブ（特に `DeptApprovers`・`Settings`・`申請書フォーム`・`操作`） | |
-| 使ってよい書き方 | `updateCells`、`values.batchUpdate`、`values.batchClear`（C 区分の余りの行だけ）、`appendDimension`（ROWS、A 区分の末尾だけ） | 同じ |
+| 使ってよい書き方 | `updateCells`、`values.batchUpdate`、`values.batchClear`（C 区分の余りの行だけ）、`appendDimension`（ROWS、A 区分の末尾だけ）、`values.append`（Requests の新しい行の requestId だけ。RAW・OVERWRITE。6-4・決定 #26） | 同じ |
 | 使わない書き方 | `deleteDimension`・`insertDimension`・`deleteSheet`・`addSheet`・`duplicateSheet`・`sortRange`・`moveDimension`・A 区分の `clear` | |
 | Drive | api・worker は呼ばない。`tools/cutover_backup.py` だけが複製（元は `PROD_SPREADSHEET_ID` と `PROD_LEDGER_SPREADSHEET_ID` だけ） | 同じ |
 | GAS の内部用の入口 | `internal.ping` の `spreadsheetId == PROD_SPREADSHEET_ID`、`scriptId == PROD_GAS_SCRIPT_ID_FIXED`、Settings の `TEMPLATE_SSID == PROD_SPREADSHEET_ID`、`PDF_ROOT_FOLDER_ID == PROD_PDF_FOLDER_ID`、`ACCUMULATION_SS_ID == PROD_LEDGER_SPREADSHEET_ID`、`spreadsheetTimeZone == DB_SHEET_TIMEZONE` | `spreadsheetId == STAGING_SPREADSHEET_ID`、`scriptId != PROD_GAS_SCRIPT_ID_FIXED`（サンドボックスに紐づく GAS の写し）、Settings の 3 つの ID が `STAGING_*` と同じで、どれも本番の ID と違う、時間帯が同じ |
@@ -778,7 +795,7 @@ GAS の `morningBatchNoMail_`（`mail.gs:1454-1468`）→ `batchGeneratePdfs_`�
 | `domain.sebastian.handle(db, raw_body: bytes) -> dict` | W | F（経路） |
 | `domain.breaks.calc_break_by_clock_time(start: datetime, end: datetime) -> int` | W | W（Sebastian・再計算） |
 | `domain.fiscal.fy_start_0316(d) -> date`・`fy_start_0401(d) -> date`・`closing_ym(d) -> str` | W | M（朝バッチの対象は使わない。参考） |
-| `domain.ops.*`（4-2 の 9 関数） | W | U（画面から RPC で） |
+| `domain.ops.*`（4-2 の 10 関数） | W | U（画面から RPC で） |
 | `services.gas_jobs.enqueue_after_approve(db, request_id) -> int` | M | W |
 | `services.gas_jobs.enqueue_after_complete(db, request_id, *, source: str, status_at_enqueue: str, wl_override: dict | None = None, priority: int = 0) -> int` | M | W |
 | `services.gas_jobs.enqueue_regenerate(db, request_id, *, reason: str, old_pdf_file_id: str = "", batch_id: str = "") -> int` | M | W |
@@ -794,6 +811,9 @@ GAS の `morningBatchNoMail_`（`mail.gs:1454-1468`）→ `batchGeneratePdfs_`�
 | `services.row_sync.run_once(session_factory, limit=50) -> dict` | D | worker（F が登録の口を作り、D が `register_schedule`／レーンに入れる） |
 | `services.reconcile.run(session_factory, *, check_only: bool) -> dict` | D | worker・tools |
 | `services.sheet_codec.COLUMN_RULES`・`encode_cell(rule, value, kind, tz) -> dict`・`decode_cell(rule, unformatted, formatted, tz) -> (value, kind)` | D | D・tools |
+| `services.sheet_codec.decode_row(spec, col, urow, frow, tz, sheet_row) -> (record: dict, errors: list[str])`・`synced_values_for(spec, record) -> dict`（1 行の読み方と反映済みの値。決定 #26） | D2 | tools（移行）・`sheet_intake` |
+| `services.sheet_intake.run(session_factory, *, api=None, app_settings=None, wait_seconds=0.0) -> dict`（`{ok, active, ingested, skipped, busy?, stopped?}`）・`run_now(db) -> dict`・`ensure_request(db, request_id) -> bool`・`status(db) -> dict`（6-10） | D2 | worker・W（`ops_runSheetIntake`・Sebastian の入口）・M（`ops_status`） |
+| `services.sheets_api.SheetsApi.append_values(spreadsheet_id, tab, values, *, purpose="row_sync") -> int`（書いた最初の行。RAW・OVERWRITE、Requests の requestId だけ） | D2（F の土台に足した） | D（`row_sync.reserve_new_rows`） |
 | `google_delegate.get_access_token(scopes=None) -> str`・`get_delegate_credentials(db)` | F | D・tools |
 
 `wl_override` の形は `{"actualStartAt": "yyyy-MM-dd HH:mm:ss", "actualEndAt": "…", "actualMinutes": int, "breakMinutes": int, "netMinutes": int}`。`requires` の形は `[{"table": "requests", "pk": "<requestId>", "version": 7}, {"table": "work_logs", "pk": "<id>", "version": 3}]`（M が `sheet_queue.current_version` で作る）。
@@ -810,6 +830,7 @@ GAS の `morningBatchNoMail_`（`mail.gs:1454-1468`）→ `batchGeneratePdfs_`�
 | `sync_sheet_config` | `SHEET_CONFIG_SYNC_MINUTES` ごと | D |
 | `morning_batch` | 毎日 6:50 | M |
 | `gas_ping` | 5 分ごと（起動時にも 1 回） | M |
+| `sheet_intake` | 1 分ごと（6-10。production は GAS が移転モードのときだけ取り込む） | D2 |
 | `purge` | 毎日 3:30（冪等キー 24 時間、期限切れのセッション、`done` の仕事 90 日、`audit_log` は消さない） | F |
 
 - `python -m app.worker run <名前>`（例 `run sync_masters`、`run sheet_reconcile --check`）で手で動かせる。
@@ -868,6 +889,7 @@ GAS の `morningBatchNoMail_`（`mail.gs:1454-1468`）→ `batchGeneratePdfs_`�
 | W | `test_domain_requests.py`・`worklog.py`・`approval.py`・`secondary.py`・`dashboards.py`・`summaries.py`・`masters.py`・`ops.py`（29 関数それぞれ: 返す形のキーと日時の形・エラー文の 1 字ずつ・積む仕事と `mark_dirty`・権限）、`test_breaks.py`（窓の境界・19:29:59／19:30:00／19:30:40・日またぎ 0・17:10 の窓は 17:20 開始で数えない）、`test_fiscal_jst.py`（**06:30 JST に通常残業を出すと targetDate が当日**、**3/16 08:00 JST に 3/15 の遡及残業が拒まれる**、**15 日 23:30 と 16 日 00:30 の締め月**、4/1 と 3/16 の年度、30 日の窓）、`test_rounding.py`（予測 15.5→16）、`test_concurrency.py`（承認と完了が同時でも PDF の仕事が必ず 1 つ積まれる＝`postgres` マーカーと SQLite の順序の両方、一括の ID の並べ替え、**2 つのタブで同じ申請を承認しても仕事は 1 つ**、**同じ冪等キーの二重送信で申請は 1 件**）、`test_sebastian.py`（4 action × 成功・各エラーの返事が [01 §1.2] の表と 1 字ずつ同じ、`text/plain` の本文、`targetDate` の 2 通りの形、`pdf` の 4 形と待ち切れ、休憩が時刻窓方式） |
 | D | `test_sheet_codec.py`（シリアル値と時間帯の往復・`cell_kinds`・`auto` の解決・表示形式の写し・WorkLogs の `@`）、`test_row_sync.py`（差分だけ書く・新しい行は末尾で作った順・ID の確かめと探し直し・見つからなければ止める・見出しの違いで止まる・時間帯の違いで止まる・GAS が書いた 3 列を上書きしない・削除は値の書き換え・行やタブを消す要求を出さない）、`test_reconcile.py`（秒の単位・反映待ちの行は比べない・DB が少なければ書かない・`--check`）、`test_config_sync.py`（Settings の下の行が勝つ・キーの空白・空なら上書きしない・DeptApprovers の 5 列を持つ）、`test_master_sync.py`（80 人・Date の規則・USER_ENTERED・余りの行は値だけ消す・空なら上書きしない・タブごとの失敗）、`test_migrate_from_sheets.py`（本番 ID 以外を拒む・空でなければ止める・`modified` で止める・孤児と行の無い申請・`sheet_row` と `cell_kinds` と `synced_values` が入る・移した直後の照合が差 0・連番を進める＝罠 9） |
 | M | `test_gas_jobs.py`（7-4 の表の行ごとに積む action と args・`requires` を待つ・canceled なら skipped・`record_pdf_result` で 3 列と `synced_values` が同じになる・再試行の間隔と 24 時間・`retryable:false` で failed・同じ申請の順番・`batch_id` の 500ms・`gas_ping` が合わないと止まる）、`test_morning_batch.py`（成功・スキップ・失敗の数、エラー詳細の形、BatchLogs の 1 行の値と型、ledgerRewriteDay が最後、6 件以上の待ち、Sebastian を先に流す、送り直しで ledgerRewriteDay をもう一度）、`test_ops_status.py` |
+| D2 | `test_sheet_intake.py`（決定 #26: Sebastian と同じ `values.append`（USER_ENTERED・INSERT_ROWS）の行を取り込み、シートへは書かない・反映済みで入り行の反映と照合が書き直さない・WorkLogs を作らない・**Sebastian の追記と VPS の新しい行が同時**（VPS が行を取る前／取った後の 2 通り）でも互いの行が残る・**取り込んだ行を承認すると同じ行の 3 列だけが変わる**・行がずれても requestId で探し直す・requestId の空・重なり・決まりに無い status・日付でない targetDate・読めない分は入れずに記録し、行の反映と照合を動かしてもその行は変わらない・**冪等と鍵**（入れ子の実行は busy、2 度目は何もしない）・production は移転モードのときだけ・時間帯が違えば止まる・1 分ごとの登録・`ops_runSheetIntake` と `ops_getStatus.sheetIntake`・Sebastian の完了がその場で取り込む・`values.append` は Requests の文字だけ）、`test_reconcile.py`（取り込み待ちの行を数えず書かない、上限を超えたら止める）、`test_cutover_tools.py`（戻しの道具が控えに無い行を消す前に止まる） |
 
 ### 12-3. 受け入れ表（計画書 3 章と抜け調査の指摘 → 確かめ方）
 
@@ -905,6 +927,7 @@ GAS の `morningBatchNoMail_`（`mail.gs:1454-1468`）→ `batchGeneratePdfs_`�
 | A-28 | 題名・改行・CSV（gap-2 S10） | 自動 U。JEV: ［表示中をCSV］が保存できる |
 | A-29 | 行の反映の型（gap-4 F-1、gap-5 高-2・中-9、決定 A） | SB: VPS が足した行・直した行を写しの GAS の `getValues()` で読み、日時の列が `Date`。`getRequestById_`・`computeIsRetroactive_`・承認者画面の提出列・未承認滞留が元の値と同じ |
 | A-30 | 行の位置と並び・消さない（gap-4 F-2・F-3・F-4、gap-3 G3-M5） | 自動 D。SB: 人が行を挿入したコピーで探し直しと止まり方 |
+| A-43 | Sebastian の直接の追記（決定 #26、6-10） | 自動 D2 `test_sheet_intake.py`。SB: ステージングの写しへ Sebastian と同じ呼び方で 1 行足し、2 分以内に画面に出る → 承認 → 同じ行が書き換わる |
 | A-31 | 毎晩の照合（決定 A） | 自動 D。SB: 移行の直後に `--check` で差 0（計画書 5-6） |
 | A-32 | GAS が止まったとき（決定 B、4-6a） | SB: 写しの GAS の token を外して操作し、画面は動き、仕事が再試行され、管理者の欄に出て、戻すと流れる |
 | A-33 | ステージングから本番に書かない（9 章） | 自動 F。staging で本番の ID・台帳・マスタ元への書き込みが拒まれる。切り替えの B-14 |

@@ -12,6 +12,10 @@
   （updateCells・appendDimension だけ。ほかの要求は 400）・values:batchUpdate（RAW／USER_ENTERED。
   USER_ENTERED は数・日付の文字を読み替える。書く範囲が行数を超えれば行を足す＝本物と同じ）・values:batchClear。
 - updateCells が行数を超えれば 400（本物と同じ。appendDimension で先に足す）。
+- values/{range}:append（insertDataOption=OVERWRITE は表の次の行に書く、INSERT_ROWS はそこに行を挿入して書く。
+  表は範囲の列で最初に値のある行から、どれかの列に値がある行が続く所まで＝本物の「表」の探し方を簡単にしたもの）。
+  Sebastian の追記（USER_ENTERED・INSERT_ROWS）を試験で再現するのに使う（決定 #26）。
+- before_request に関数を入れると、各呼び出しの前に (method, url, params, body) で呼ぶ（同時の書き込みの再現）。
 """
 from __future__ import annotations
 
@@ -225,6 +229,8 @@ class FakeSheets:
         self.calls: list[tuple[str, str, Any, Any]] = []
         self.fail_queue: list[int] = []  # 次の呼び出しを失敗させる状態コード
         self.fail_write_rows: set[tuple[str, int]] = set()  # (タブ, 1 始まりの行) に触れる updateCells を 400 に
+        self.before_request: list = []  # 呼び出しの前に動かす関数（同時に別の人が書いたことの再現）
+        self._in_hook = False
 
     def add_book(self, sid: str, tz: str = "Asia/Tokyo") -> FakeBook:
         book = FakeBook(sid=sid, tz=tz)
@@ -250,6 +256,13 @@ class FakeSheets:
     # ----- 本物の AuthorizedSession の代わり -----
 
     def request(self, method, url, params=None, json=None, timeout=None):
+        if self.before_request and not self._in_hook:
+            self._in_hook = True
+            try:
+                for hook in list(self.before_request):
+                    hook(method, url, params, json)
+            finally:
+                self._in_hook = False
         self.calls.append((method, url, params, json))
         if self.fail_queue:
             return FakeResp(self.fail_queue.pop(0), {"error": "injected"})
@@ -265,6 +278,9 @@ class FakeSheets:
                 return self._values_update(sid, json)
             if method == "POST" and rest == "values:batchClear":
                 return self._values_clear(sid, json)
+            if method == "POST" and rest.startswith("values/") and rest.endswith(":append"):
+                return self._values_append(sid, urllib.parse.unquote(rest[len("values/"):-len(":append")]),
+                                           params, json)
             if method == "POST" and path.endswith(":batchUpdate"):
                 return self._batch_update(path[: -len(":batchUpdate")], json)
         except _Http as e:
@@ -347,7 +363,9 @@ class FakeSheets:
             return v, None
         if v.startswith("'"):
             return v[1:], None  # 先頭の ' は「文字として入れる」印（値には残らない）
-        if v[:1] == "=" or (v[:1] in "+-" and not re.fullmatch(r"[+-]\d*\.?\d+", v.strip())):
+        if v == "":
+            return "", None
+        if v[:1] == "=" or (v[:1] in ("+", "-") and not re.fullmatch(r"[+-]\d*\.?\d+", v.strip())):
             return FormulaCell(v if v[:1] == "=" else "=" + v), None  # 本物と同じく式になる
         s = v.strip()
         if s == "":
@@ -358,6 +376,10 @@ class FakeSheets:
             return float(s), None
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", s):
             return serial(s), dict(DATE_FMT)
+        m = re.fullmatch(r"(\d{1,2})/(\d{1,2})/(\d{4}) (\d{1,2}):(\d{2}):(\d{2})", s)
+        if m:  # 'M/D/YYYY H:MM:SS'（en_US の書き方。Sebastian の submittedAt）
+            mo, d, y, h, mi, se = (int(x) for x in m.groups())
+            return serial(f"{y:04d}-{mo:02d}-{d:02d} {h:02d}:{mi:02d}:{se:02d}"), dict(DATETIME_FMT)
         if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}", s):
             return serial(s), {"type": "DATE_TIME", "pattern": "yyyy-mm-dd hh:mm:ss"}
         if s.upper() in ("TRUE", "FALSE"):
@@ -386,6 +408,57 @@ class FakeSheets:
                     else:
                         cell.value = v
         return FakeResp(200, {"totalUpdatedCells": 1})
+
+    def _values_append(self, sid, a1, params, body):
+        book = self._book(sid)
+        p = dict(params or {})
+        option = p.get("valueInputOption")
+        insert = p.get("insertDataOption", "OVERWRITE")
+        if option not in ("RAW", "USER_ENTERED") or insert not in ("OVERWRITE", "INSERT_ROWS"):
+            raise _Http(400, "bad append options")
+        title, _r0, _r1, c0, _c1 = parse_a1(a1)
+        tab = self._tab(book, title)
+        values = body["values"]
+
+        def has_any(r):
+            return r < len(tab.rows) and any(not _blank(c.value) for c in tab.rows[r])
+
+        start = None
+        for r in range(len(tab.rows)):
+            if not _blank(tab.get(r, c0).value):
+                start = r
+                break
+        pos = 0
+        if start is not None:
+            end = start
+            while has_any(end + 1):
+                end += 1
+            pos = end + 1
+        n = len(values)
+        if insert == "INSERT_ROWS":
+            while len(tab.rows) < pos:
+                tab.rows.append([])
+            for _ in range(n):
+                tab.rows.insert(pos, [])
+            tab.row_count += n
+        elif pos + n > tab.row_count:
+            tab.row_count = pos + n
+        for dr, row in enumerate(values):
+            for dc, v in enumerate(row):
+                cell = tab.cell(pos + dr, c0 + dc)
+                if option == "USER_ENTERED":
+                    val, fmt = self._user_entered(v)
+                    cell.value = val
+                    if fmt:
+                        cell.fmt = fmt
+                else:
+                    cell.value = v
+        width = max([len(r) for r in values] + [1])
+        from app.services.sheets_api import column_letter
+
+        rng = f"{title}!{column_letter(c0)}{pos + 1}:{column_letter(c0 + width - 1)}{pos + n}"
+        return FakeResp(200, {"spreadsheetId": sid, "tableRange": "", "updates": {"updatedRange": rng,
+                                                                                  "updatedRows": n}})
 
     def _values_clear(self, sid, body):
         book = self._book(sid)

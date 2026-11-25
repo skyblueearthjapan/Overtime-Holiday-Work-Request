@@ -110,17 +110,9 @@ def decode_table(spec: codec.TableSpec, unformatted: list, formatted: list, tz) 
         if all(codec.is_blank(v) for v in urow):
             skipped += 1
             continue
-        record: dict = {"sheet_row": r, "row_version": 1, "cell_kinds": {}}
-        for rule in spec.columns:
-            c = col.get(rule.header, -1)
-            try:
-                value, kind = codec.decode_cell(rule, codec.cell_at(urow, c), codec.cell_at(frow, c), tz)
-            except codec.CodecError as error:
-                errors.append(f"{spec.tab} {r} 行目: {error}")
-                continue
-            codec.assign_db_value(rule, record, value)
-            if rule.date_like and kind:
-                record["cell_kinds"][rule.header] = kind
+        # 1 行の読み方は取り込み（services/sheet_intake）と同じ関数（決定 #26）
+        record, row_errors = codec.decode_row(spec, col, urow, frow, tz, r)
+        errors.extend(row_errors)
         rows.append(record)
     return {"rows": rows, "missing": missing, "duplicated": dup, "dropped": dropped, "errors": errors,
             "skippedEmptyRows": skipped, "headerCount": len([h for h in normalized if h])}
@@ -313,8 +305,7 @@ def sync_state_rows(tables: dict) -> list[dict]:
     for t in A_TABLES:
         spec = codec.TABLES[t]
         for row in tables[t]:
-            synced = codec.snapshot(spec, row)
-            synced[codec.KINDS_KEY] = dict(row.get("cell_kinds") or {})
+            synced = codec.synced_values_for(spec, row)
             pk = str(row["request_id"] if t == "requests" else row["id"])
             out.append({"table_name": t, "pk": pk, "desired_version": 1, "synced_version": 1, "synced_values": synced,
                         "state": "ok", "attempts": 0, "next_try_at": None, "last_error": "", "first_dirty_at": None,

@@ -14,7 +14,7 @@ import pytest
 
 from app import config
 from conftest import make_settings
-from fake_sheets import FakeBook
+from fake_sheets import Cell, FakeBook
 from sheet_fixtures import STAGING_SID, make_fake
 
 TOOLS = Path(__file__).resolve().parents[2] / "tools"
@@ -157,6 +157,24 @@ def test_restore_apply_writes_values_raw_and_clears_surplus(restore_env, setting
     assert bodies and all(b["valueInputOption"] == "RAW" for b in bodies)
     assert all(STAGING_SID in u for m, u, b in fake.writes())  # 書くのはこの環境の DB だけ
     assert not fake.batch_requests()  # 行・タブを足す・消す要求を出さない
+
+
+def test_restore_refuses_to_drop_rows_not_in_copy(restore_env, settings, capsys):
+    """控えの後に Sebastian が直接足した Requests の行（決定 #26）は、写し戻すと消えるので止める。"""
+    tool, fake, db_book, backup = restore_env
+    rid = "5eba5eba-0000-4000-8000-0000000000aa"
+    db_book.tabs["Requests"].rows.append([Cell(rid), Cell("overtime"), Cell("submitted")])
+    report = tool.run(fake.api(settings), settings, COPY_ID, "Requests", apply=False)
+    assert report["tabs"][0]["rowsNotInCopy"] == [{"row": 6, "requestId": rid}]
+    fake.calls.clear()
+    with pytest.raises(tool.RestoreStop, match="控えに無い行"):
+        tool.run(fake.api(settings), settings, COPY_ID, "all", apply=True)
+    assert fake.writes() == []
+    assert tool.main(["--from-copy", COPY_ID, "--tabs", "Requests", "--apply"], api=fake.api(settings),
+                     settings=settings) == 2
+    assert rid in capsys.readouterr().err
+    report = tool.run(fake.api(settings), settings, COPY_ID, "Requests", apply=True, drop_rows_not_in_copy=True)
+    assert report["applied"] == ["Requests"] and db_book.tabs["Requests"].row_values(6) == []
 
 
 @pytest.mark.parametrize("tabs", ["all", "Requests,all"])

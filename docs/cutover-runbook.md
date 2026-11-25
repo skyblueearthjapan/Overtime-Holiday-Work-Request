@@ -162,7 +162,7 @@ psql_q() { sg docker -c "docker compose exec -T db psql -U overtime -d overtime 
 | B-13 | `.env` を控えて本番の値に | 値と権限 600 | 控えを戻す |
 | B-14 | **api だけ**起動し、安全装置と `internal.ping` | `NG` 0 行、healthz が production、ping が本番の DB と移転モード on | ログを見て直すか C へ |
 | B-15 | マスタ同期と共有タブの取り込みを手で 1 回 | 作業員 50・工番 560・業務 NO 47・カレンダー 130 前後。DeptApprovers 13 部署、管理者 2 人 | 控えから 4 タブを写し戻す |
-| B-16 | **worker を起動**し、行の反映と照合 `--check` | A 区分の差 0、反映待ち 0、`gas_ping` 成功、DeptApprovers が変わっていない | worker を止め、控えから写し戻して C へ |
+| B-16 | **worker を起動**し、行の反映と照合 `--check`。シートの取り込み（`sheet_intake`）も worker と一緒に動き出す | A 区分の差 0、反映待ち 0、`gas_ping` 成功、DeptApprovers が変わっていない、`sheet_intake` の最後の回が `ok`・`active: true`（B-11 の後に Sebastian が足した行があれば取り込まれている） | worker を止め、控えから写し戻して C へ（Sebastian が控えの後に足した行があれば、戻しの道具が止まる） |
 | B-17 | GAS: `setSebastianForwardUrl` → Sebastian の `ping` | GAS の `/exec` 経由で `{ok:true, pong}`、VPS のログに届く | `clearSebastianForwardUrl` |
 | B-18 | 画面と受け入れ（読むだけ）の確認。書き込みはしない | 期待どおり、acceptance の FAIL 0 | — |
 | B-19 | 社内ポータルの url 列を新しい URL に（前に声をかける） | ポータルから新しい URL が開く | 元の `/exec` に戻す |
@@ -473,12 +473,15 @@ psql_q <<'SQL'
 SELECT count(*) FILTER (WHERE desired_version > synced_version) row_sync_pending, count(*) FILTER (WHERE state = 'blocked') blocked FROM sheet_sync_state;
 SELECT lane, state, count(*) FROM jobs GROUP BY 1, 2 ORDER BY 1, 2;
 SELECT kind, ok, started_at, summary_json->'problems' problems FROM sync_runs ORDER BY id DESC LIMIT 10;
+SELECT ok, started_at, summary_json->'active' active, summary_json->'ingested' ingested, summary_json->'skipped' skipped, summary_json->'stopped' stopped FROM sync_runs WHERE kind IN ('schedule:sheet_intake', 'sheet_intake') AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1;
 SQL
 sg docker -c "docker compose logs --since 2m worker" | grep -iE 'error|exception|unsafe' || echo "worker: エラーなし"
 EOF
 ```
 
-確かめ: `sheet_reconcile: ok=True` で A 区分の差 0、`row_sync_pending 0`・`blocked 0`、jobs は 0 件（まだ誰も操作していない）、最新の `gas_ping` が `ok = t`。管理者の画面の「運用」欄（`ops_getStatus`）の `sheetWriteGate.allowed` が `true`（`blocked` なら理由の欄を読む。本番は GAS が移転モードでないと、行の反映・照合・マスタ同期はシートへ書きません）。シートの `DeptApprovers`・`Settings` が B-8 の控えと同じ（VPS は書かない）。worker の起動のときは `SKIP_DAILY_ON_STARTUP=1` で、0:30・2:10・6:50 の枠の中で起動しても、その回の毎日の予定は動きません（`sync_runs` に `skipped`）。次の起動からは通常どおり動かしたいので、確かめが済んだら `.env` の `SKIP_DAILY_ON_STARTUP=1` の行を消します（次に起動し直すまで効き目は変わりません）。戻す: `sg docker -c "docker compose stop worker"`、控えから写し戻して（`tools/restore_tabs_from_copy.py --from-copy <控え> --tabs all`。`DeptApprovers`・`Settings` は名前を書いたときだけ戻ります）C へ。
+シートの取り込み（決定 #26。実装仕様 6-10）: Sebastian は移転モードの間も Requests へ直接行を足せます（GAS の `doPost` は止まりますが、Sheets API の追記は止まりません）。B-11 の移行より前に足された行は移行が入れ、後に足された行は worker の起動の後に `sheet_intake` が 1 分ごとに入れます。上の最後の SQL で `ok = t`・`active = true`・`stopped` が空であることを確かめます。`skipped` に行があれば（requestId の空・重なり・読めない値）、その行はシートに残したまま入れていません。行番号と理由を引継ぎメモに書き、オーナーと扱いを決めます。`active = false` なら、GAS が移転モードでないか `gas_ping` が古いので、B-14 の `internal.ping` から見直します。
+
+確かめ: `sheet_reconcile: ok=True` で A 区分の差 0（`notInDb` に Sebastian の取り込み待ちの行が出ることがありますが、1 分後にもう一度流すと消えます）、`row_sync_pending 0`・`blocked 0`、jobs は 0 件（まだ誰も操作していない）、最新の `gas_ping` が `ok = t`、`sheet_intake` の最後の回が `ok`・`active`。管理者の画面の「運用」欄（`ops_getStatus`）の `sheetWriteGate.allowed` が `true`（`blocked` なら理由の欄を読む。本番は GAS が移転モードでないと、行の反映・照合・マスタ同期はシートへ書きません）。シートの `DeptApprovers`・`Settings` が B-8 の控えと同じ（VPS は書かない）。worker の起動のときは `SKIP_DAILY_ON_STARTUP=1` で、0:30・2:10・6:50 の枠の中で起動しても、その回の毎日の予定は動きません（`sync_runs` に `skipped`）。次の起動からは通常どおり動かしたいので、確かめが済んだら `.env` の `SKIP_DAILY_ON_STARTUP=1` の行を消します（次に起動し直すまで効き目は変わりません）。戻す: `sg docker -c "docker compose stop worker"`、控えから写し戻して（`tools/restore_tabs_from_copy.py --from-copy <控え> --tabs all`。`DeptApprovers`・`Settings` は名前を書いたときだけ戻ります）C へ。
 
 ### B-17 Sebastian の転送
 
@@ -613,7 +616,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://overtime.lineworks-local.net/he
    ssh lineworks-vps-user 'test "$(hostname)" = srv1508169 || exit 9; cd /opt/overtime && sg docker -c "docker compose exec -T worker python -m app.worker run sheet_reconcile --check" && sg docker -c "docker compose rm -sf worker"'
    ```
 
-3. **C-3 GAS を戻す**: GAS エディタで `exitMigrationMode`（Sebastian の転送も外れます。内部用の入口は token が無ければ何もしないので残してよい）→ `restoreTriggersAfterRollback`（朝バッチとマスタ同期の 2 本。同じ関数のトリガーが既にあれば作りません）。旧フォームは決定 #11 のとおり閉じたままにします。**オーナーが旧フォームも戻すと決めたときだけ**、`restoreTriggersAfterRollback` の代わりに `reopenFormsAfterRollback` → `restoreAllTriggersAfterRollback`（4 本）を実行します。確かめ: `showMigrationStatus` で移転モード「なし」、トリガーが 2 本（フォームも戻したなら 4 本）。
+3. **C-3 GAS を戻す**（移転モードを外すと、VPS の `sheet_intake` は取り込みをやめます。GAS が正に戻り、Sebastian の追記はそのまま GAS の画面に出ます）: GAS エディタで `exitMigrationMode`（Sebastian の転送も外れます。内部用の入口は token が無ければ何もしないので残してよい）→ `restoreTriggersAfterRollback`（朝バッチとマスタ同期の 2 本。同じ関数のトリガーが既にあれば作りません）。旧フォームは決定 #11 のとおり閉じたままにします。**オーナーが旧フォームも戻すと決めたときだけ**、`restoreTriggersAfterRollback` の代わりに `reopenFormsAfterRollback` → `restoreAllTriggersAfterRollback`（4 本）を実行します。確かめ: `showMigrationStatus` で移転モード「なし」、トリガーが 2 本（フォームも戻したなら 4 本）。
 4. **C-4 マスタ同期を手で 1 回**: GAS エディタで `syncAllMasters` を実行し、ログの `OK` 4 行を確かめます（VPS が書いていた DB のマスタ 4 タブに、GAS の同期が今の形で書けること。gap-4 F-6）。
 5. **C-5 控えた仕事を GAS で処理する**: C-2 で控えた申請ごとに、メニューの PDF の作り直し、台帳は管理の関数で upsert（オーナーと相談）。
 6. **C-6 確かめ**: 本番 `/exec` で一覧が出て、VPS で最後に作られた申請が見えること。Sebastian の `/exec` に `ping`（B-17 のコマンド）を送り、GAS の返事（`{ok:true, pong}`）が返ること。
@@ -637,6 +640,7 @@ curl -s -o /dev/null -w '%{http_code}\n' https://overtime.lineworks-local.net/he
 翌朝（6-5）に確かめること:
 
 - 最初の申請が 1 分以内にシートの Requests の末尾に出たこと（型と表示形式も）。
+- Sebastian が足した申請が 2 分以内に VPS の画面に出たこと（管理者の欄の `sheetIntake.ingested`、または下の SQL の `sheet_intake_ingest`）。`sheetIntake.skipped` が空であること。
 - 最初の PDF が GAS の内部用の入口で作られ、DB とシートの 3 列が同じこと。本番で最初に作られた PDF 1 件をオーナーが見る。
 - VPS の朝バッチ（6:50 ごろ）が前日分の PDF を作り、BatchLogs に `morningBatchNoMail` の 1 行、台帳に前日分を書いたこと（7:05 の確かめの結果も）。
 - 統合メール通知システムの通知がいつもどおり出たこと。Sebastian の完了が届き、PDF ができたこと。
@@ -654,13 +658,15 @@ SELECT lane, state, count(*) FROM jobs GROUP BY 1, 2 ORDER BY 1, 2;
 SELECT count(*) FILTER (WHERE desired_version > synced_version) pending, count(*) FILTER (WHERE state = 'blocked') blocked FROM sheet_sync_state;
 SELECT kind, ok, started_at FROM sync_runs WHERE kind NOT IN ('gas_ping') ORDER BY id DESC LIMIT 12;
 SELECT kind, ok, started_at FROM sync_runs WHERE kind = 'gas_ping' ORDER BY id DESC LIMIT 1;
+SELECT ok, started_at, summary_json->'active' active, summary_json->'skipped' skipped FROM sync_runs WHERE kind IN ('schedule:sheet_intake', 'sheet_intake') AND finished_at IS NOT NULL ORDER BY id DESC LIMIT 1;
+SELECT started_at, summary_json->'ingested' ingested FROM sync_runs WHERE kind = 'sheet_intake_ingest' ORDER BY id DESC LIMIT 5;
 SQL
 ls -l backups/ | tail -3
 sg docker -c "docker compose logs --since 24h api worker" | grep -ciE ' error|exception' || true
 EOF
 ```
 
-- `failed` の仕事が無い、反映待ち・blocked が 0、マスタ同期・共有タブ取り込み・毎晩の照合・朝バッチが `ok`、バックアップが 1KB 超。管理者の画面の「運用（管理者）」欄でも同じものが見えます。
+- `failed` の仕事が無い、反映待ち・blocked が 0、マスタ同期・共有タブ取り込み・毎晩の照合・朝バッチ・シートの取り込み（`sheet_intake`、`skipped` が空）が `ok`、バックアップが 1KB 超。管理者の画面の「運用（管理者）」欄でも同じものが見えます。
 - 完了済みで PDF なしの 25 件は切り替えでは触りません（Q13 で決める）。
 - 戻せる期間が過ぎたら: ステージングの DB・台帳・PDF フォルダ・GAS の写しの片付けを、オーナーに確かめてから行います。
 

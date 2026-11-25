@@ -13,7 +13,8 @@ const SCREEN = [
 ];
 const OPS = [
   'ops_getStatus', 'ops_retryJob', 'ops_syncSheetConfigNow', 'ops_runMasterSync', 'ops_regeneratePdf',
-  'ops_batchPdfForDate', 'ops_rebuildLedger', 'ops_recalcBreaks', 'ops_revokeSessions'
+  'ops_batchPdfForDate', 'ops_rebuildLedger', 'ops_recalcBreaks', 'ops_revokeSessions',
+  'ops_runSheetIntake'
 ];
 // 画面の「使われていないコード」だけが呼ぶ関数（仕様 4-1 で出さない。呼ばれることは無い）
 const DEAD_CODE_ONLY = ['api_getFormUrl'];

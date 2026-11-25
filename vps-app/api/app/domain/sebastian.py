@@ -131,6 +131,22 @@ def _holiday_done(db: Session, request_id: str, manual: str, now: datetime, sett
     return out
 
 
+def _ensure_ingested(db: Session, request_id: str, settings: Settings) -> None:
+    """Sebastian が Requests へ直接足したばかりで、まだ取り込んでいない申請なら、その場で取り込む（決定 #26）。
+
+    GAS ではシートの行がすぐ見えたので、追記の直後に完了を送っても見つかった。取り込めなければ、いつもどおり
+    「見つかりません」になる（ここでは例外にしない）。
+    """
+    if db.get(Request, request_id) is not None:
+        return
+    try:
+        from app.services import sheet_intake
+
+        sheet_intake.ensure_request(db, request_id, settings)
+    except Exception:  # noqa: BLE001 - 詳細はログだけ
+        log.exception("sebastian: on-demand intake failed")
+
+
 def handle(db: Session, raw_body: bytes, settings: Settings | None = None) -> dict:
     s = settings or get_settings()
     try:
@@ -155,6 +171,7 @@ def handle(db: Session, raw_body: bytes, settings: Settings | None = None) -> di
             if not js_truthy(body.get("requestId")):
                 raise RpcError("requestId is required")
             request_id = js_string(body.get("requestId"))
+            _ensure_ingested(db, request_id, s)
             if action == "completeOvertime":
                 return _complete_overtime(db, request_id, now, s)
             if action == "markHolidayStart":

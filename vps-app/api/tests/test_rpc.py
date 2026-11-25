@@ -27,10 +27,10 @@ def count(db, model):
 # ===== 閉じたリスト =====
 
 
-def test_exactly_38_functions_are_public():
+def test_exactly_39_functions_are_public():
     assert len(rpc.SCREEN_FUNCTIONS) == 29 == len(set(rpc.SCREEN_FUNCTIONS))
-    assert len(rpc.OPS_FUNCTIONS) == 9
-    assert len(rpc.RPC_FUNCTIONS) == 38 == len(set(rpc.RPC_FUNCTIONS))
+    assert len(rpc.OPS_FUNCTIONS) == 10  # 9 ＋ ops_runSheetIntake（決定 #26）
+    assert len(rpc.RPC_FUNCTIONS) == 39 == len(set(rpc.RPC_FUNCTIONS))
     # 画面から呼ばれない公開関数・旧フォーム・保守の関数は出さない（9-1 #11・#13）
     for name in ("api_getFormUrl", "api_getTodayRequestsForDept", "api_getTodayRequestsForWorker",
                  "recalcWorkLogsBreakMinutes", "rebuildAccumulationSS", "syncAllMasters", "doGet", "doPost",

@@ -6,6 +6,7 @@ get_ops_status(db) は JSON にできる dict を返す（日時は JST の 'yyy
   待ち（pending）で理由のあるもの（行の反映待ち・gas_ping 待ちなど）
 - gasPing: 最後の gas_ping の時刻・結果・合わない点
 - lastRuns: 朝バッチ・手動の PDF 一括・7:05 の確かめ・マスタ同期・共有タブ取り込み・毎晩の照合の最後の結果
+- sheetIntake: シートの取り込み（決定 #26）の最後の回（取り込んだ申請・取り込まなかった行と理由）
 - reconcileFixedRows: 最後の照合で直した行の数（照合の summary に数があれば）
 - exhausted: 再試行を使い切った仕事の記録（新しい順に最大 20）
 - pdfMode: Settings の PDF_MODE（表示だけ。8-7）
@@ -24,7 +25,7 @@ from app.services import gas_jobs, write_gate
 
 ROW_SYNC_DELAY_ALERT = timedelta(minutes=5)
 LAST_RUN_KINDS = ("morning_batch", "manual_batch_pdfs", "morning_batch_check", "sync_masters", "sync_sheet_config",
-                  "sheet_reconcile")
+                  "sheet_reconcile", "sheet_intake")
 FIXED_ROW_KEYS = ("fixedRows", "fixed_rows", "fixed", "repairedRows", "repaired")
 
 
@@ -137,6 +138,12 @@ def _exhausted(db: Session) -> list[dict]:
     return [{"at": _t(r.started_at), **_plain(r.summary_json or {})} for r in rows]
 
 
+def _sheet_intake(db: Session) -> dict:
+    from app.services import sheet_intake
+
+    return _plain(sheet_intake.status(db))
+
+
 def get_ops_status(db: Session) -> dict:
     now = timeutil.now_utc()
     last_runs = {kind: _last_run(db, kind) for kind in LAST_RUN_KINDS}
@@ -151,6 +158,8 @@ def get_ops_status(db: Session) -> dict:
         "warnings": _config_warnings(get_settings()),
         "lastRuns": last_runs,
         "reconcileFixedRows": _fixed_rows(last_runs.get("sheet_reconcile")),
+        # シートの取り込み（決定 #26）: Sebastian が Requests へ直接足した行。skipped は取り込まなかった行と理由
+        "sheetIntake": _sheet_intake(db),
         "exhausted": _exhausted(db),
         "orphanPdfs": _orphan_pdfs(db),
         "pdfMode": pdf_mode.value if pdf_mode is not None else "",

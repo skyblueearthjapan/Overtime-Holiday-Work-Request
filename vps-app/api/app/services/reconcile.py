@@ -7,8 +7,10 @@ A 区分の 3 タブ（Requests・WorkLogs・BatchLogs）を UNFORMATTED_VALUE�
   表示形式（表示が日付になっているか。表示形式の無いシリアル値は戻した GAS が数として読む＝gap-4 F-1）も見る。
 - 反映待ち（desired_version > synced_version）と blocked の行は比べない。
 - 差があれば DB の値でそのセルを書き直し（purpose='reconcile'）、直した行・列・前後の値を sync_runs に残す。
-- シートにあって DB に無い行（GAS や人が書いた行）は消さずに報告する。
+- シートにあって DB に無い行（GAS や人が書いた行）は消さずに報告する。Sebastian が Requests へ直接足して、まだ
+  取り込んでいない行（決定 #26。services/sheet_intake が 60 秒ごとに入れる）も同じで、触らずに notInDb に出す。
 - 歯止め（罠 49）: DB の requests か work_logs が 0 行、または DB の行がシートより少ないタブがあれば、1 行も書かずに止める。
+  ただし Requests の「DB に無い requestId の行」（取り込み待ち）は FOREIGN_TOLERANCE 行までは数から除く。
 - check_only=True（`python -m app.worker run sheet_reconcile --check`）は書かずに数えるだけ。
 
 compare_tab は移行の道具（移した直後の照合）も使う。
@@ -35,6 +37,8 @@ log = logging.getLogger(__name__)
 
 RUN_KIND = "sheet_reconcile"
 MAX_LISTED = 200
+# Requests の取り込み待ち（DB に無い requestId の行）を歯止めの数から除く上限（決定 #26）。これを超えたら止める
+FOREIGN_TOLERANCE = 20
 
 
 # ===== 比べる（読むだけ。移行の道具も使う） =====
@@ -59,7 +63,8 @@ def compare_tab(spec: codec.TableSpec, unformatted: list, formatted: list, db_ro
 
     db_rows: [{"pk", "sheet_row", "values"(見出し → 論理の値), "kinds"(cell_kinds), "synced_kinds",
                "skip"(反映待ち・blocked なら True)}]
-    戻り値: {"diffs": [...], "idMismatch": [...], "extraRows": [...], "sheetRows", "dbRows", "compared"}。
+    戻り値: {"diffs": [...], "idMismatch": [...], "extraRows": [...], "notInDb": [...], "sheetRows", "dbRows",
+    "compared"}。notInDb は requestId（ID）が DB のどの行とも違う行（取り込み待ちの外の行。書かない）。
     """
     header = _row(unformatted, spec.header_row)
     missing = codec.missing_headers(spec, header)
@@ -103,6 +108,10 @@ def compare_tab(spec: codec.TableSpec, unformatted: list, formatted: list, db_ro
             elif kind == codec.SERIAL and not codec.looks_like_date_display(f):
                 diffs.append({**entry, "reason": "format"})
     extra: list[dict] = []
+    not_in_db: list[dict] = []
+    db_keys = [row_sync.db_id(spec, d["values"]) for d in db_rows]
+    single = len(spec.id_headers) == 1
+    db_key_set = {k for k in db_keys} if single else set()
     sheet_rows = 0
     for r in range(spec.data_start_row, len(unformatted) + 1):
         urow = _row(unformatted, r)
@@ -113,7 +122,10 @@ def compare_tab(spec: codec.TableSpec, unformatted: list, formatted: list, db_ro
         has_any = any(not codec.is_blank(codec.cell_at(urow, col[h])) for h in spec.headers)
         if has_any and r not in claimed:
             extra.append({"row": r, "id": [codec.js_string(k) for k in key]})
-    return {"diffs": diffs, "idMismatch": id_mismatch, "extraRows": extra, "sheetRows": sheet_rows,
+        if has_id and single and key not in db_key_set:
+            not_in_db.append({"row": r, "id": [codec.js_string(k) for k in key]})
+    return {"diffs": diffs, "idMismatch": id_mismatch, "extraRows": extra, "notInDb": not_in_db,
+            "sheetRows": sheet_rows,
             "dbRows": len(db_rows), "compared": compared, "col": col}
 
 
@@ -229,6 +241,14 @@ def _fix_tab(api: SheetsApi, sid: str, spec: codec.TableSpec, meta: dict, unform
     return fixed
 
 
+def _tolerated(table: str, result: dict) -> int:
+    """歯止めの数から除く行の数（Requests の取り込み待ちだけ。上限を超えたら 0＝止める）。"""
+    if table != "requests":
+        return 0
+    n = len(result.get("notInDb") or [])
+    return n if n <= FOREIGN_TOLERANCE else 0
+
+
 def run(session_factory: Callable[[], Session], *, check_only: bool = False, api: SheetsApi | None = None,
         app_settings: Any = None) -> dict:
     """照合を 1 回。check_only なら書かない。戻り値は sync_runs の summary と同じ形（ok を含む）。"""
@@ -260,13 +280,14 @@ def run(session_factory: Callable[[], Session], *, check_only: bool = False, api
                 db_tables[table] = db_rows_for(db, table)
             results[table] = compare_tab(spec, unformatted[0], formatted[0], db_tables[table], tz)
         short = [f"{codec.TABLES[t].tab}（DB {results[t]['dbRows']} 行・シート {results[t]['sheetRows']} 行）"
-                 for t in codec.TABLE_ORDER if results[t]["dbRows"] < results[t]["sheetRows"]]
+                 for t in codec.TABLE_ORDER if results[t]["dbRows"] + _tolerated(t, results[t]) < results[t]["sheetRows"]]
         for table in codec.TABLE_ORDER:
             r = results[table]
             summary["tabs"][codec.TABLES[table].tab] = {
                 "dbRows": r["dbRows"], "sheetRows": r["sheetRows"], "compared": r["compared"],
                 "diffCount": len(r["diffs"]), "diffs": r["diffs"][:MAX_LISTED],
                 "idMismatch": r["idMismatch"][:MAX_LISTED], "extraRows": r["extraRows"][:MAX_LISTED],
+                "notInDb": r["notInDb"][:MAX_LISTED],
                 "skipped": sum(1 for d in db_tables[table] if d["skip"]),
             }
         total = sum(len(r["diffs"]) for r in results.values())

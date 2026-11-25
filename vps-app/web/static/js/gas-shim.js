@@ -38,7 +38,8 @@
     'api_editRequest', 'api_deleteRequest', 'api_approveRequest', 'api_rejectRequest',
     'api_approveRequestsBatch', 'api_secondaryApprove', 'api_secondaryApproveBatch', 'api_adminManualComplete',
     'ops_retryJob', 'ops_syncSheetConfigNow', 'ops_runMasterSync', 'ops_regeneratePdf',
-    'ops_batchPdfForDate', 'ops_rebuildLedger', 'ops_recalcBreaks', 'ops_revokeSessions'
+    'ops_batchPdfForDate', 'ops_rebuildLedger', 'ops_recalcBreaks', 'ops_revokeSessions',
+    'ops_runSheetIntake'
   ];
   var ALL_FNS = READ_FNS.concat(WRITE_FNS);
   var IS_WRITE = {};
