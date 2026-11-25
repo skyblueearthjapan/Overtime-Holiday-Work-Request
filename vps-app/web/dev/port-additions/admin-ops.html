@@ -1,0 +1,34 @@
+
+    <div style="height:12px"></div>
+
+    <!-- 運用（管理者）: VPS 版で足した欄（仕様 3-10）。閉じたままなら今の画面と同じ見た目 -->
+    <details class="card" id="opsPanel">
+      <summary style="cursor:pointer; font-weight:900;">運用（管理者）</summary>
+      <div class="row" style="margin-top:12px;">
+        <button class="ghost" data-on-click="opsLoadStatus">状態を更新</button>
+        <button class="ghost" data-on-click="opsRun" data-args='["ops_syncSheetConfigNow","$this"]'>共有タブを今すぐ取り込む</button>
+        <button class="ghost" data-on-click="opsRun" data-args='["ops_runMasterSync","$this"]'>マスタ同期</button>
+        <button class="ghost" data-on-click="opsRun" data-args='["ops_rebuildLedger","$this"]'>台帳の作り直し</button>
+        <button class="ghost" data-on-click="opsRun" data-args='["ops_recalcBreaks","$this"]'>休憩の再計算</button>
+        <a href="/auth/google-delegate/start" target="_top" class="chip">委任の許可をやり直す</a>
+      </div>
+      <div class="row" style="margin-top:10px;">
+        <div>
+          <div class="sub">申請 ID</div>
+          <input id="opsRequestId" placeholder="requestId">
+        </div>
+        <button class="ghost" data-on-click="opsRunWithInput" data-args='["ops_regeneratePdf","opsRequestId","$this"]'>PDF の作り直し</button>
+        <div>
+          <div class="sub">日（yyyy-mm-dd）</div>
+          <input id="opsBatchDate" placeholder="2026-02-13">
+        </div>
+        <button class="ghost" data-on-click="opsRunWithInput" data-args='["ops_batchPdfForDate","opsBatchDate","$this"]'>指定日の PDF 一括</button>
+        <div>
+          <div class="sub">メール</div>
+          <input id="opsRevokeEmail" placeholder="name@lineworks-local.info">
+        </div>
+        <button class="ghost" data-on-click="opsRunWithInput" data-args='["ops_revokeSessions","opsRevokeEmail","$this"]'>セッションの取り消し</button>
+      </div>
+      <div id="opsFailed" style="margin-top:12px;"></div>
+      <pre id="opsStatus" style="margin-top:12px; white-space:pre-wrap; word-break:break-all; font-size:12px; background:#f7fbff; border:1px solid var(--line); border-radius:12px; padding:10px; max-height:420px; overflow:auto;">（開くと読み込みます）</pre>
+    </details>

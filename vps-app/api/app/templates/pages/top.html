@@ -1,0 +1,642 @@
+<!doctype html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>残業・休日出勤申請</title>
+  <style>
+    :root{
+      --bg1:#eaf6ff;
+      --bg2:#f7fffb;
+      --accent:#1f9d55;
+      --accent2:#0ea5e9;
+      --text:#0b2545;
+      --muted:#5c6b7a;
+      --card:#ffffffcc;
+      --line:#d7e7f5;
+      --danger:#ff5a5f;
+      --warn:#ffb020;
+    }
+    body{
+      margin:0;
+      font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans JP", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(1100px 600px at 18% 0%, var(--bg1), transparent),
+        radial-gradient(1100px 600px at 92% 20%, var(--bg2), transparent),
+        linear-gradient(180deg, #ffffff, #f3fbff);
+    }
+    header{
+      padding:18px 22px;
+      display:flex; align-items:flex-end; justify-content:space-between;
+      border-bottom:1px solid var(--line);
+      backdrop-filter: blur(8px);
+      position:sticky; top:0;
+      background: rgba(255,255,255,.55);
+      z-index: 10;
+    }
+    .title{ font-weight:900; letter-spacing:.06em; }
+    .sub{ opacity:.8; font-size:12px; color:var(--muted); }
+    .wrap{ padding:18px 22px; max-width:1060px; margin:0 auto; }
+    .row{ display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end; }
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:14px 14px;
+      box-shadow: 0 10px 30px rgba(10,40,80,.06);
+    }
+    .grid2{ display:grid; gap:12px; grid-template-columns: 1fr 1fr; }
+    .kpi2{ font-size:18px; font-weight:900; }
+    .action-card{
+      cursor:pointer;
+      text-align:center;
+      padding:28px 14px;
+      transition: transform .12s, box-shadow .12s;
+    }
+    .action-card:hover{
+      transform:translateY(-2px);
+      box-shadow:0 14px 36px rgba(10,40,80,.12);
+    }
+    .action-card.overtime{ border-left:4px solid var(--accent2); }
+    .action-card.holiday{ border-left:4px solid var(--accent); }
+
+    .sectionTitle{
+      font-weight:900;
+      letter-spacing:.05em;
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:8px;
+    }
+    .section-count{
+      font-size:13px; font-weight:700; color:var(--accent2);
+      margin-left:8px;
+    }
+    table{
+      width:100%;
+      border-collapse:collapse;
+      font-size:13px;
+    }
+    th, td{
+      border-bottom:1px solid var(--line);
+      padding:10px 8px;
+      text-align:left;
+    }
+    th{
+      font-size:12px;
+      color:var(--muted);
+    }
+    button{
+      padding:10px 12px;
+      border-radius:12px;
+      border:0;
+      background:linear-gradient(135deg, var(--accent), #1bd67f);
+      color:#fff; font-weight:800;
+      cursor:pointer;
+      box-shadow: 0 10px 22px rgba(31,157,85,.20);
+    }
+    .ghost{
+      background:#fff;
+      color:var(--text);
+      border:1px solid var(--line);
+      box-shadow:none;
+    }
+    .btn-blue{
+      background:linear-gradient(135deg, var(--accent2), #38bdf8);
+      box-shadow:0 10px 22px rgba(14,165,233,.20);
+    }
+    .btn-sm{ padding:6px 10px; font-size:12px; border-radius:8px; }
+    .btn-warn{
+      background:linear-gradient(135deg, var(--warn), #ffc655);
+      color:var(--text);
+      box-shadow:0 6px 16px rgba(255,176,32,.20);
+    }
+    .btn-danger{
+      background:linear-gradient(135deg, var(--danger), #ff8a8e);
+      box-shadow:0 6px 16px rgba(255,90,95,.20);
+    }
+    .pill{
+      padding:4px 10px;
+      border-radius:999px;
+      font-size:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      display:inline-block;
+      color:var(--text);
+    }
+    .danger{ border-color:#ffb3b3; background:#fff0f0; color:#7a0b0b; }
+    .warn{ border-color:#ffd29e; background:#fff6eb; color:#7a4a0b; }
+    .ok{ border-color:#bfe9d0; background:#f0fff6; color:#0b5a2b; }
+    .info{ border-color:#b3d4ff; background:#f0f7ff; color:#0b2a5a; }
+    .muted{ color:var(--muted); }
+    a{ color:var(--accent2); text-decoration:none; }
+    a:hover{ text-decoration:underline; }
+    .nav-link{
+      font-size:13px; padding:6px 12px; border-radius:8px;
+      border:1px solid var(--line); background:#fff; color:var(--text);
+    }
+    .nav-link:hover{ background:var(--bg1); text-decoration:none; }
+    .portal-link{ background:var(--accent); color:#fff; border-color:var(--accent); }
+    .portal-link:hover{ background:#177a43; color:#fff; }
+    .loading{ text-align:center; padding:30px; color:var(--muted); }
+    .manual-input-area{
+      display:none;
+      margin-top:6px;
+      padding:6px 8px;
+      background:#f8fafc;
+      border:1px solid var(--line);
+      border-radius:8px;
+    }
+    .manual-input-area select{
+      padding:4px 8px;
+      border:1px solid var(--line);
+      border-radius:6px;
+      font-size:13px;
+      width:100px;
+    }
+    .overdue-banner{
+      background:#fff0f0;
+      border:1px solid #ffb3b3;
+      border-radius:10px;
+      padding:10px 14px;
+      margin-bottom:10px;
+      display:flex;
+      align-items:center;
+      gap:8px;
+      font-size:13px;
+      font-weight:700;
+      color:#7a0b0b;
+    }
+    .order-slot{ display:flex; align-items:center; }
+    .order-item{
+      padding:10px 14px;
+      border-bottom:1px solid var(--line);
+      cursor:pointer;
+      font-size:13px;
+      transition: background .1s;
+    }
+    .order-item:hover{ background:var(--bg1); }
+    .order-item .order-code{ font-weight:700; }
+    .order-item .order-detail{ color:var(--muted); font-size:12px; margin-top:2px; }
+
+    /* === 申請モーダル === */
+    .req-modal-overlay{
+      position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:300;
+    }
+    .req-modal{
+      position:fixed; top:50%; left:50%; transform:translate(-50%,-50%);
+      z-index:301; max-width:520px; width:94%; padding:0;
+      max-height:90vh; display:flex; flex-direction:column;
+      background:#fff; border-radius:18px;
+      box-shadow:0 20px 60px rgba(10,40,80,.18);
+    }
+    .req-modal-header{
+      display:flex; align-items:center; justify-content:space-between;
+      padding:18px 20px 14px;
+      border-bottom:1px solid var(--line);
+    }
+    .req-modal-header h3{ margin:0; font-size:17px; font-weight:900; }
+    .req-modal-body{ padding:18px 20px; overflow-y:auto; flex:1; }
+    .req-modal-footer{
+      display:flex; gap:8px; justify-content:flex-end;
+      padding:14px 20px; border-top:1px solid var(--line);
+    }
+    .req-step-label{
+      font-size:12px; color:var(--accent2); font-weight:700;
+      margin-bottom:12px; letter-spacing:.04em;
+    }
+    .req-field{ margin-bottom:14px; }
+    .req-field label{ display:block; font-size:13px; font-weight:700; margin-bottom:4px; }
+    .req-field select, .req-field textarea, .req-field input[type="text"]{
+      width:100%; padding:10px 12px; border-radius:10px;
+      border:1px solid var(--line); font-size:14px;
+      box-sizing:border-box; font-family:inherit;
+    }
+    .req-field textarea{ resize:vertical; min-height:60px; }
+    .req-summary{
+      background:#f0f7ff; border:1px solid #b3d4ff; border-radius:10px;
+      padding:10px 14px; font-size:13px; margin-bottom:14px;
+    }
+    .req-date-btn{
+      width:100%; padding:12px; font-size:14px; border-radius:10px;
+      cursor:pointer; border:1px solid var(--line); background:#fff;
+      color:var(--text); font-weight:700; transition:background .1s;
+      box-shadow:0 2px 8px rgba(10,40,80,.06);
+    }
+    .req-date-btn:hover{ background:var(--bg1); }
+    .req-date-btn.selected{ border-color:var(--accent2); background:#f0f7ff; }
+
+    /* === 過去申請カレンダー === */
+    .retro-toggle{
+      display:flex; align-items:center; gap:6px;
+      width:100%; padding:10px 12px; margin-top:10px;
+      background:#fffaf0; border:1px dashed #e6c38a; color:#7a4a0b;
+      border-radius:10px; font-size:13px; font-weight:700;
+      cursor:pointer; text-align:left; transition:background .15s;
+    }
+    .retro-toggle:hover{ background:#fff3dd; }
+    .retro-toggle .retro-arrow{ margin-left:auto; font-size:11px; transition:transform .2s; }
+    .retro-toggle.open .retro-arrow{ transform:rotate(90deg); }
+    .retro-panel-wrap{
+      max-height:0; overflow:hidden;
+      transition:max-height .25s ease;
+    }
+    .retro-panel-wrap.open{ max-height:560px; }
+    .retro-panel{
+      margin-top:8px; padding:12px 14px;
+      background:#fffdf7; border:1px solid #e6c38a; border-radius:12px;
+    }
+    .retro-warn{
+      background:#fff6eb; border:1px solid #ffd29e; border-radius:8px;
+      padding:8px 10px; margin-bottom:10px;
+      font-size:12px; font-weight:700; color:#7a4a0b;
+      display:flex; gap:6px; align-items:flex-start;
+    }
+    .retro-nav{
+      display:flex; align-items:center; justify-content:space-between;
+      margin-bottom:8px;
+    }
+    .retro-nav button{
+      background:#fff; border:1px solid var(--line);
+      border-radius:8px; padding:4px 10px; font-size:14px;
+      cursor:pointer; font-weight:700; color:var(--text);
+    }
+    .retro-nav button:disabled{ opacity:.35; cursor:not-allowed; }
+    .retro-nav .retro-ym{ font-weight:900; font-size:14px; color:var(--text); }
+    .retro-grid{
+      display:grid; grid-template-columns:repeat(7,1fr); gap:3px;
+      font-size:12px;
+    }
+    .retro-grid .retro-dow{
+      text-align:center; padding:4px 0; font-weight:700; color:var(--muted);
+    }
+    .retro-grid .retro-dow.sun{ color:var(--danger); }
+    .retro-grid .retro-dow.sat{ color:var(--accent2); }
+    .retro-cell{
+      text-align:center; padding:8px 0; border-radius:6px;
+      background:#fff; border:1px solid transparent;
+      cursor:pointer; font-weight:700; color:var(--text);
+      transition:background .1s;
+    }
+    .retro-cell:hover:not(.disabled):not(.selected){ background:#fff3dd; }
+    .retro-cell.disabled{ color:#cbd5e1; background:#f7f9fc; cursor:not-allowed; font-weight:400; }
+    .retro-cell.other-month{ visibility:hidden; }
+    .retro-cell.today{ border-color:var(--accent2); }
+    .retro-cell.selected{
+      background:#ffb020; color:#fff; border-color:#d89000;
+    }
+    .retro-selected-label{
+      margin-top:10px; font-size:13px; font-weight:700; color:#7a4a0b;
+      text-align:center;
+    }
+    .retro-clear-btn{
+      margin-top:6px; background:none; border:none; color:var(--muted);
+      font-size:12px; cursor:pointer; text-decoration:underline;
+      display:block; margin-left:auto; margin-right:auto;
+    }
+
+    @media (max-width:640px){
+      header{ flex-direction:column; align-items:flex-start; gap:8px; }
+      .wrap{ padding:12px 10px; }
+      .grid2{ grid-template-columns:1fr; }
+      table{ font-size:12px; }
+      th, td{ padding:8px 4px; }
+      .row{ flex-direction:column; align-items:stretch; }
+      .card div[style*="grid-template-columns:1fr 1fr"]{ grid-template-columns:1fr !important; }
+    }
+  </style>
+<link rel="stylesheet" href="/static/css/mobile.css">
+</head>
+<body data-page="top">
+  <header>
+    <div>
+      <div class="title">残業・休日出勤 申請TOP</div>
+      <div class="sub" id="headerSub">全社の本日残業 / 休日出勤申請 一覧</div>
+    </div>
+    <div class="row">
+      <a href="{{ APP_URL }}?page=staffSummary" target="_top" class="nav-link">スタッフ集計</a>
+      <a href="{{ APP_URL }}?page=approver" target="_top" class="nav-link">承認者画面</a>
+      <a href="{{ APP_URL }}?page=admin" target="_top" class="nav-link">総務部画面</a>
+      <a href="{{ PORTAL_URL }}" target="_top" class="nav-link portal-link">社内ポータルへ移動</a>
+    </div>
+  </header>
+
+  <div class="wrap">
+
+    <!-- 申請用：部署 + 作業員選択 -->
+    <div class="card" style="margin-bottom:12px; padding:16px 16px;">
+      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px;">
+        <label style="font-weight:700; font-size:14px;">部署：</label>
+        <select id="deptSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:180px;">
+          <option value="">読込中...</option>
+        </select>
+        <label style="font-weight:700; font-size:14px;">作業員：</label>
+        <select id="workerSelect" style="padding:8px 14px; border-radius:999px; border:1px solid var(--line); font-size:14px; font-weight:700; min-width:200px;">
+          <option value="">-- 部署を先に選択 --</option>
+        </select>
+      </div>
+      <!-- 申請ボタン -->
+      <div style="display:grid; grid-template-columns:1fr 1fr; gap:10px;">
+        <button class="btn-blue" data-on-click="openForm" data-args-click='["overtime"]' style="padding:14px 20px; font-size:15px; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:10px; letter-spacing:.04em; transition:transform .12s, box-shadow .12s;" data-on-mouseenter="__vpsSetHover" data-args-mouseenter='["$this","translateY(-1px)","0 12px 28px rgba(14,165,233,.30)"]' data-on-mouseleave="__vpsSetHover" data-args-mouseleave='["$this","",""]'>
+          <span style="font-size:18px; opacity:.85;">&#9201;</span>
+          <span>残業申請</span>
+        </button>
+        <button data-on-click="openForm" data-args-click='["holiday"]' style="padding:14px 20px; font-size:15px; border-radius:12px; display:flex; align-items:center; justify-content:center; gap:10px; letter-spacing:.04em; transition:transform .12s, box-shadow .12s;" data-on-mouseenter="__vpsSetHover" data-args-mouseenter='["$this","translateY(-1px)","0 12px 28px rgba(31,157,85,.30)"]' data-on-mouseleave="__vpsSetHover" data-args-mouseleave='["$this","",""]'>
+          <span style="font-size:18px; opacity:.85;">&#128197;</span>
+          <span>休日出勤申請</span>
+        </button>
+      </div>
+      <!-- 注意事項 -->
+      <div style="background:#fff6eb; border:1px solid #ffd29e; border-radius:10px; padding:10px 14px; margin-top:10px; display:flex; align-items:center; gap:8px;">
+        <span style="font-size:18px; flex-shrink:0;">&#9888;</span>
+        <span style="font-size:13px; font-weight:700; color:#7a4a0b;">4時30分までに申請を出さなかった場合、申請が下りない場合がございます。</span>
+      </div>
+    </div>
+
+    <!-- 残業セクション（本日） -->
+    <div class="card" style="margin-bottom:12px;">
+      <div class="sectionTitle">
+        <div>
+          本日の残業申請（<span id="todayDate">-</span>）
+          <span class="section-count" id="otCount"></span>
+        </div>
+        <button class="ghost btn-sm" data-on-click="loadDashboard">更新</button>
+      </div>
+      <table id="tblOvertime">
+        <thead>
+          <tr>
+            <th>部署</th>
+            <th>氏名</th>
+            <th>承認</th>
+            <th>予定</th>
+            <th>実績</th>
+            <th>休憩</th>
+            <th>実残業</th>
+            <th>PDF</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="9" class="loading">読込中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- 休日出勤セクション（未承認＋承認済み全日付） -->
+    <div class="card">
+      <div class="sectionTitle">
+        <div>
+          休日出勤申請（未承認＋承認済み）
+          <span class="section-count" id="hdCount"></span>
+        </div>
+      </div>
+      <table id="tblHoliday">
+        <thead>
+          <tr>
+            <th>日付</th>
+            <th>部署</th>
+            <th>氏名</th>
+            <th>承認</th>
+            <th>予定</th>
+            <th>実績</th>
+            <th>休憩</th>
+            <th>実働</th>
+            <th>PDF</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><td colspan="10" class="loading">読込中...</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+
+  <!-- 工番選択モーダル -->
+  <div id="orderPickerWrap" style="display:none;">
+    <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:200;" data-on-click="closeOrderPicker"></div>
+    <div class="card" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:201; max-width:480px; width:94%; padding:24px; max-height:85vh; display:flex; flex-direction:column;">
+      <div style="font-weight:900; font-size:16px; margin-bottom:2px;">工番選択（任意）</div>
+      <div class="sub" style="margin-bottom:12px;">間接業務の方は「工番なしで申請」をお選びください</div>
+
+      <!-- 選択済み工番スロット -->
+      <div id="orderSlots" style="display:flex; flex-direction:column; gap:6px; margin-bottom:12px;">
+        <div class="order-slot" id="orderSlot1" style="display:none;">
+          <span class="pill info" style="flex:1; text-align:left;">
+            <b>工番1:</b> <span class="slot-label"></span>
+          </span>
+          <button class="ghost btn-sm" data-on-click="clearOrderSlot" data-args='[0]' style="margin-left:6px; color:var(--danger);">×</button>
+        </div>
+        <div class="order-slot" id="orderSlot2" style="display:none;">
+          <span class="pill info" style="flex:1; text-align:left;">
+            <b>工番2:</b> <span class="slot-label"></span>
+          </span>
+          <button class="ghost btn-sm" data-on-click="clearOrderSlot" data-args='[1]' style="margin-left:6px; color:var(--danger);">×</button>
+        </div>
+        <div class="order-slot" id="orderSlot3" style="display:none;">
+          <span class="pill info" style="flex:1; text-align:left;">
+            <b>工番3:</b> <span class="slot-label"></span>
+          </span>
+          <button class="ghost btn-sm" data-on-click="clearOrderSlot" data-args='[2]' style="margin-left:6px; color:var(--danger);">×</button>
+        </div>
+      </div>
+
+      <!-- 検索入力 -->
+      <input type="text" id="orderSearchInput" placeholder="工番・品名・納入先で検索..."
+        style="width:100%; padding:10px 14px; border-radius:10px; border:1px solid var(--line); font-size:14px; box-sizing:border-box; margin-bottom:8px;"
+        data-on-input="filterOrders" />
+
+      <!-- 検索結果 -->
+      <div id="orderResults" style="flex:1; overflow-y:auto; max-height:240px; border:1px solid var(--line); border-radius:10px; background:#fff;">
+        <div class="loading" id="orderLoading">工番マスタを読込中...</div>
+      </div>
+
+      <!-- ボタン -->
+      <div style="display:flex; gap:8px; justify-content:flex-end; margin-top:14px;">
+        <button class="ghost" data-on-click="closeOrderPicker">キャンセル</button>
+        <button class="ghost" data-on-click="submitOrderPicker" data-args='[true]' style="color:var(--muted);">工番なしで申請</button>
+        <button class="btn-blue" data-on-click="submitOrderPicker" data-args='[false]'>この工番で申請</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== 申請モーダル（2ステップウィザード） ====== -->
+  <div id="requestModalWrap" style="display:none;">
+    <div class="req-modal-overlay" data-on-click="closeRequestModal"></div>
+    <div class="req-modal card">
+      <div class="req-modal-header">
+        <h3 id="reqModalTitle">残業申請</h3>
+        <button class="ghost btn-sm" data-on-click="closeRequestModal" style="font-size:18px; line-height:1;">&times;</button>
+      </div>
+      <div class="req-modal-body">
+
+        <!-- ステップ1: 日付 + 工番選択 -->
+        <div id="reqStep1">
+          <div class="req-step-label">STEP 1 / 2</div>
+
+          <!-- 日付表示（残業は自動、休日は選択） -->
+          <div class="req-field">
+            <label>作業実施日</label>
+            <div id="reqDateDisplay" style="font-weight:700; font-size:15px; padding:8px 0;"></div>
+            <div id="reqDatePicker" style="display:none;">
+              <div id="reqDateButtons" style="display:flex; flex-direction:column; gap:6px; margin-bottom:8px;"></div>
+              <div style="border-top:1px solid var(--line); margin-top:8px; padding-top:8px;">
+                <div style="font-size:12px; color:var(--muted); margin-bottom:4px;">上記以外の日付：</div>
+                <div style="display:flex; gap:6px; align-items:center;">
+                  <input type="date" id="reqManualDate" style="flex:1; padding:8px 10px; border-radius:8px; border:1px solid var(--line); font-size:13px;" />
+                  <button class="ghost btn-sm" data-on-click="__vpsSelectReqManualDate">決定</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 過去申請カレンダー（折りたたみ式） -->
+            <button type="button" class="retro-toggle" id="retroToggleBtn" data-on-click="toggleRetroPanel" style="margin-top:10px;">
+              <span>&#128197;</span>
+              <span>過去日に申請する場合はこちら</span>
+              <span class="retro-arrow">&#9654;</span>
+            </button>
+            <div class="retro-panel-wrap" id="retroPanelWrap">
+              <div class="retro-panel">
+                <div class="retro-warn">
+                  <span>&#9888;</span>
+                  <span>過去申請をされる場合は、必ず事前に承認者および総務へご連絡ください。</span>
+                </div>
+                <div class="retro-nav">
+                  <button type="button" id="retroPrevBtn" data-on-click="retroPrevMonth">&#9664;</button>
+                  <div class="retro-ym" id="retroYmLabel">-</div>
+                  <button type="button" id="retroNextBtn" data-on-click="retroNextMonth">&#9654;</button>
+                </div>
+                <div class="retro-grid" id="retroGrid"></div>
+                <div class="retro-selected-label" id="retroSelectedLabel">選択中: （未選択）</div>
+                <button type="button" class="retro-clear-btn" data-on-click="clearRetroSelection">選択を解除</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 工番選択 -->
+          <div class="req-field">
+            <label>工番選択（任意・最大3件）</label>
+            <div class="sub" style="margin-bottom:6px;">間接業務の方は工番なしのまま「次へ」をお選びください</div>
+            <div id="reqOrderSlots" style="display:flex; flex-direction:column; gap:4px; margin-bottom:8px;">
+              <div class="order-slot" id="reqOrderSlot1" style="display:none;">
+                <span class="pill info" style="flex:1; text-align:left;"><b>1:</b> <span class="slot-label"></span></span>
+                <button class="ghost btn-sm" data-on-click="clearReqOrderSlot" data-args='[0]' style="color:var(--danger);">&times;</button>
+              </div>
+              <div class="order-slot" id="reqOrderSlot2" style="display:none;">
+                <span class="pill info" style="flex:1; text-align:left;"><b>2:</b> <span class="slot-label"></span></span>
+                <button class="ghost btn-sm" data-on-click="clearReqOrderSlot" data-args='[1]' style="color:var(--danger);">&times;</button>
+              </div>
+              <div class="order-slot" id="reqOrderSlot3" style="display:none;">
+                <span class="pill info" style="flex:1; text-align:left;"><b>3:</b> <span class="slot-label"></span></span>
+                <button class="ghost btn-sm" data-on-click="clearReqOrderSlot" data-args='[2]' style="color:var(--danger);">&times;</button>
+              </div>
+            </div>
+            <input type="text" id="reqOrderSearch" placeholder="工番・品名・納入先で検索..."
+              style="width:100%; padding:10px 14px; border-radius:10px; border:1px solid var(--line); font-size:14px; box-sizing:border-box; margin-bottom:6px;"
+              data-on-input="filterReqOrders" />
+            <div id="reqOrderResults" style="max-height:180px; overflow-y:auto; border:1px solid var(--line); border-radius:10px; background:#fff;">
+              <div class="muted" style="padding:14px; text-align:center;">工番・品名・納入先を入力して検索</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ステップ2: 理由・時間・業務内容 -->
+        <div id="reqStep2" style="display:none;">
+          <div class="req-step-label">STEP 2 / 2</div>
+
+          <!-- サマリー -->
+          <div class="req-summary" id="reqSummary"></div>
+
+          <div class="req-field">
+            <label>理由 <span style="color:var(--danger);">*</span></label>
+            <select id="reqReason" data-on-change="onReqReasonChange">
+              <option value="">-- 選択してください --</option>
+            </select>
+          </div>
+
+          <div class="req-field" id="reqReasonDetailWrap" style="display:none;">
+            <label>補足理由 <span style="color:var(--danger);">*</span></label>
+            <input type="text" id="reqReasonDetail" placeholder="具体的な理由を入力してください" />
+          </div>
+
+          <div class="req-field">
+            <label>予定時間 <span style="color:var(--danger);">*</span></label>
+            <select id="reqHours">
+              <option value="">-- 選択してください --</option>
+            </select>
+          </div>
+
+          <div class="req-field">
+            <label>業務内容</label>
+            <textarea id="reqWorkContent" placeholder="作業内容があれば入力してください"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- フッターボタン -->
+      <div class="req-modal-footer">
+        <button class="ghost" id="reqBtnBack" style="display:none;" data-on-click="reqGoStep1">&#8592; 戻る</button>
+        <button class="ghost" data-on-click="closeRequestModal">キャンセル</button>
+        <button class="btn-blue" id="reqBtnNext" data-on-click="reqGoStep2">次へ &#8594;</button>
+        <button id="reqBtnSubmit" style="display:none;" data-on-click="submitRequest">申請送信</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 休日出勤：日付選択モーダル -->
+  <div id="datePickerWrap" style="display:none;">
+    <div style="position:fixed; inset:0; background:rgba(0,0,0,.35); z-index:100;" data-on-click="closeDatePicker"></div>
+    <div class="card" style="position:fixed; top:50%; left:50%; transform:translate(-50%,-50%); z-index:101; max-width:360px; width:90%; padding:24px;">
+      <div style="font-weight:900; font-size:16px; margin-bottom:4px;">休日出勤 - 作業実施日を選択</div>
+      <div class="sub" style="margin-bottom:14px;">今週の土日・祝日から選んでください</div>
+      <div id="dateButtons" style="display:flex; flex-direction:column; gap:8px;"></div>
+      <!-- フォールバック：カレンダーから日付を直接選択 -->
+      <div style="border-top:1px solid var(--line); margin-top:14px; padding-top:14px;">
+        <div style="font-size:13px; color:var(--muted); margin-bottom:8px;">上記以外の日付：</div>
+        <div style="display:flex; gap:8px; align-items:center;">
+          <input type="date" id="manualDateInput" style="flex:1; padding:10px 12px; border-radius:10px; border:1px solid var(--line); font-size:14px;" />
+          <button class="ghost" style="white-space:nowrap; padding:10px 14px;" data-on-click="onManualDateSelect">この日付で申請</button>
+        </div>
+      </div>
+      <div style="text-align:center; margin-top:14px;">
+        <button class="ghost btn-sm" data-on-click="closeDatePicker">キャンセル</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ====== 編集モーダル ====== -->
+  <div id="editModalWrap" style="display:none;">
+    <div class="req-modal-overlay" data-on-click="closeEditModal"></div>
+    <div class="req-modal card">
+      <div class="req-modal-header">
+        <h3 id="editModalTitle">申請 編集</h3>
+        <button class="ghost btn-sm" data-on-click="closeEditModal" style="font-size:18px; line-height:1;">&times;</button>
+      </div>
+      <div class="req-modal-body">
+        <div class="req-field">
+          <label>対象者</label>
+          <div id="editInfo" style="font-weight:700; font-size:14px; padding:4px 0;"></div>
+        </div>
+        <div class="req-field">
+          <label>予定時間 <span style="color:var(--danger);">*</span></label>
+          <select id="editHours" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); font-size:14px;">
+          </select>
+        </div>
+        <div class="req-field" id="editDateWrap" style="display:none;">
+          <label>作業実施日</label>
+          <input type="date" id="editTargetDate" style="width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--line); font-size:14px; box-sizing:border-box;" />
+        </div>
+      </div>
+      <div class="req-modal-footer">
+        <button class="ghost" data-on-click="closeEditModal">キャンセル</button>
+        <button class="btn-blue" id="editBtnSave" data-on-click="saveEdit">保存</button>
+      </div>
+    </div>
+  </div>
+
+<script type="application/json" id="gas-template-data">{{ data_json|safe }}</script>
+<script src="/static/js/gas-shim.js"></script>
+<script src="/static/js/top.js"></script>
+</body>
+</html>
