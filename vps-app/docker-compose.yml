@@ -69,6 +69,9 @@ services:
     container_name: overtime-api
     restart: unless-stopped
     environment: *api-env
+    # 権限を持たない（ポート 8000 は特権の要らない番号。セキュリティ 低-4）
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     depends_on:
       db:
         condition: service_healthy
@@ -80,6 +83,8 @@ services:
     restart: unless-stopped
     command: ["python", "-m", "app.worker"]
     environment: *api-env
+    cap_drop: ["ALL"]
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       disable: true
     depends_on:

@@ -386,6 +386,8 @@ def callback(
         tokens = exchange_code(code, settings.oauth_redirect_uri, flow["verifier"], settings)
         claims = verify_id_token(tokens.get("id_token", ""), nonce=flow["nonce"], settings=settings)
     except LoginRejected as exc:
+        # ログインの失敗を残す（社外公開のため。IP は nginx が付ける X-Real-IP。セキュリティ 低-3）
+        log.warning("login rejected: ip=%s reason=%s", request.headers.get("x-real-ip", ""), str(exc)[:200])
         page = message_page("ログインできませんでした", str(exc), 403, "/auth/login", "もう一度ログインする")
         _clear_cookie(page, LOGIN_FLOW_COOKIE)
         return page
@@ -393,6 +395,7 @@ def callback(
     response = RedirectResponse(safe_next(flow.get("next")), status_code=302)
     _clear_cookie(response, LOGIN_FLOW_COOKIE)
     create_session(db, response, claims["email"], settings)
+    log.info("login ok: email=%s ip=%s", claims["email"], request.headers.get("x-real-ip", ""))
     return response
 
 
