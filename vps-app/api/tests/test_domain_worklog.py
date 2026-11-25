@@ -31,7 +31,8 @@ def test_overtime_done_now_creates_worklog_and_enqueues(db):
     assert job["args"] == {"source": "screen", "statusAtEnqueue": "approved", "wlOverride": {
         "actualStartAt": "2026-11-26 17:20:00", "actualEndAt": "2026-11-26 19:30:00", "actualMinutes": 130,
         "breakMinutes": 10, "netMinutes": 120}}
-    assert {r["table"] for r in job["requires"]} == {"requests", "work_logs"}
+    # gas_jobs.requires_for_request: 一度も変えていない行（申請）はシートと同じなので待たない。変えた実績の行だけ待つ
+    assert {r["table"] for r in job["requires"]} == {"work_logs"}
 
 
 def test_overtime_done_submitted_still_enqueues_for_ledger(db):

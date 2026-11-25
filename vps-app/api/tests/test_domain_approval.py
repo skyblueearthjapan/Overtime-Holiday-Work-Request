@@ -51,7 +51,8 @@ def test_approve_completed_enqueues_after_approve_once_even_from_two_tabs(db, ap
     assert approve(db, req.request_id) == {"ok": True, "message": "既に承認済みです。"}
     jobs = jobs_of(db)
     assert [(j["kind"], j["requestId"]) for j in jobs] == [("internal.afterApprove", req.request_id)]
-    assert jobs[0]["guard"] == {"status": "approved"}
+    # guard の形は gas_jobs（M）の取り決め: 積んだ時点の状態と、GAS へ送る jobId
+    assert jobs[0]["guard"]["statusAtEnqueue"] == "approved" and jobs[0]["guard"]["gasJobId"]
 
 
 def test_approve_uses_last_worklog_row_for_done_check(db, approvers):
