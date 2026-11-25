@@ -148,6 +148,13 @@
 | 本番データの控え（読み取り時点） | `C:\Users\imaizumi.LINEWORKS-NET\.secrets\overtime\snapshot-20261126\`（gviz CSV。集計用。移行には使わない） | 2026-11-26 |
 | コードに直書きの Drive フォルダ | `1Bs1FvgRvlCAkpARZ0XN3YkXJS9eoIN1B`（`PDF_DRIVE_FOLDER_URL` の既定値） | 確認済み（`mail.gs`） |
 | 外部から呼ぶシステム | Sebastian（`doPost`、token 認証）、統合メール通知システム（DB を読む可能性） | 【要確認】置き場所・持ち主 |
+| ステージングの DB（本番のコピー） | `1I0dPlH6w14UaiJVbO9i6wFCXlvGyPEJvDus8ekGptWY`「【ステージング】残業・休日出勤申請app（VPS移行試験用・消してよい）」。Settings を試験用に書き換え済み（PDF・テンプレ・台帳を試験用へ、旧フォームの ID と夕方の追加宛先は `STAGING-DISABLED`、`HR_MAIL_TO` は imaizumi@lineworks.co.jp）。FormMap タブは `FormMap_STAGING_DISABLED` に改名 | 作成済み（2026-11-26） |
+| ステージングの GAS（DB に紐づいたコピー） | scriptId `1y027cB_59N1P2o3toawpCyPZ2k_W6mPETtgiDpPFtpY7TKgBWslnyLNM`。トリガーなし。初回の実行にはオーナーの「許可」が要る | 作成済み（2026-11-26） |
+| ステージングの台帳（コピー） | `16M5PxyozS_tTEpQmR6jizICgZov4SoK2M1IO4TG1oHI` | 作成済み（2026-11-26） |
+| ステージングの PDF フォルダ | `1KsWanVEQr-gMsb_N9mxzplEjKFibsnrc` | 作成済み（2026-11-26） |
+| Cloudflare | Tunnel `overtime-vps`（id `1e31b48e…`）、DNS `overtime.lineworks-local.net` → `http://web:80`。TUNNEL_TOKEN は `~/.secrets/overtime/tunnel-token.env` | 作成済み（2026-11-26） |
+| VPS の置き場 | `/opt/overtime`（lineworks 所有、750） | 作成済み（2026-11-26） |
+| OAuth クライアント | GCP `sebastian01` で作る途中。GCP の画面が本人確認のパスワードを求めたため、オーナーの手が要る | 未（2026-11-26） |
 | 手元の秘密の置き場 | `C:\Users\imaizumi.LINEWORKS-NET\.secrets\overtime\` | 案 |
 | 社内ポータルの行 | APP_MASTER の key 〇〇 | 【要確認】 |
 
