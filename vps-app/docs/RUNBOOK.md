@@ -84,6 +84,7 @@ GAS の仕事（`jobs` の `lane='gas'`）は全体で同時に 1 本。失敗�
 - シートへ書く前の関所（`services/write_gate`）: 本番は、合格した `gas_ping` が `SHEET_WRITE_PING_MAX_MINUTES`（既定 10）分以内で、GAS が移転モード（`migrated=true`）のときだけ、行の反映・照合・マスタ同期がシートへ書きます。ステージングは、ステージングの GAS への合格した `gas_ping` があれば書きます。止めているときは `ops_getStatus` の `sheetWriteGate.blocked` が `true` で、理由が出ます。
 - `SKIP_DAILY_ON_STARTUP=1` で起動すると、起動した時に枠の中にある毎日の予定（0:30・2:10・6:50 など）を、その回だけ飛ばします（`sync_runs` に `skipped`）。切り替えの夜に使い、済んだら `.env` から消します。
 - blocked の行（人がシートの行を消したなど）: `docker compose exec -T worker python -m app.services.row_sync status` で一覧、行を直したら `unblock <table> <pk>`、行が消えたなら `reappend <table> <pk>`（末尾に新しい行として書き直す）。
+- 朝バッチ（6:50〜7:50 の枠）を worker の停止で逃したときは取り戻しません（7:05 の確かめが「仕事がありません」と出します）。管理者の欄の `ops_batchPdfForDate`（前日の `yyyy-MM-dd`）で手で流します（データ安全 低-8）。
 - 台帳の作り直し（`ops_rebuildLedger`）は、行の反映待ちが 0 のときだけ積めます。時間切れ・失敗しても送り直しません（台帳を見てから手で動かし直す）。
 
 ## ログインの取り消し
