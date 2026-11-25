@@ -62,8 +62,12 @@ def assert_gas_url_allowed(url: str, settings: Settings) -> str:
     deployment = _config.gas_deployment_id(url)
     if not deployment:
         raise GasClientConfigError("GAS_INTERNAL_URL の形が正しくありません")
-    if settings.is_staging and deployment in _config.PRODUCTION_IDS:
+    prod_ids = set(_config.PRODUCTION_IDS) | set(getattr(settings, "prod_gas_deployment_ids", ()))
+    if settings.is_staging and deployment in prod_ids:
         raise GasClientConfigError("ステージングから本番の GAS は呼べません")
+    internal = getattr(settings, "prod_gas_internal_deployment_id", "")
+    if not settings.is_staging and internal and deployment != internal:
+        raise GasClientConfigError("本番は PROD_GAS_INTERNAL_DEPLOYMENT_ID のデプロイしか呼べません")
     if not settings.is_staging and deployment in _config.KNOWN_STAGING_IDS:
         raise GasClientConfigError("本番からステージングの GAS は呼べません")
     return deployment
