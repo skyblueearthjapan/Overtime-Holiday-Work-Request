@@ -174,13 +174,14 @@ def _process_item(ctx: JobContext, state: dict, item: dict) -> None:
     if resp is not None:
         pdf = resp.get("pdf") if isinstance(resp.get("pdf"), dict) else {}
         status = pdf.get("status")
-        if status in ("created", "already"):
+        if status in ("created", "already") or gas_jobs.pdf_result_to_record(resp):
             merged = dict(pdf)
-            for key in ("pdfFileId", "pdfFolderId", "pdfGeneratedAt"):
+            for key in ("pdfFileId", "pdfFolderId", "pdfGeneratedAt", "pdfGeneratedAtEpochMs"):
                 if not merged.get(key) and resp.get(key):
                     merged[key] = resp[key]
             gas_jobs.record_pdf_result(db, req.request_id, merged, expected_current=snapshot)
-            state["ok"] += 1
+            # skipped（シートに既に PDF がある）は記録したうえで skip に数える（データ安全 高-2）
+            state["skip" if status == "skipped" else "ok"] += 1
             state["tries"] = 0
             return
         if status == "error":

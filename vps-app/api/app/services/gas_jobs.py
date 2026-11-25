@@ -317,6 +317,21 @@ def record_pdf_result(db: Session, request_id: str, pdf: Mapping[str, Any], *,
     return True
 
 
+def pdf_result_to_record(resp: Mapping[str, Any]) -> bool:
+    """GAS の返事に、DB に記録すべき PDF の ID があるか。
+
+    created・already に加え、skipped（has_pdf など＝シートに既に PDF がある）でも、返事に空でない pdfFileId が
+    あれば記録する（記録しないと毎晩の照合がシートの 3 列を空で上書きする。データ安全 高-2）。
+    """
+    pdf = resp.get("pdf")
+    if not isinstance(pdf, Mapping):
+        return False
+    status = pdf.get("status")
+    if status in ("created", "already"):
+        return True
+    return status == "skipped" and bool(normalize_gas(pdf.get("pdfFileId") or resp.get("pdfFileId")))
+
+
 def _apply_trash(db: Session, request_id: str, trash: Any, old_pdf_file_id: str) -> None:
     if not isinstance(trash, Mapping) or not request_id:
         return
@@ -480,7 +495,7 @@ def apply_response(ctx: JobContext, req: models.Request | None, resp: Mapping[st
     db = ctx.db
     resp = dict(resp)
     pdf = resp.get("pdf")
-    if req is not None and isinstance(pdf, Mapping) and pdf.get("status") in ("created", "already"):
+    if req is not None and isinstance(pdf, Mapping) and pdf_result_to_record(resp):
         merged = dict(pdf)
         for key in ("pdfFileId", "pdfFolderId", "pdfGeneratedAt", "pdfGeneratedAtEpochMs"):
             if not merged.get(key) and resp.get(key):
