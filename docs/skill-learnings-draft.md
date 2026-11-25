@@ -9,3 +9,4 @@
 - DB スプレッドシートの時間帯が GMT（Sheets API の properties.timeZone は "Etc/GMT"、地域は en_US）だった。Apps Script の `getSpreadsheetTimeZone()` はこのとき空の文字を返す。GAS の返事だけで時間帯を照合すると必ず不合格になるので、GMT 系の設定のときは空を同じ値として扱い、本当の値は Sheets API で確かめる。
 - 外の仕組み（Sebastian）が、Sheets API で Requests に新しい申請の行を直接足していた（`values.append`、USER_ENTERED、INSERT_ROWS）。GAS の doPost だけを見ていると気づかない。移す前に、シートに直接書いている仕組みが無いかを、その仕組みのコードで確かめる（DB の ID で grep）。VPS 側に「シートからの取り込み」を足して、外の仕組みは変えずに済ませた。
 - 移行の道具が本番だけを移す元として受け付ける作りだと、ステージングにも本番の行が入る。本番の PDF の ID などは、ステージングでは空にして入れる（ステージングの GAS もオーナーの権限で動くため、本番のファイルを捨てられる）。
+- worker を `python -m app.worker` で起動すると、同じファイルが `__main__` と `app.worker` の 2 つとして読まれる。各モジュールの `register_worker()` は `app.worker` 側に予定を登録するので、`__main__` 側で回すと予定が空になる（ステージングで、1 分ごとの取り込み・gas_ping・行の反映の予定が一度も動いていなかった）。試験は部品として読むので気づけない。`if __name__ == "__main__": from app import worker; worker.main()` とし、起動ログの schedules= の一覧を必ず目で見る。貯蔵品・工番部品の worker も同じ作りなら確かめる。

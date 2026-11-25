@@ -348,4 +348,9 @@ def main(argv: list[str] | None = None) -> None:  # pragma: no cover - VPS で�
 
 
 if __name__ == "__main__":  # pragma: no cover
-    main()
+    # `python -m app.worker` では、このファイルが `__main__` と `app.worker` の 2 つのモジュールとして読まれる。
+    # 各担当の register_worker() は `from app import worker` で `app.worker` の _schedules に登録するので、
+    # `__main__` の main() を呼ぶと予定が purge だけになる（2026-11-26 ステージングで発見）。必ず app.worker の main を呼ぶ。
+    from app import worker as _worker_module
+
+    _worker_module.main()
