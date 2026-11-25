@@ -98,6 +98,7 @@ function buildJoinedRecords_(dateFrom, dateTo) {
 // ====================================================================
 
 function api_adminDailyDetail(dateYmd, deptFilter) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   assertAdmin_();
   const d = new Date(dateYmd);
   if (isNaN(d.getTime())) throw new Error('日付が不正です（yyyy-mm-dd）');
@@ -128,6 +129,7 @@ function api_adminDailyDetail(dateYmd, deptFilter) {
 // ====================================================================
 
 function api_adminMonthlySummary(yearMonth, deptFilter) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   assertAdmin_();
   return buildMonthlySummary_(yearMonth, deptFilter);
 }
@@ -278,6 +280,7 @@ function buildMonthlySummary_(yearMonth, deptFilter) {
 // ====================================================================
 
 function api_adminFiscalTrend(baseDateYmd, deptFilter) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   assertAdmin_();
 
   const base = new Date(baseDateYmd);
@@ -321,6 +324,7 @@ function api_adminFiscalTrend(baseDateYmd, deptFilter) {
 // ====================================================================
 
 function api_adminSpecialClauseCount(baseDateStr, deptFilter) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   assertAdmin_();
 
   const base = new Date(baseDateStr);
@@ -380,6 +384,7 @@ function api_adminSpecialClauseCount(baseDateStr, deptFilter) {
 // ====================================================================
 
 function api_adminPendingWatch() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   assertAdmin_();
 
   const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
@@ -430,6 +435,7 @@ function api_adminPendingWatch() {
 // ====================================================================
 
 function api_adminManualComplete(requestId, endTimeStr, startTimeStr) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   assertAdmin_();
 
   const lock = LockService.getScriptLock();
@@ -522,6 +528,7 @@ function api_adminManualComplete(requestId, endTimeStr, startTimeStr) {
 // ====================================================================
 
 function api_adminDeptOptions() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   assertAdmin_();
   const depts = loadDeptList_(); // 既に作成済み
   return ['ALL', ...depts];
@@ -532,6 +539,8 @@ function api_adminDeptOptions() {
 // ====================================================================
 
 function doGet(e) {
+  // 移転モード（Cutover.gs）なら、アプリの代わりに新しいアドレスの案内を返す
+  if (isMigrationMode_()) return renderMigratedPage_(e);
   const page = (e && e.parameter && e.parameter.page) ? e.parameter.page : 'top';
   const appUrl = ScriptApp.getService().getUrl();
 

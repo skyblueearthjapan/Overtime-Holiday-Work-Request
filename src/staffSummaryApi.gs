@@ -55,6 +55,7 @@ function otWorkerKey_(r) {
  * @return {Object} personal or list
  */
 function api_getClosingSummary(yearMonth, dept, workerToken) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   if (!yearMonth) yearMonth = closingYmOfDate_(new Date());
   const period = closingPeriodOf_(yearMonth);
 

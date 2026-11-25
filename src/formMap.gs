@@ -101,6 +101,7 @@ function getTemplateFormId_(type) {
 // ====== フォームURL取得（TOP画面用：未作成なら自動生成） ======
 
 function api_getFormUrl(type, dept, workerLabel, targetDateStr, orderCodes) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   let formId = '';
 
   // 既存を探す
@@ -220,6 +221,7 @@ function addDatePrefill_(formResponse, form, questionTitle, targetDateStr) {
 // ====== 休日出勤：今週の候補日（土日＋祝日）を取得 ======
 
 function api_getHolidayCandidateDates() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const today = new Date();
   const dow = today.getDay(); // 0=Sun..6=Sat
   const dayNames = ['日','月','火','水','木','金','土'];
@@ -308,6 +310,7 @@ function api_getHolidayCandidateDates() {
 
 // ====== 従来方式フォールバック（マスタ未設定時） ======
 function api_getHolidayCandidateDates_legacy_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const today = new Date();
   const dow = today.getDay();
   const dayNames = ['日','月','火','水','木','金','土'];

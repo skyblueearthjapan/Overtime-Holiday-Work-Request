@@ -324,6 +324,7 @@ function buildEveningMailBody_(dateObj) {
 // その時間点の承認状況が反映される。
 
 function sendEveningMail_() {
+  if (skipBecauseMigrated_('sendEveningMail_')) return; // 移転モード（Cutover.gs）なら何もしない
   const settings = getSettings_();
   const to = normalize_(settings['HR_MAIL_TO']);
   if (!to) throw new Error('Settingsに HR_MAIL_TO が未設定です。');
@@ -804,6 +805,7 @@ function formatAccRow_(sh, rowNo, rowData) {
  * メニューから手動実行する想定。
  */
 function migrateAccumulationTimeColumns() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var ss;
   try {
     ss = getAccumulationSS_();
@@ -941,6 +943,7 @@ function migrateAccumulationTimeColumns() {
  * メニューから手動実行を想定。
  */
 function rebuildAccumulationSS() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var t0 = Date.now();
   var ss;
   try {
@@ -1314,6 +1317,7 @@ function countGeneratedPdfsForDate_(dateObj) {
 // ====== 朝メール送信（本文にテキストテーブル＋リンク） ======
 
 function sendMorningMail_(targetDateObj) {
+  if (skipBecauseMigrated_('sendMorningMail_')) return; // 移転モード（Cutover.gs）なら何もしない
   const settings = getSettings_();
   const to = normalize_(settings['HR_MAIL_TO']);
   if (!to) throw new Error('Settingsに HR_MAIL_TO が未設定です。');
@@ -1425,6 +1429,7 @@ function sendMorningMail_(targetDateObj) {
 // ====================================================================
 
 function morningBatch_() {
+  if (skipBecauseMigrated_('morningBatch_')) return; // 移転モード（Cutover.gs）なら何もしない
   // 朝バッチは「前日分」の実績を対象とする
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -1452,6 +1457,7 @@ function morningBatch_() {
  * 統合メール通知システム移行後に使用
  */
 function morningBatchNoMail_() {
+  if (skipBecauseMigrated_('morningBatchNoMail_')) return; // 移転モード（Cutover.gs）なら何もしない
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
 

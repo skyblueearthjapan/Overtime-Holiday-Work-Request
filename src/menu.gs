@@ -1,6 +1,14 @@
 // ====== 手動メニュー（管理者が押せる） ======
 
 function onOpen() {
+  // 移転モード（Cutover.gs）なら「移転済み」の 1 項目だけを出す
+  if (isMigrationMode_()) {
+    SpreadsheetApp.getUi()
+      .createMenu('残業休日アプリ')
+      .addItem('移転済み（新しいアドレス）', 'showMigratedAddress')
+      .addToUi();
+    return;
+  }
   SpreadsheetApp.getUi()
     .createMenu('残業休日アプリ')
     .addItem('フォームを全更新（マスタ反映）', 'nightlyUpdateAllForms_')
@@ -31,6 +39,7 @@ function onOpen() {
 
 /** PDF一括生成（手動）— 本日分の承認済み＆PDF未生成を処理 */
 function manualBatchPdfs_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const result = batchGeneratePdfs_(new Date());
   logBatchResult_('manualBatchPdfs', new Date(), result);
   const msg = 'PDF一括生成 完了\n'
@@ -43,6 +52,7 @@ function manualBatchPdfs_() {
 }
 
 function debugCreateFirstDeptOvertime_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const depts = loadDeptList_();
   if (!depts.length) throw new Error('作業員マスタに部署データがありません。');
   const dept = depts[0];
@@ -55,6 +65,7 @@ function debugCreateFirstDeptOvertime_() {
  * FormMap に既にある部署はスキップされる。
  */
 function buildAllDeptForms() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const depts = loadDeptList_();
   if (!depts.length) throw new Error('作業員マスタに部署データがありません。');
 
@@ -84,6 +95,7 @@ function buildAllDeptForms() {
 // ====== トリガー作成（フォーム毎朝更新） ======
 
 function setupTriggers_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   // 既存同名トリガーを重複作成しない簡易対策
   const triggers = ScriptApp.getProjectTriggers();
   for (const t of triggers) {
@@ -101,6 +113,7 @@ function setupTriggers_() {
 // ====== トリガー作成（メール：夕方2回＋朝1回） ======
 
 function setupMailTriggers_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const triggers = ScriptApp.getProjectTriggers();
   const has = (fn) => triggers.some(t => t.getHandlerFunction() === fn);
 
@@ -148,6 +161,7 @@ function setupMailTriggers_() {
 // ====== トリガー作成（マスタ自動転記） ======
 
 function setupSyncTrigger_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const triggers = ScriptApp.getProjectTriggers();
   if (triggers.some(t => t.getHandlerFunction() === 'syncAllMasters')) return;
 
@@ -165,6 +179,7 @@ function setupSyncTrigger_() {
 // ポーリング方式への移行時に実行が必要。
 
 function cleanupFormSubmitTriggers_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const triggers = ScriptApp.getProjectTriggers();
   let deleted = 0;
   for (const t of triggers) {
@@ -180,6 +195,7 @@ function cleanupFormSubmitTriggers_() {
 // ====== ポーリングトリガー設定（1分間隔） ======
 
 function setupFormPollTrigger_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   // 旧フォーム個別トリガーを先に削除
   cleanupFormSubmitTriggers_();
 
@@ -198,6 +214,7 @@ function setupFormPollTrigger_() {
 // ====== 全トリガー一括セットアップ ======
 
 function setupAllTriggers_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   cleanupFormSubmitTriggers_(); // 旧フォーム個別トリガーを削除
   setupSyncTrigger_();          // マスタ転記（6:00）
   setupTriggers_();              // フォーム毎朝更新（6:30）
@@ -210,6 +227,7 @@ function setupAllTriggers_() {
 
 // 朝バッチトリガー（PDF生成+データ蓄積のみ）
 function setupMorningBatchTrigger_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const triggers = ScriptApp.getProjectTriggers();
   if (triggers.some(t => t.getHandlerFunction() === 'morningBatchNoMail_')) return;
   ScriptApp.newTrigger('morningBatchNoMail_')
@@ -226,6 +244,7 @@ function setupMorningBatchTrigger_() {
 // この関数はハードコードを持たず、転記先シートの「存在・ヘッダ・条件付き書式」だけを保証する“器”。
 // ※ 既存データは消さない（同期済みデータを保護する）。
 function ensureCompanyCalendarSheet() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const ss = getDb_();
   const sheetName = SHEET.COMPANY_CALENDAR;
   let sh = ss.getSheetByName(sheetName);

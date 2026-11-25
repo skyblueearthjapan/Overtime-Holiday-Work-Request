@@ -78,6 +78,7 @@ function loadOrderChoices_() {
 // ====== 工番一覧取得（WEBアプリの工番選択モーダル用） ======
 
 function api_getOrderList() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const sh = requireSheet_(SHEET.ORDERS);
   const values = sh.getDataRange().getValues();
   const H = values[0].map(h => normalize_(h));
@@ -139,6 +140,7 @@ function loadOrderPrefixes_() {
 // ====== 作業者本人情報取得（Googleアカウント列があれば照合、無ければ null） ======
 
 function api_getWorkerInfo() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const email = Session.getActiveUser().getEmail();
   if (!email) return null;
 

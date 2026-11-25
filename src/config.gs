@@ -67,6 +67,8 @@ function fmtDate_(d, pattern='yyyy-MM-dd') {
 }
 
 function getDb_() {
+  // 移転モード（Cutover.gs）なら止める。VPS の内部用の入口（token を確かめた実行）だけは通す。
+  assertDbOpenAllowed_();
   // このスクリプトがDBスプレッドシートに紐づく前提なら SpreadsheetApp.getActive()
   return SpreadsheetApp.getActive();
 }

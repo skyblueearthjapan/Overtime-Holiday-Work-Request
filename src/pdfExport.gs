@@ -629,6 +629,7 @@ function logBatchResult_(batchName, dateObj, result) {
 // ====== 診断: PDF理由フィールドのデバッグ（手動実行用） ======
 
 function debugPdfReason() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   Logger.log('===== PDF理由フィールド診断 =====');
 
   // 1. Requests シートのヘッダー一覧
@@ -741,6 +742,7 @@ function debugPdfReason() {
 // ====== PDF強制再生成（最新の承認済み申請、手動実行用） ======
 
 function forceRegeneratePdf() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   Logger.log('===== PDF強制再生成 =====');
 
   // 最新の承認済み申請を探す
@@ -873,6 +875,7 @@ function forceRegeneratePdf() {
 // ====== 診断: 印鑑データのデバッグ（手動実行用） ======
 
 function debugStampData() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   Logger.log('===== 印鑑データ診断 =====');
 
   // 1. Settings の印鑑関連キー

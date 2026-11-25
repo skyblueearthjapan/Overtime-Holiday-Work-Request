@@ -115,6 +115,7 @@ function isGeneralAffairs_(email) {
  * 部署一覧を返す API（TOPの部署選択用・誰でも呼べる）。
  */
 function api_getDeptList() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   return loadDeptList_();
 }
 
@@ -123,6 +124,7 @@ function api_getDeptList() {
  * 戻り値: ["A001 今泉雄二", "A002 田中太郎", ...]
  */
 function api_getWorkersByDept(dept) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   if (!dept) return [];
   const workersByDept = loadWorkersByDept_();
   return workersByDept.get(dept) || [];
