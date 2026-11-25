@@ -383,7 +383,7 @@ function vpsPing_(p) {
   try {
     var ss = getDb_();
     out.spreadsheetId = out.dbId = ss.getId();
-    try { out.spreadsheetTimeZone = out.dbTimeZone = ss.getSpreadsheetTimeZone(); } catch (e2) { /* ignore */ }
+    try { out.spreadsheetTimeZone = out.dbTimeZone = ss.getSpreadsheetTimeZone(); } catch (e2) { out.spreadsheetTimeZoneError = String(e2 && e2.message || e2); }
     var s = getSettings_();
     out.settings = {
       TEMPLATE_SSID: normalize_(s['TEMPLATE_SSID']),
