@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from app import sheet_queue, timeutil
@@ -44,11 +44,42 @@ def request_count(db: Session) -> int:
     return int(db.scalar(select(func.count()).select_from(Request)) or 0)
 
 
+def _like_any(text: str) -> str:
+    r"""LIKE '%text%' の形（% _ \ を \ で逃がす。escape="\\" と一緒に使う）。"""
+    return "%" + text.replace("\\", "\\\\").replace("%", r"\%").replace("_", r"\_") + "%"
+
+
+def _gas_id_arg(request_id: Any) -> str | None:
+    """GAS は normalize_(行の ID) === 引数 で探す。normalize_ の結果と同じ形の引数しか当たらない。"""
+    if not isinstance(request_id, str) or not request_id or normalize_gas(request_id) != request_id:
+        return None
+    return request_id
+
+
+def find_request_id(db: Session, request_id: Any) -> str | None:
+    """引数に当たる申請の DB の ID（GAS と同じく行の ID の前後の空白を無視する。無ければ None）。
+
+    同じ ID の行があればそれ。無ければ、前後に空白などが付いた行（normalize_ すると同じ）をシートの順で探す。
+    """
+    rid = _gas_id_arg(request_id)
+    if rid is None:
+        return None
+    if db.scalar(select(Request.request_id).where(Request.request_id == rid)) is not None:
+        return rid
+    rows = db.scalars(select(Request).where(Request.request_id.like(_like_any(rid), escape="\\"))
+                      .order_by(*_request_order())).all()
+    for row in rows:
+        if normalize_gas(row.request_id) == rid:
+            return row.request_id
+    return None
+
+
 def lock_request(db: Session, request_id: Any) -> Request | None:
     """申請の行を FOR UPDATE で読む（無ければ None）。GAS は normalize_(行の ID) === 引数 で探す。"""
-    if not isinstance(request_id, str) or not request_id:
+    db_id = find_request_id(db, request_id)
+    if db_id is None:
         return None
-    stmt = select(Request).where(Request.request_id == request_id).with_for_update()
+    stmt = select(Request).where(Request.request_id == db_id).with_for_update()
     return db.execute(stmt.execution_options(populate_existing=True)).scalar_one_or_none()
 
 
@@ -113,10 +144,21 @@ def _wl_order():
     return (WorkLog.sheet_row.is_(None), WorkLog.sheet_row, WorkLog.id)
 
 
+def worklogs_for(db: Session, request_id: Any) -> list[WorkLog]:
+    """normalize_(行の requestId) === 引数 の WorkLogs の行（シートの順）。前後の空白は GAS と同じく無視する。"""
+    rid = normalize_gas(request_id)
+    if not rid:
+        return []
+    stmt = (select(WorkLog)
+            .where(or_(WorkLog.request_id == rid, WorkLog.request_id.like(_like_any(rid), escape="\\")))
+            .order_by(*_wl_order()))
+    return [wl for wl in db.scalars(stmt) if normalize_gas(wl.request_id) == rid]
+
+
 def first_worklog(db: Session, request_id: str) -> WorkLog | None:
     """findWorkLogRowNo_: 上から探して最初の行。"""
-    stmt = select(WorkLog).where(WorkLog.request_id == request_id).order_by(*_wl_order()).limit(1)
-    return db.scalars(stmt).first()
+    rows = worklogs_for(db, request_id)
+    return rows[0] if rows else None
 
 
 def worklogs_in_sheet_order(db: Session) -> list[WorkLog]:
@@ -155,7 +197,7 @@ def worklog_map(db: Session) -> dict[str, WlView]:
 
 def worklog_view(db: Session, request_id: str) -> WlView:
     """wlMap.get(requestId) || {}（下の行が勝つ）。"""
-    rows = list(db.scalars(select(WorkLog).where(WorkLog.request_id == request_id).order_by(*_wl_order())))
+    rows = worklogs_for(db, request_id)
     if not rows:
         return EMPTY_WL
     wl = rows[-1]

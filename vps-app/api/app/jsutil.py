@@ -54,7 +54,46 @@ def js_string(value: Any) -> str:
         return str(value)
     if isinstance(value, float):
         return _js_number_string(value)
+    if isinstance(value, (list, tuple)):
+        # Array.prototype.toString: 要素を ',' でつなぐ（null・undefined は空。正しさ 低-2）
+        return ",".join(js_string(v) for v in value)
+    if isinstance(value, dict):
+        return "[object Object]"
     return str(value)
+
+
+def js_property_key(value: Any) -> str:
+    """オブジェクトのキーにしたときの文字（`obj[value]`）。null は 'null'（String(null)）。"""
+    if value is None:
+        return "null"
+    if isinstance(value, (list, tuple)):
+        return ",".join("" if v is None else js_string(v) for v in value)
+    return js_string(value)
+
+
+def _is_array_index(key: str) -> bool:
+    return key.isdigit() and key.isascii() and (key == "0" or not key.startswith("0")) and int(key) < 2**32 - 1
+
+
+def js_object_key_order(keys: list[str]) -> list[str]:
+    """`for (k in obj)` の順: 配列の添字に見える数字のキーを小さい順に先に、残りは入れた順。"""
+    index_keys = sorted((k for k in keys if _is_array_index(k)), key=int)
+    return index_keys + [k for k in keys if not _is_array_index(k)]
+
+
+def js_utf16_units(text: str) -> list[str]:
+    """文字列を JS の添字（UTF-16 の符号単位）ごとに分ける（サロゲートのペアは 2 つになる）。"""
+    data = text.encode("utf-16-be", "surrogatepass")
+    return [data[i:i + 2].decode("utf-16-be", "surrogatepass") for i in range(0, len(data), 2)]
+
+
+def js_array_like_items(value: Any) -> list:
+    """`for (k = 0; k < x.length; k++) x[k]` で読む値（配列はそのまま、文字列は 1 字ずつ、ほかは length が無いので空）。"""
+    if isinstance(value, (list, tuple)):
+        return list(value)
+    if isinstance(value, str):
+        return js_utf16_units(value)
+    return []
 
 
 def js_trim(text: str) -> str:

@@ -10,10 +10,11 @@ from __future__ import annotations
 from typing import Any
 
 from app import permissions
-from app.jsutil import normalize_gas
+from app.jsutil import js_array_like_items, js_object_key_order, js_property_key, normalize_gas
 from app.rpc import RpcContext, RpcError
 
 from . import gasjobs, store
+from .jsdate import js_truthy
 from .summaries import build_monthly_summary, recompute_people_summary
 
 
@@ -64,10 +65,11 @@ def api_rejectRequest(ctx: RpcContext, request_id=None):
 
 
 def api_approveRequestsBatch(ctx: RpcContext, request_ids=None):
-    if not request_ids:
+    # GAS: `!requestIds || requestIds.length === 0` → 空。配列でない値は包まない（正しさ 低-5）:
+    # 文字列は 1 字ずつの ID（JS の添字）、数・オブジェクトは length が無いので対象なし。
+    if not js_truthy(request_ids) or (isinstance(request_ids, (list, tuple)) and len(request_ids) == 0):
         return {"ok": True, "results": []}
-    if not isinstance(request_ids, list):
-        request_ids = [request_ids]
+    request_ids = js_array_like_items(request_ids)
     if len(request_ids) > 50:
         raise RpcError("一括承認は50件までです。")
     email = ctx.user.email or "unknown"
@@ -75,7 +77,7 @@ def api_approveRequestsBatch(ctx: RpcContext, request_ids=None):
 
     target: dict[str, bool] = {}
     for rid in request_ids:
-        target[rid if isinstance(rid, str) else str(rid)] = True
+        target[js_property_key(rid)] = True  # targetSet[requestIds[k]]（キーは String(x)。正しさ 低-6）
     locked = store.lock_requests(db, list(target))
     if store.request_count(db) == 0:
         return {"ok": True, "results": []}
@@ -111,7 +113,7 @@ def api_approveRequestsBatch(ctx: RpcContext, request_ids=None):
             if wl_map.get(normalize_gas(rid), store.EMPTY_WL).actualEndAt:
                 gasjobs.after_approve(db, rid)
 
-    for missing in target:
+    for missing in js_object_key_order(list(target)):
         results.append({"requestId": missing, "ok": False, "error": "見つかりません"})
     return {"ok": True, "results": results}
 
