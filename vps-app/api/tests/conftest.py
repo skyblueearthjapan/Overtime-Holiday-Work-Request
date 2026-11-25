@@ -116,6 +116,17 @@ def db(session_factory) -> Session:
 
 
 @pytest.fixture(autouse=True)
+def _open_write_gate(request, monkeypatch):
+    """シートへ書く前の関所（データ安全 高-3）は、ほかの試験では開けておく。関所そのものの試験は
+    @pytest.mark.real_write_gate を付ける（tests/test_write_gate.py）。"""
+    if request.node.get_closest_marker("real_write_gate"):
+        return
+    from app.services import write_gate
+
+    monkeypatch.setattr(write_gate, "check", lambda *a, **k: (True, ""))
+
+
+@pytest.fixture(autouse=True)
 def _reset_registries():
     """登録（RPC・仕事の種類・予定）を試験ごとに空へ戻す。"""
     rpc.reset_registry()

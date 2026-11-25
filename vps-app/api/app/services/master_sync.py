@@ -40,6 +40,7 @@ from app import timeutil
 from app.jsutil import js_string, js_trim
 from app.models import CompanyCalendar, Order, SyncRun, Worker
 from app.services import sheet_codec as codec
+from app.services import write_gate
 from app.services.sheets_api import SheetsApi, column_letter, quote_sheet, sheet_titles, spreadsheet_timezone
 
 log = logging.getLogger(__name__)
@@ -250,6 +251,14 @@ def sync_masters(db: Session, api: SheetsApi | None = None, app_settings: Any = 
         target_titles = set(sheet_titles(target_meta))
     except Exception as error:  # noqa: BLE001 - GAS の FATAL と同じく結果で返す
         result["error"] = f"{type(error).__name__}: {error}"[:500]
+        _record(db, started, result)
+        return result
+
+    # 書く前の関所（データ安全 高-3）: GAS が移転モードでなければ、タブも DB の表も書き換えない
+    allowed, reason = write_gate.check(db, settings)
+    if not allowed:
+        result["error"] = "書き込みの関所で止めました: " + reason
+        result["writeBlocked"] = reason
         _record(db, started, result)
         return result
 

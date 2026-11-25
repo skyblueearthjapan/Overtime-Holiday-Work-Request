@@ -27,6 +27,7 @@ from app.models import SYNCED_TABLES, SheetSyncState, SyncRun
 from app.safety import UnsafeWriteError
 from app.services import row_sync
 from app.services import sheet_codec as codec
+from app.services import write_gate
 from app.services.sheets_api import SheetsApi, SheetsError, quote_sheet, sheet_id_by_title
 
 log = logging.getLogger(__name__)
@@ -246,6 +247,14 @@ def run(session_factory: Callable[[], Session], *, check_only: bool = False, api
             return {k: v for k, v in summary.items() if not k.startswith("_")}
         fixed = 0
         if not check_only and total:
+            # 書く前の関所（データ安全 高-3）: GAS が移転モードでなければ書かずに報告だけ
+            with session_factory() as db:
+                allowed, reason = write_gate.check(db, settings)
+            if not allowed:
+                summary.update({"ok": False, "fixedRows": 0, "writeBlocked": reason,
+                                "stopped": "書き込みの関所で止めました（差は報告だけ）: " + reason})
+                _record(session_factory, False, summary)
+                return {k: v for k, v in summary.items() if not k.startswith("_")}
             for table in codec.TABLE_ORDER:
                 if results[table]["diffs"]:
                     fixed += _fix_tab(api, sid, codec.TABLES[table], meta, reads[table][0], results[table],

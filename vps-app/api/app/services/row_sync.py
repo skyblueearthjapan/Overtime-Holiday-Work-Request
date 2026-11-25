@@ -35,6 +35,7 @@ from app.jsutil import js_string, normalize_gas
 from app.models import SYNCED_TABLES, SheetSyncState, SyncRun
 from app.safety import UnsafeWriteError
 from app.services import sheet_codec as codec
+from app.services import write_gate
 from app.services.sheets_api import SheetsApi, SheetsError, column_letter, quote_sheet, sheet_id_by_title, spreadsheet_timezone
 
 log = logging.getLogger(__name__)
@@ -50,8 +51,15 @@ GRID_FIELDS = "sheets(data(startRow,startColumn,rowData(values(userEnteredValue,
 RUN_KIND = "row_sync"
 
 
+GATE_RECHECK_SECONDS = 30  # 書き込みの関所で止めたときは早めに確かめ直す
+
+
 class LaneHalt(RuntimeError):
     """レーンを止める理由（見出しの違い・時間帯の違い・安全装置の拒否）。再試行しない。"""
+
+
+class GateClosed(LaneHalt):
+    """書き込みの関所（write_gate）で止めた。"""
 
 
 # ===== レーンの状態（worker の 1 つのプロセスの中だけ。止めたことは sync_runs にも残す） =====
@@ -430,11 +438,11 @@ def _retry_delay(attempts: int) -> int:
     return RETRY_DELAYS[min(attempts, len(RETRY_DELAYS)) - 1] if attempts >= 1 else RETRY_DELAYS[0]
 
 
-def _record_halt(session_factory, reason: str) -> None:
+def _record_halt(session_factory, reason: str, recheck_seconds: int = RECHECK_SECONDS) -> None:
     now = timeutil.now_utc()
     first = _lane.halted != reason
     _lane.halted = reason
-    _lane.recheck_at = now + timedelta(seconds=RECHECK_SECONDS)
+    _lane.recheck_at = now + timedelta(seconds=recheck_seconds)
     log.error("row_sync halted: %s", reason)
     if first:
         with session_factory() as db:
@@ -585,6 +593,12 @@ def run_once(session_factory: Callable[[], Session], limit: int = 50, *, api: Sh
     result: dict = {"ok": True, "written": 0, "failed": 0, "blocked": 0}
     processed: list[RowWork] = []  # 書き終えた表の行（途中で止めても、書いた分は記録する）
     try:
+        if works:
+            # 書く前の関所（データ安全 高-3）: GAS が移転モードでなければ書かない
+            with session_factory() as db:
+                allowed, reason = write_gate.check(db, settings, now)
+            if not allowed:
+                raise GateClosed("書き込みの関所: " + reason)
         if api is None:
             api = api_factory(session_factory, settings)
         meta = check_timezone(api, sid, settings)
@@ -609,7 +623,8 @@ def run_once(session_factory: Callable[[], Session], limit: int = 50, *, api: Sh
             write_rows(api, sid, ctx, todo, tz, purpose="row_sync")
             processed.extend(group)
     except (LaneHalt, UnsafeWriteError) as halt:
-        _record_halt(session_factory, str(halt))
+        _record_halt(session_factory, str(halt),
+                     GATE_RECHECK_SECONDS if isinstance(halt, GateClosed) else RECHECK_SECONDS)
         done = _save_results(session_factory, processed, [], timeutil.now_utc()) if processed else {"written": 0}
         return {"ok": False, "halted": str(halt), "written": done["written"]}
     except SheetsError as error:

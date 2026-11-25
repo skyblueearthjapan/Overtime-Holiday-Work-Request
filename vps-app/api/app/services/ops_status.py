@@ -19,7 +19,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app import jobs, models, timeutil
-from app.services import gas_jobs
+from app.config import get_settings
+from app.services import gas_jobs, write_gate
 
 ROW_SYNC_DELAY_ALERT = timedelta(minutes=5)
 LAST_RUN_KINDS = ("morning_batch", "manual_batch_pdfs", "morning_batch_check", "sync_masters", "sync_sheet_config",
@@ -129,6 +130,8 @@ def get_ops_status(db: Session) -> dict:
         "rowSync": _row_sync(db, now),
         "gasJobs": _gas_jobs(db),
         "gasPing": _gas_ping(db, now),
+        # シートへ書く前の関所（データ安全 高-3）。blocked なら行の反映・照合・マスタ同期は書かない
+        "sheetWriteGate": write_gate.status(db, get_settings(), now),
         "lastRuns": last_runs,
         "reconcileFixedRows": _fixed_rows(last_runs.get("sheet_reconcile")),
         "exhausted": _exhausted(db),

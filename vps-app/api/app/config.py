@@ -119,6 +119,9 @@ class Settings(BaseSettings):
     sebastian_api_token: str = Field(min_length=32)
     sebastian_pdf_wait_seconds: float = Field(default=40, gt=0, le=300)
 
+    # シートへ書く前の関所（services/write_gate。データ安全 高-3）: 合格した gas_ping がこの分数より古ければ書かない
+    sheet_write_ping_max_minutes: int = Field(default=10, ge=1, le=60)
+
     # DB スプレッドシートの時間帯（IANA 名。シートの値と違えば行の反映を止める）
     db_sheet_timezone: str = Field(min_length=1)
     # 社内ポータルの固定 URL（画面の「社内ポータルへ移動」）
