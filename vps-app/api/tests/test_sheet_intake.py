@@ -432,3 +432,52 @@ def test_status_skips_busy_runs(env, db):
                       summary_json={"ok": True, "busy": True, "ingested": [], "skipped": []}))
         s.commit()
     assert sheet_intake.status(db)["skipped"] == [{"row": 9}]
+
+
+# ===== 決定 #27: Sebastian の submittedAt（JST の壁時計の文字を GMT のシートへ USER_ENTERED）を直す =====
+
+
+def test_submitted_at_jst_text_on_gmt_sheet_is_fixed_and_written_back(engine, session_factory, monkeypatch):
+    from app.domain import dashboards
+    from conftest import make_settings
+    from fake_sheets import serial
+    from test_domain_helpers import ctx
+
+    freeze_now(monkeypatch, NOW)
+    gmt = make_settings(db_sheet_timezone="Etc/GMT")
+    fake = make_fake()
+    book = fake.books[STAGING_SID]
+    book.tz = "Etc/GMT"
+    migrate(fake, engine, gmt)
+    before_existing = session_factory().get(Request, R4).submitted_at  # 既存の行は変えない
+    sebastian_append(fake, seb_row(S1, submittedAt="11/26/2026 8:43:31"))
+    original = {h: (cell(book, 6, h).value, cell(book, 6, h).fmt) for h in REQUEST_HEADERS}
+    assert original["submittedAt"][0] == serial("2026-11-26 08:43:31")  # JST の壁時計を GMT とみなした値
+    result = sheet_intake.run(session_factory, api=fake.api(gmt), app_settings=gmt)
+    assert result["ingested"] == [S1]
+    with session_factory() as db:
+        req = db.get(Request, S1)
+        assert req.submitted_at == datetime(2026, 11, 25, 23, 43, 31, tzinfo=timezone.utc)  # 08:43:31 JST
+        assert db.get(Request, R4).submitted_at == before_existing
+        st = db.get(SheetSyncState, ("requests", S1))
+        assert st.desired_version == 2 and st.synced_version == 1
+        res = dashboards.api_getApproverDashboard(ctx(db, email="approver-a@lineworks-local.info", settings=gmt),
+                                                  "機械加工")
+        rows = [r for r in res["overtime"] if r["requestId"] == S1]
+        assert len(rows) == 1 and rows[0]["submittedAt"] == "2026-11-26 08:43:31", res
+        from app.domain import store
+        assert store.jst_text(req.submitted_at) == "2026-11-26 08:43:31"
+    fake.calls.clear()
+    out = row_sync.run_once(session_factory, api=fake.api(gmt), app_settings=gmt)
+    assert out["written"] == 1
+    cols = [b["updateCells"]["start"]["columnIndex"] for b in fake.batch_requests() if "updateCells" in b]
+    assert cols == [REQUEST_HEADERS.index("submittedAt")]  # ほかの列は書かない
+    c = cell(book, 6, "submittedAt")
+    assert c.value == serial("2026-11-25 23:43:31") and c.fmt and c.fmt["type"] == "DATE_TIME"
+    for h in REQUEST_HEADERS:
+        if h != "submittedAt":
+            assert (cell(book, 6, h).value, cell(book, 6, h).fmt) == original[h], h
+    # もう一度取り込んでも、反映しても何も変わらない
+    assert sheet_intake.run(session_factory, api=fake.api(gmt), app_settings=gmt)["ingested"] == []
+    fake.calls.clear()
+    assert row_sync.run_once(session_factory, api=fake.api(gmt), app_settings=gmt)["written"] == 0
