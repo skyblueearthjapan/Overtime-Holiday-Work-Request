@@ -67,6 +67,8 @@ function fmtDate_(d, pattern='yyyy-MM-dd') {
 }
 
 function getDb_() {
+  // 移転モード（Cutover.gs）なら止める。VPS の内部用の入口（token を確かめた実行）だけは通す。
+  assertDbOpenAllowed_();
   // このスクリプトがDBスプレッドシートに紐づく前提なら SpreadsheetApp.getActive()
   return SpreadsheetApp.getActive();
 }
@@ -100,6 +102,14 @@ function normalize_(s) {
   return String(s ?? '').trim()
     .replace(/[Ａ-Ｚａ-ｚ０-９]/g, c =>
       String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+}
+
+// 利用者が入れた文字をセルへ書くとき（台帳・PDF のひな形）に通す。
+// = + - @ で始まる文字は setValue(s) が式として扱うので、先頭に ' を付けて「文字」として入れる。
+// ' はセルにも PDF にも表示されない（見た目は入力どおり）。それ以外の値（ふつうの文字・数・日付）はそのまま返す。
+function sheetLiteral_(v) {
+  if (typeof v !== 'string') return v;
+  return /^[=+\-@]/.test(v) ? "'" + v : v;
 }
 
 // ====== 過去日遡及申請ヘルパー ======

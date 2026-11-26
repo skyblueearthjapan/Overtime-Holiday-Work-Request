@@ -324,6 +324,7 @@ function buildEveningMailBody_(dateObj) {
 // その時間点の承認状況が反映される。
 
 function sendEveningMail_() {
+  if (skipBecauseMigrated_('sendEveningMail_')) return; // 移転モード（Cutover.gs）なら何もしない
   const settings = getSettings_();
   const to = normalize_(settings['HR_MAIL_TO']);
   if (!to) throw new Error('Settingsに HR_MAIL_TO が未設定です。');
@@ -591,12 +592,12 @@ function buildAccRow_(req, wl, targetDate) {
     typeLabel,
     ymd,
     dow,
-    req.dept,
-    workerId,
-    req.workerName,
-    req.reason || '',
-    req.reasonDetail || '',
-    req.workContent || '',
+    sheetLiteral_(req.dept),
+    sheetLiteral_(workerId),
+    sheetLiteral_(req.workerName),
+    sheetLiteral_(req.reason || ''),
+    sheetLiteral_(req.reasonDetail || ''),
+    sheetLiteral_(req.workContent || ''),
     approvedMin,
     fmtMinutesJa_(approvedMin),
     startStr,
@@ -804,6 +805,7 @@ function formatAccRow_(sh, rowNo, rowData) {
  * メニューから手動実行する想定。
  */
 function migrateAccumulationTimeColumns() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var ss;
   try {
     ss = getAccumulationSS_();
@@ -941,6 +943,7 @@ function migrateAccumulationTimeColumns() {
  * メニューから手動実行を想定。
  */
 function rebuildAccumulationSS() {
+  assertDbOpenAllowed_(); // 移転モード（Cutover.gs）なら止める（VPS の内部用の入口 internal.ledgerRebuild だけ通す）
   var t0 = Date.now();
   var ss;
   try {
@@ -948,7 +951,7 @@ function rebuildAccumulationSS() {
   } catch (e) {
     Logger.log('蓄積SS取得失敗: ' + e.message);
     try { SpreadsheetApp.getUi().alert('蓄積スプレッドシートが取得できません: ' + e.message); } catch (e2) {}
-    return;
+    return { rebuilt: false, reason: 'ledger_unavailable: ' + e.message }; // 内部用の入口が件数を返すため
   }
 
   var timestamp = Utilities.formatDate(new Date(), TZ, 'yyyyMMdd_HHmmss');
@@ -977,7 +980,7 @@ function rebuildAccumulationSS() {
   var reqLastRow = reqSh.getLastRow();
   if (reqLastRow < 2) {
     try { SpreadsheetApp.getUi().alert('Requests シートが空のため再構築をスキップしました。'); } catch (e) {}
-    return;
+    return { rebuilt: false, reason: 'requests_empty', backups: backupRenamed }; // 内部用の入口が件数を返すため
   }
   var reqValues = reqSh.getRange(2, 1, reqLastRow - 1, reqSh.getLastColumn()).getValues();
   Logger.log('[rebuild] step2 requests read: ' + reqValues.length + ' rows (' + (Date.now() - t0) + 'ms)');
@@ -1061,12 +1064,12 @@ function rebuildAccumulationSS() {
       typeLabel,
       ymd,
       dow,
-      dept,
-      workerCode,
-      workerName,
-      reqIdx['reason'] !== undefined ? (row[reqIdx['reason']] || '') : '',
-      reqIdx['reasonDetail'] !== undefined ? (row[reqIdx['reasonDetail']] || '') : '',
-      reqIdx['workContent'] !== undefined ? (row[reqIdx['workContent']] || '') : '',
+      sheetLiteral_(dept),
+      sheetLiteral_(workerCode),
+      sheetLiteral_(workerName),
+      sheetLiteral_(reqIdx['reason'] !== undefined ? (row[reqIdx['reason']] || '') : ''),
+      sheetLiteral_(reqIdx['reasonDetail'] !== undefined ? (row[reqIdx['reasonDetail']] || '') : ''),
+      sheetLiteral_(reqIdx['workContent'] !== undefined ? (row[reqIdx['workContent']] || '') : ''),
       approvedMin,
       fmtMinutesJa_(approvedMin),
       startStr,
@@ -1124,6 +1127,9 @@ function rebuildAccumulationSS() {
     + '所要時間: ' + ((Date.now() - t0) / 1000).toFixed(1) + ' 秒';
   Logger.log(msg);
   try { SpreadsheetApp.getUi().alert(msg); } catch (e) { /* trigger実行時はUI不可 */ }
+  // 内部用の入口（internal.ledgerRebuild）が件数を返すため。メニューからの実行では使わない
+  return { rebuilt: true, processed: processed, sheets: sheetCount, written: totalWritten,
+    backups: backupRenamed, durationMs: Date.now() - t0 };
 }
 
 // ====================================================================
@@ -1314,6 +1320,7 @@ function countGeneratedPdfsForDate_(dateObj) {
 // ====== 朝メール送信（本文にテキストテーブル＋リンク） ======
 
 function sendMorningMail_(targetDateObj) {
+  if (skipBecauseMigrated_('sendMorningMail_')) return; // 移転モード（Cutover.gs）なら何もしない
   const settings = getSettings_();
   const to = normalize_(settings['HR_MAIL_TO']);
   if (!to) throw new Error('Settingsに HR_MAIL_TO が未設定です。');
@@ -1425,6 +1432,7 @@ function sendMorningMail_(targetDateObj) {
 // ====================================================================
 
 function morningBatch_() {
+  if (skipBecauseMigrated_('morningBatch_')) return; // 移転モード（Cutover.gs）なら何もしない
   // 朝バッチは「前日分」の実績を対象とする
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
@@ -1452,6 +1460,7 @@ function morningBatch_() {
  * 統合メール通知システム移行後に使用
  */
 function morningBatchNoMail_() {
+  if (skipBecauseMigrated_('morningBatchNoMail_')) return; // 移転モード（Cutover.gs）なら何もしない
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
 

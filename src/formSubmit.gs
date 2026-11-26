@@ -12,6 +12,7 @@ function addFormSubmitTrigger_(formId) {
 // setupAllTriggers_ で1分間隔の時間トリガーとして登録される。
 
 function pollNewResponses_() {
+  if (skipBecauseMigrated_('pollNewResponses_')) return; // 移転モード（Cutover.gs）なら何もしない
   const lock = LockService.getScriptLock();
   if (!lock.tryLock(10000)) {
     Logger.log('pollNewResponses_: lock取得失敗（別プロセスが実行中）');
@@ -118,6 +119,7 @@ function pollNewResponses_() {
 // ポーリング状態と各フォームの未処理回答数がログに出力されます。
 
 function debugPollStatus_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const props = PropertiesService.getScriptProperties();
   const lastTs = props.getProperty('POLL_LAST_TS');
   Logger.log('=== ポーリング診断 ===');
@@ -196,6 +198,7 @@ function debugPollStatus_() {
 // 最新の未処理回答を1件だけ処理してエラーを確認する。
 
 function debugProcessLatest_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const sh = ensureFormMapSheet_();
   const values = sh.getDataRange().getValues();
   const H = values[0].map(h => normalize_(h));
@@ -243,6 +246,7 @@ function debugProcessLatest_() {
 //    Requestsが空の状態で実行することを推奨。
 
 function reprocessAllResponses_() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const props = PropertiesService.getScriptProperties();
 
   // タイムスタンプを48時間前にリセット（全回答を拾う）
@@ -418,6 +422,7 @@ function plannedMinutesFromHoliday_(label) {
 // 送信した瞬間に Requests に 1 行追加 → トップで即表示
 
 function handleFormSubmit_(e) {
+  if (skipBecauseMigrated_('handleFormSubmit_')) return; // 移転モード（Cutover.gs）なら何もしない
   // ※ ロックは呼び出し元（pollNewResponses_）で取得済みのため、ここでは取得しない。
   //    再取得するとデッドロックになる。
   try {
@@ -676,6 +681,7 @@ function appendRequestRow_(obj) {
 // 既存ヘルパーを全て再利用し、Requestsシートに直接書き込む。
 
 function api_submitRequest(data) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   // --- バリデーション ---
   var requestType = normalize_(data.requestType);   // 'overtime' or 'holiday'
   var dept        = normalize_(data.dept);

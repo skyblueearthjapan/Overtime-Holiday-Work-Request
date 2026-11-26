@@ -78,6 +78,7 @@ function canApproveDept_(email, dept) {
 // ====== 承認者画面用：部署別「本日申請」取得 ======
 
 function api_getTodayRequestsForDept(dept) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const normDept = normalize_(dept);
   const email = Session.getActiveUser().getEmail();
   if (!canApproveDept_(email, normDept)) throw new Error('この部署の承認権限がありません。');
@@ -130,6 +131,7 @@ function api_getTodayRequestsForDept(dept) {
 // ====== 承認者ダッシュボード（全承認対象部署の残業+休日） ======
 
 function api_getApproverDashboard(deptsOrDept) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   try {
     const email = Session.getActiveUser().getEmail() || '';
     const admin = !email || isAdmin_(email);
@@ -278,6 +280,7 @@ function api_getApproverDashboard(deptsOrDept) {
 // ====== 承認実行（承認ボタン） ======
 
 function api_approveRequest(requestId) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const email = Session.getActiveUser().getEmail() || 'unknown';
   var approvedAtStr = '';
   var hasWorkDone = false;
@@ -346,6 +349,7 @@ function api_approveRequest(requestId) {
 // ====== 却下API ======
 
 function api_rejectRequest(requestId) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var email = Session.getActiveUser().getEmail() || 'unknown';
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
@@ -386,6 +390,7 @@ function api_rejectRequest(requestId) {
 // ====== 一括承認API ======
 
 function api_approveRequestsBatch(requestIds) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   if (!requestIds || requestIds.length === 0) return { ok: true, results: [] };
   if (requestIds.length > 50) throw new Error('一括承認は50件までです。');
 
@@ -478,6 +483,7 @@ function api_approveRequestsBatch(requestIds) {
 // ====== 承認者向け月次サマリーAPI ======
 
 function api_approverMonthlySummary(yearMonth, deptsOrDept) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const email = Session.getActiveUser().getEmail();
   if (!email) throw new Error('メールアドレスが取得できません。');
 
@@ -533,6 +539,7 @@ function api_approverMonthlySummary(yearMonth, deptsOrDept) {
 // ====== 承認者の担当部署一覧取得（承認者プロファイルベース） ======
 
 function api_getApproverDepts() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const email = Session.getActiveUser().getEmail();
   if (!email) throw new Error('メールアドレスが取得できません。');
   const emailLc = email.toLowerCase();
@@ -591,6 +598,7 @@ function ensureSecondaryApprovalColumns_() {
  * @param {string} dateYmd - 'yyyy-MM-dd'
  */
 function api_getSecondaryApprovalList(dateYmd) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   assertAdmin_();
 
   var d = new Date(dateYmd);
@@ -694,6 +702,7 @@ function api_getSecondaryApprovalList(dateYmd) {
  * @param {string} requestId
  */
 function api_secondaryApprove(requestId) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var email = assertAdmin_();
   var approvedAt2Str = '';
   var hadExistingPdf = false; // 作業完了済み（PDF生成済み）かどうか
@@ -773,6 +782,7 @@ function api_secondaryApprove(requestId) {
  * @param {string[]} requestIds
  */
 function api_secondaryApproveBatch(requestIds) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   if (!requestIds || requestIds.length === 0) return { ok: true, results: [] };
   if (requestIds.length > 50) throw new Error('一括承認は50件までです。');
 

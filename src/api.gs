@@ -8,11 +8,24 @@
 //   3. 取得したURLとトークンを Hermès 側 .env に登録
 
 function doPost(e) {
+  const rawBody = (e && e.postData && e.postData.contents) || '';
   let body;
   try {
-    body = JSON.parse((e && e.postData && e.postData.contents) || '{}');
+    body = JSON.parse(rawBody || '{}');
   } catch (err) {
+    // 移転モード（Cutover.gs）では Sebastian あての本文をそのまま VPS へ転送する（JSON の誤りも VPS が答える）
+    if (isMigrationMode_()) return forwardSebastianToVps_(rawBody, '');
     return _apiResponse_({ error: 'invalid JSON: ' + err.message });
+  }
+
+  // VPS から呼ぶ内部用の入口（Internal.gs）。別の token で守る。移転モードでも止めない。
+  if (isVpsInternalRequest_(body)) {
+    return handleVpsInternal_(body);
+  }
+
+  // 移転モード: Sebastian の action は本文をそのまま VPS の /api/sebastian へ転送し、返事をそのまま返す
+  if (isMigrationMode_()) {
+    return forwardSebastianToVps_(rawBody, String((body && body.action) || ''));
   }
 
   const expected = PropertiesService.getScriptProperties().getProperty('SEBASTIAN_API_TOKEN');

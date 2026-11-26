@@ -26,6 +26,7 @@ const SYNC_MAP = [
  * 手動実行 or トリガーから呼び出す。
  */
 function syncAllMasters() {
+  if (skipBecauseMigrated_('syncAllMasters')) return; // 移転モード（Cutover.gs）なら何もしない
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
 
@@ -235,6 +236,7 @@ function compactRows_(values) {
  * - 失敗 → 保護/権限が原因
  */
 function testSyncWorkerOneRow() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var settings = getSettings_();
   var sourceId = normalize_(settings['SOURCE_SSID']);
   if (!sourceId) throw new Error('SOURCE_SSID 未設定');

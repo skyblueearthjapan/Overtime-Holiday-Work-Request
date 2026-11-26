@@ -1,6 +1,7 @@
 // ====== 全フォーム更新（毎朝バッチ） ======
 
 function nightlyUpdateAllForms_() {
+  if (skipBecauseMigrated_('nightlyUpdateAllForms_')) return; // 移転モード（Cutover.gs）なら何もしない
   const sh = ensureFormMapSheet_();
   const values = sh.getDataRange().getValues();
   const H = values[0].map(h => normalize_(h));

@@ -141,6 +141,7 @@ function assertSelf_(request) {
 // ====== 残業：完了ボタン（17:20固定起点） ======
 
 function api_markOvertimeDone(requestId, manualEndTime) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -215,6 +216,7 @@ function api_markOvertimeDone(requestId, manualEndTime) {
 // ====== 休日：開始ボタン ======
 
 function api_markHolidayStart(requestId, manualStartTime) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -250,6 +252,7 @@ function api_markHolidayStart(requestId, manualStartTime) {
 // ====== 休日：完了ボタン（start/end で実績 → 休憩 → net） ======
 
 function api_markHolidayDone(requestId, manualEndTime) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -346,6 +349,7 @@ function api_markHolidayDone(requestId, manualEndTime) {
 // 未指定（空文字） → 本日の全申請を返す
 
 function api_getTodayRequestsForWorker(workerCode) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   const filterCode = normalize_(workerCode || '');
 
   const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
@@ -402,6 +406,7 @@ function api_getTodayRequestsForWorker(workerCode) {
 // 全社員の申請を取得し、残業と休日に分けて返す。
 
 function api_getDashboard() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   try {
     const { sh, idx } = getSheetHeaderIndex_('Requests', 1);
     const values = sh.getDataRange().getValues();
@@ -538,6 +543,7 @@ function api_getDashboard() {
 // ステータスは変更しない（承認済みでも再承認不要）。
 
 function api_editRequest(requestId, patch) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -650,6 +656,7 @@ function api_editRequest(requestId, patch) {
 // status を canceled に変更し、PDF削除＋蓄積SS行削除。
 
 function api_deleteRequest(requestId) {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var lock = LockService.getScriptLock();
   lock.waitLock(20000);
   try {
@@ -710,6 +717,7 @@ function api_deleteRequest(requestId) {
  * メニューから手動実行を想定。
  */
 function recalcWorkLogsBreakMinutes() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   var sh = requireSheet_('WorkLogs');
   var lastRow = sh.getLastRow();
   if (lastRow < 3) {

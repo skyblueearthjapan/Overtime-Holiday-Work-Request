@@ -203,7 +203,7 @@ function generatePdfForRequest_(requestId, workLogOverride) {
     const reasonDetailVal = normalize_(req.reasonDetail || '');
     Logger.log('[PDF/XLOOKUP] reason=[' + reasonVal + '] reasonDetail=[' + reasonDetailVal + ']');
     var reasonText = buildReasonText_(reasonVal, reasonDetailVal);
-    formSheet.getRange(PDF_MAP.reason).setValue(reasonText);
+    formSheet.getRange(PDF_MAP.reason).setValue(sheetLiteral_(reasonText));
 
     // 実績時刻を直接書込（WorkLogsのTZバグ回避）
     // workLogOverride が渡された場合はWorkLogsを再読み込みせず、計算済みの正しい値を使用
@@ -451,9 +451,9 @@ function fillPdfTemplate_(sheet, reqData, requestId, workLogOverride) {
 
   // 基本情報
   sheet.getRange(PDF_MAP.createdDate).setValue(fmtDate_(now, 'yyyy/MM/dd'));
-  sheet.getRange(PDF_MAP.dept).setValue(normalize_(reqData['dept']));
+  sheet.getRange(PDF_MAP.dept).setValue(sheetLiteral_(normalize_(reqData['dept'])));
   sheet.getRange(PDF_MAP.dept).setHorizontalAlignment('center');  // 部署名を中央揃え
-  sheet.getRange(PDF_MAP.name).setValue(normalize_(reqData['workerName']));
+  sheet.getRange(PDF_MAP.name).setValue(sheetLiteral_(normalize_(reqData['workerName'])));
 
   // F4: 区分印鑑（残業/休日出勤のPNG画像を挿入）
   const stampTypeKey = requestType === 'overtime' ? 'STAMP_OVERTIME_FILE_ID' : 'STAMP_HOLIDAY_FILE_ID';
@@ -509,21 +509,21 @@ function fillPdfTemplate_(sheet, reqData, requestId, workLogOverride) {
     const workNo = normalize_(reqData['workNo' + suffix] || reqData['orderNo' + suffix]);
     const customer = normalize_(reqData['customer' + suffix]);
     const product = normalize_(reqData['product' + suffix]);
-    if (workNo) sheet.getRange(d.workNo).setValue(workNo);
-    if (customer) sheet.getRange(d.customer).setValue(customer);
-    if (product) sheet.getRange(d.product).setValue(product);
+    if (workNo) sheet.getRange(d.workNo).setValue(sheetLiteral_(workNo));
+    if (customer) sheet.getRange(d.customer).setValue(sheetLiteral_(customer));
+    if (product) sheet.getRange(d.product).setValue(sheetLiteral_(product));
   }
 
   // 業務内容
   const workContent = normalize_(reqData['workContent']);
-  if (workContent) sheet.getRange(PDF_MAP.workContent).setValue(workContent);
+  if (workContent) sheet.getRange(PDF_MAP.workContent).setValue(sheetLiteral_(workContent));
 
   // 理由（定型理由 or 「その他: 補足理由」）
   const reason = normalize_(reqData['reason']);
   const reasonDetail = normalize_(reqData['reasonDetail']);
   Logger.log('[PDF/Direct] reason=[' + reason + '] reasonDetail=[' + reasonDetail + ']');
   // 空でもsetValueして、テンプレのXLOOKUP数式をクリアする
-  sheet.getRange(PDF_MAP.reason).setValue(buildReasonText_(reason, reasonDetail));
+  sheet.getRange(PDF_MAP.reason).setValue(sheetLiteral_(buildReasonText_(reason, reasonDetail)));
 
   // F34: 承認者（印鑑画像のみ、メールアドレスは書き込まない）
   const approvedBy = normalize_(reqData['approvedBy']);
@@ -629,6 +629,7 @@ function logBatchResult_(batchName, dateObj, result) {
 // ====== 診断: PDF理由フィールドのデバッグ（手動実行用） ======
 
 function debugPdfReason() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   Logger.log('===== PDF理由フィールド診断 =====');
 
   // 1. Requests シートのヘッダー一覧
@@ -741,6 +742,7 @@ function debugPdfReason() {
 // ====== PDF強制再生成（最新の承認済み申請、手動実行用） ======
 
 function forceRegeneratePdf() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   Logger.log('===== PDF強制再生成 =====');
 
   // 最新の承認済み申請を探す
@@ -873,6 +875,7 @@ function forceRegeneratePdf() {
 // ====== 診断: 印鑑データのデバッグ（手動実行用） ======
 
 function debugStampData() {
+  assertNotMigrated_(); // 移転モード（Cutover.gs）なら止める
   Logger.log('===== 印鑑データ診断 =====');
 
   // 1. Settings の印鑑関連キー
