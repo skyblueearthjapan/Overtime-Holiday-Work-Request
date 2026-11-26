@@ -36,7 +36,7 @@ from sqlalchemy import delete, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, sessionmaker
 
-from app import timeutil
+from app import sheet_queue, timeutil
 from app.constants import REQUEST_STATUSES, REQUEST_TYPES
 from app.jsutil import js_string, normalize_gas
 from app.models import Request, SheetSyncState, SyncRun
@@ -193,6 +193,22 @@ def check_record(record: dict, settings: Any) -> str:
     return ""
 
 
+def fix_submitted_at(record: dict, tz: Any) -> bool:
+    """決定 #27: Sebastian は submittedAt を JST の壁時計の文字（'M/D/YYYY H:MM:SS'）で USER_ENTERED に書くので、
+    GMT のシートでは「JST の壁時計を GMT とみなした」シリアル値になる（9 時間遅れて見える）。取り込む行だけ、
+    日時のセルの壁時計を Asia/Tokyo として読み直す。直したら True（行の反映が同じ行へ正しい値を書き戻す）。
+    """
+    moment = record.get("submitted_at")
+    if moment is None or (record.get("cell_kinds") or {}).get("submittedAt") != codec.SERIAL:
+        return False
+    wall = moment.astimezone(codec._as_tz(tz)).replace(tzinfo=None)
+    fixed = wall.replace(tzinfo=codec.JST).astimezone(codec.UTC)
+    if fixed == moment:
+        return False
+    record["submitted_at"] = fixed
+    return True
+
+
 def _skip(row: int, rid: str, reason: str) -> dict:
     return {"row": row, "requestId": rid, "reason": reason}
 
@@ -206,6 +222,8 @@ def _insert(session_factory: Callable[[], Session], records: list[dict]) -> tupl
     done, skipped = [], []
     with session_factory() as db:
         for rec in records:
+            synced_now = rec.pop("_synced", None)
+            dirty = rec.pop("_dirty", False)
             rid = rec["request_id"]
             if db.get(Request, rid) is not None:
                 skipped.append(_skip(rec["sheet_row"], rid, "もう DB にあります（ほかの回が先に入れた）"))
@@ -215,10 +233,14 @@ def _insert(session_factory: Callable[[], Session], records: list[dict]) -> tupl
                     db.add(Request(**rec))
                     db.flush()
                     db.add(SheetSyncState(table_name="requests", pk=rid, desired_version=1, synced_version=1,
-                                          synced_values=codec.synced_values_for(spec, rec), state="ok", attempts=0,
-                                          next_try_at=None, last_error="", first_dirty_at=None,
+                                          synced_values=synced_now or codec.synced_values_for(spec, rec), state="ok",
+                                          attempts=0, next_try_at=None, last_error="", first_dirty_at=None,
                                           last_synced_at=timeutil.now_utc(), seq=0))
                     db.flush()
+                    if dirty:
+                        # submittedAt を直した（決定 #27）: synced_values は直す前のシートの値なので、行の反映が
+                        # 同じ行の submittedAt だけを正しい値で書き直す
+                        sheet_queue.mark_dirty(db, "requests", rid)
             except IntegrityError:
                 skipped.append(_skip(rec["sheet_row"], rid, "もう DB にあります（同時に入った）"))
                 continue
@@ -306,6 +328,10 @@ def _run_locked(session_factory: Callable[[], Session], api: SheetsApi | None, s
         if reason:
             skipped.append(_skip(r, rid, reason))
             continue
+        synced = codec.synced_values_for(spec, record)  # 今シートにある値（直す前）
+        if fix_submitted_at(record, tz):
+            record["_synced"] = synced
+            record["_dirty"] = True
         records.append(record)
     done, already = _insert(session_factory, records) if records else ([], [])
     for rec in done:
